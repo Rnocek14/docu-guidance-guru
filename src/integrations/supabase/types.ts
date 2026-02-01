@@ -14,6 +14,38 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_events: {
+        Row: {
+          account_id: string
+          created_at: string
+          event_data: Json
+          event_type: string
+          id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          event_data?: Json
+          event_type: string
+          id?: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          event_data?: Json
+          event_type?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_events_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       accounts: {
         Row: {
           account_number: string
@@ -505,7 +537,7 @@ export type Database = {
     }
     Functions: {
       bootstrap_first_admin: {
-        Args: { _email: string; _secret: string }
+        Args: { _secret: string; _user_id: string }
         Returns: boolean
       }
       get_user_roles: {
