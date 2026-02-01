@@ -2,3 +2,6 @@ project_id = "sfxmgwkrjwuerfkqxokq"
 
 [functions.admin-actions]
 verify_jwt = false
+
+[functions.ingest-trade]
+verify_jwt = false
