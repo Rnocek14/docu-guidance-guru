@@ -5,6 +5,9 @@ import type { Database } from './types';
 const SUPABASE_URL = "https://sfxmgwkrjwuerfkqxokq.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM";
 
+// Export the URL for use in Edge Function calls
+export const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
+
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 

@@ -19,21 +19,21 @@ export type Database = {
           account_id: string
           created_at: string
           event_data: Json
-          event_type: string
+          event_type: Database["public"]["Enums"]["account_event_type"]
           id: string
         }
         Insert: {
           account_id: string
           created_at?: string
           event_data?: Json
-          event_type: string
+          event_type: Database["public"]["Enums"]["account_event_type"]
           id?: string
         }
         Update: {
           account_id?: string
           created_at?: string
           event_data?: Json
-          event_type?: string
+          event_type?: Database["public"]["Enums"]["account_event_type"]
           id?: string
         }
         Relationships: [
@@ -536,10 +536,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      bootstrap_first_admin: {
-        Args: { _secret: string; _user_id: string }
-        Returns: boolean
-      }
+      bootstrap_first_admin: { Args: { _user_id: string }; Returns: boolean }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
@@ -560,6 +557,20 @@ export type Database = {
       }
     }
     Enums: {
+      account_event_type:
+        | "account_created"
+        | "trade_ingested"
+        | "daily_reset"
+        | "breach_detected"
+        | "breach_confirmed"
+        | "failure_confirmed"
+        | "passed"
+        | "payout_requested"
+        | "payout_under_review"
+        | "payout_approved"
+        | "payout_rejected"
+        | "payout_paid"
+        | "status_changed"
       account_status:
         | "active"
         | "breached_detected"
@@ -722,6 +733,21 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      account_event_type: [
+        "account_created",
+        "trade_ingested",
+        "daily_reset",
+        "breach_detected",
+        "breach_confirmed",
+        "failure_confirmed",
+        "passed",
+        "payout_requested",
+        "payout_under_review",
+        "payout_approved",
+        "payout_rejected",
+        "payout_paid",
+        "status_changed",
+      ],
       account_status: [
         "active",
         "breached_detected",
