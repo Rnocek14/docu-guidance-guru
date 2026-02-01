@@ -24,6 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Fetch user profile
   const fetchProfile = async (userId: string) => {
@@ -56,54 +57,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Initialize auth state
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+    let isMounted = true;
+    
+    // Get initial session FIRST, before setting up listener
+    const initializeAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!isMounted) return;
+        
         setSession(session);
         setUser(session?.user ?? null);
 
         if (session?.user) {
-          // Use setTimeout to avoid potential race conditions with Supabase triggers
-          setTimeout(async () => {
-            const [profileData, rolesData] = await Promise.all([
-              fetchProfile(session.user.id),
-              fetchRoles(session.user.id),
-            ]);
+          const [profileData, rolesData] = await Promise.all([
+            fetchProfile(session.user.id),
+            fetchRoles(session.user.id),
+          ]);
+          if (isMounted) {
             setProfile(profileData);
             setRoles(rolesData);
-            setIsLoading(false);
-          }, 0);
+          }
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+          setIsInitialized(true);
+        }
+      }
+    };
+
+    initializeAuth();
+
+    // Set up auth state listener AFTER initial load
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, newSession) => {
+        if (!isMounted) return;
+        
+        // Skip if this is the initial session (already handled above)
+        if (!isInitialized && event === 'INITIAL_SESSION') return;
+        
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
+
+        if (newSession?.user) {
+          const [profileData, rolesData] = await Promise.all([
+            fetchProfile(newSession.user.id),
+            fetchRoles(newSession.user.id),
+          ]);
+          if (isMounted) {
+            setProfile(profileData);
+            setRoles(rolesData);
+          }
         } else {
           setProfile(null);
           setRoles([]);
-          setIsLoading(false);
         }
       }
     );
 
-    // THEN get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-
-      if (session?.user) {
-        Promise.all([
-          fetchProfile(session.user.id),
-          fetchRoles(session.user.id),
-        ]).then(([profileData, rolesData]) => {
-          setProfile(profileData);
-          setRoles(rolesData);
-          setIsLoading(false);
-        });
-      } else {
-        setIsLoading(false);
-      }
-    });
-
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [isInitialized]);
 
   const signUp = async (email: string, password: string, fullName?: string) => {
     const { error } = await supabase.auth.signUp({
