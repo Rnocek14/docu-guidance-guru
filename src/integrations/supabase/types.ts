@@ -25,6 +25,7 @@ export type Database = {
           highest_balance: number
           id: string
           passed_at: string | null
+          rule_snapshot: Json | null
           starting_balance: number
           status: Database["public"]["Enums"]["account_status"]
           total_pnl: number
@@ -42,6 +43,7 @@ export type Database = {
           highest_balance?: number
           id?: string
           passed_at?: string | null
+          rule_snapshot?: Json | null
           starting_balance?: number
           status?: Database["public"]["Enums"]["account_status"]
           total_pnl?: number
@@ -59,6 +61,7 @@ export type Database = {
           highest_balance?: number
           id?: string
           passed_at?: string | null
+          rule_snapshot?: Json | null
           starting_balance?: number
           status?: Database["public"]["Enums"]["account_status"]
           total_pnl?: number
@@ -501,6 +504,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      bootstrap_first_admin: {
+        Args: { _email: string; _secret: string }
+        Returns: boolean
+      }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
@@ -548,6 +555,7 @@ export type Database = {
         | "cohort_assigned"
         | "intake_paused"
         | "intake_resumed"
+        | "rule_breach_detected"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -710,6 +718,7 @@ export const Constants = {
         "cohort_assigned",
         "intake_paused",
         "intake_resumed",
+        "rule_breach_detected",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
