@@ -21,6 +21,7 @@ export type Database = {
           event_data: Json
           event_type: Database["public"]["Enums"]["account_event_type"]
           id: string
+          request_id: string | null
         }
         Insert: {
           account_id: string
@@ -28,6 +29,7 @@ export type Database = {
           event_data?: Json
           event_type: Database["public"]["Enums"]["account_event_type"]
           id?: string
+          request_id?: string | null
         }
         Update: {
           account_id?: string
@@ -35,6 +37,7 @@ export type Database = {
           event_data?: Json
           event_type?: Database["public"]["Enums"]["account_event_type"]
           id?: string
+          request_id?: string | null
         }
         Relationships: [
           {
@@ -129,6 +132,7 @@ export type Database = {
           id: string
           ip_address: string | null
           reason: string | null
+          request_id: string | null
           user_agent: string | null
           user_id: string | null
         }
@@ -140,6 +144,7 @@ export type Database = {
           id?: string
           ip_address?: string | null
           reason?: string | null
+          request_id?: string | null
           user_agent?: string | null
           user_id?: string | null
         }
@@ -151,6 +156,7 @@ export type Database = {
           id?: string
           ip_address?: string | null
           reason?: string | null
+          request_id?: string | null
           user_agent?: string | null
           user_id?: string | null
         }
@@ -464,6 +470,7 @@ export type Database = {
           platform_trade_id: string | null
           pnl: number | null
           quantity: number
+          raw_payload: Json | null
           side: string
           status: string
           symbol: string
@@ -480,6 +487,7 @@ export type Database = {
           platform_trade_id?: string | null
           pnl?: number | null
           quantity: number
+          raw_payload?: Json | null
           side: string
           status?: string
           symbol: string
@@ -496,6 +504,7 @@ export type Database = {
           platform_trade_id?: string | null
           pnl?: number | null
           quantity?: number
+          raw_payload?: Json | null
           side?: string
           status?: string
           symbol?: string

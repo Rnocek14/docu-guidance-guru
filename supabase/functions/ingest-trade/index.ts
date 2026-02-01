@@ -15,7 +15,7 @@ interface TradePayload {
   qty: number
   price: number
   commission?: number
-  pnl?: number // Some platforms provide realized PnL directly
+  pnl?: number // Platform-provided realized PnL (Option A: treated as authoritative)
 }
 
 interface RuleSnapshot {
@@ -38,7 +38,12 @@ interface BreachResult {
   threshold?: number
 }
 
-// Verify HMAC signature from webhook
+// Generate UUID for request correlation
+function generateRequestId(): string {
+  return crypto.randomUUID()
+}
+
+// Verify HMAC signature from webhook (constant-time, anti-replay)
 async function verifyWebhookSignature(
   payload: string,
   signature: string,
@@ -46,6 +51,7 @@ async function verifyWebhookSignature(
   secret: string
 ): Promise<boolean> {
   try {
+    // HMAC computed over: timestamp + "." + raw_body
     const signedPayload = `${timestamp}.${payload}`
     const encoder = new TextEncoder()
     const key = await crypto.subtle.importKey(
@@ -76,7 +82,49 @@ async function verifyWebhookSignature(
   }
 }
 
+// Check if we need a daily reset (based on configured trading day boundary)
+function needsDailyReset(
+  lastResetAt: string | null,
+  resetHour: number,
+  timezone: string
+): boolean {
+  if (!lastResetAt) return true
+  
+  const now = new Date()
+  const lastReset = new Date(lastResetAt)
+  
+  // Get current trading day boundary in the configured timezone
+  // For simplicity, we use UTC offset calculation
+  // Trading day resets at resetHour in the specified timezone
+  const nowUTC = now.getTime()
+  const lastResetUTC = lastReset.getTime()
+  
+  // Calculate hours since last reset
+  const hoursSinceReset = (nowUTC - lastResetUTC) / (1000 * 60 * 60)
+  
+  // If more than 24 hours, definitely needs reset
+  if (hoursSinceReset >= 24) return true
+  
+  // Check if we've crossed the reset hour boundary
+  // This is a simplified check - production should use proper timezone library
+  const nowHourUTC = now.getUTCHours()
+  const lastResetHourUTC = lastReset.getUTCHours()
+  
+  // Approximate ET offset (simplified: -5 for EST, should handle DST properly)
+  const etOffset = timezone === 'America/New_York' ? -5 : 0
+  const resetHourUTC = (resetHour - etOffset + 24) % 24
+  
+  // Check if we've crossed the reset boundary
+  if (now.getUTCDate() !== lastReset.getUTCDate()) {
+    // Different day - check if we've passed reset hour
+    return nowHourUTC >= resetHourUTC
+  }
+  
+  return false
+}
+
 // Check for rule breaches using frozen rule_snapshot
+// PnL Source-of-Truth: Option A - We trust platform-provided PnL
 function detectBreaches(
   account: { 
     starting_balance: number
@@ -86,36 +134,41 @@ function detectBreaches(
     daily_pnl_start_balance: number | null
     rule_snapshot: RuleSnapshot 
   },
-  newPnl: number
+  newPnl: number,
+  newBalance: number
 ): BreachResult {
   const rules = account.rule_snapshot
-  const newBalance = account.current_balance + newPnl
   const startBalance = account.starting_balance
   const dailyStartBalance = account.daily_pnl_start_balance || account.current_balance
   const newDailyPnl = account.daily_pnl + newPnl
 
   // Check max daily loss
-  const dailyLossPct = ((dailyStartBalance - (dailyStartBalance + newDailyPnl)) / dailyStartBalance) * 100
-  if (dailyLossPct >= rules.max_daily_loss_percent) {
-    return {
-      breached: true,
-      rule_type: 'max_daily_loss',
-      description: `Daily loss limit exceeded: ${dailyLossPct.toFixed(2)}% loss vs ${rules.max_daily_loss_percent}% limit`,
-      actual_value: dailyLossPct,
-      threshold: rules.max_daily_loss_percent
+  // Daily loss = how much we've lost today from the day's starting balance
+  if (newDailyPnl < 0) {
+    const dailyLossPct = (Math.abs(newDailyPnl) / dailyStartBalance) * 100
+    if (dailyLossPct >= rules.max_daily_loss_percent) {
+      return {
+        breached: true,
+        rule_type: 'max_daily_loss',
+        description: `Daily loss limit exceeded: ${dailyLossPct.toFixed(2)}% loss (limit: ${rules.max_daily_loss_percent}%)`,
+        actual_value: dailyLossPct,
+        threshold: rules.max_daily_loss_percent
+      }
     }
   }
 
-  // Check max total drawdown (from highest balance)
-  const highWatermark = Math.max(account.highest_balance, newBalance)
-  const drawdownPct = ((highWatermark - newBalance) / startBalance) * 100
-  if (drawdownPct >= rules.max_total_drawdown_percent) {
-    return {
-      breached: true,
-      rule_type: 'max_total_drawdown',
-      description: `Total drawdown limit exceeded: ${drawdownPct.toFixed(2)}% drawdown vs ${rules.max_total_drawdown_percent}% limit`,
-      actual_value: drawdownPct,
-      threshold: rules.max_total_drawdown_percent
+  // Check max total drawdown (from starting balance, not trailing)
+  // Drawdown = how far we are below starting balance
+  if (newBalance < startBalance) {
+    const drawdownPct = ((startBalance - newBalance) / startBalance) * 100
+    if (drawdownPct >= rules.max_total_drawdown_percent) {
+      return {
+        breached: true,
+        rule_type: 'max_total_drawdown',
+        description: `Total drawdown limit exceeded: ${drawdownPct.toFixed(2)}% below start (limit: ${rules.max_total_drawdown_percent}%)`,
+        actual_value: drawdownPct,
+        threshold: rules.max_total_drawdown_percent
+      }
     }
   }
 
@@ -123,6 +176,9 @@ function detectBreaches(
 }
 
 Deno.serve(async (req) => {
+  // Generate request ID for correlation
+  const requestId = generateRequestId()
+
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -131,10 +187,16 @@ Deno.serve(async (req) => {
   // Only accept POST
   if (req.method !== 'POST') {
     return new Response(
-      JSON.stringify({ error: 'Method not allowed' }),
+      JSON.stringify({ error: 'Method not allowed', request_id: requestId }),
       { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
+
+  // Create service role client
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  )
 
   try {
     // Get webhook secret
@@ -142,7 +204,7 @@ Deno.serve(async (req) => {
     if (!webhookSecret) {
       console.error('TRADE_WEBHOOK_SECRET not configured')
       return new Response(
-        JSON.stringify({ error: 'Server configuration error' }),
+        JSON.stringify({ error: 'Server configuration error', request_id: requestId }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -153,17 +215,17 @@ Deno.serve(async (req) => {
 
     if (!signature || !timestamp) {
       return new Response(
-        JSON.stringify({ error: 'Missing webhook signature' }),
+        JSON.stringify({ error: 'Missing webhook signature', request_id: requestId }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Check timestamp freshness (5 min window)
+    // Check timestamp freshness (5 min window) - anti-replay
     const timestampMs = parseInt(timestamp) * 1000
     const now = Date.now()
     if (Math.abs(now - timestampMs) > 5 * 60 * 1000) {
       return new Response(
-        JSON.stringify({ error: 'Webhook timestamp expired' }),
+        JSON.stringify({ error: 'Webhook timestamp expired', request_id: requestId }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -171,10 +233,10 @@ Deno.serve(async (req) => {
     // Read body for signature verification
     const bodyText = await req.text()
 
-    // Verify signature
+    // Verify signature (HMAC over timestamp.body)
     if (!await verifyWebhookSignature(bodyText, signature, timestamp, webhookSecret)) {
       return new Response(
-        JSON.stringify({ error: 'Invalid webhook signature' }),
+        JSON.stringify({ error: 'Invalid webhook signature', request_id: requestId }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -185,16 +247,10 @@ Deno.serve(async (req) => {
     // Validate required fields
     if (!payload.platform_account_id || !payload.platform_trade_id || !payload.symbol || !payload.side) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields' }),
+        JSON.stringify({ error: 'Missing required fields', request_id: requestId }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
-
-    // Create service role client
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
 
     // Resolve internal account from platform mapping
     const { data: platformAccount, error: mappingError } = await supabase
@@ -204,17 +260,15 @@ Deno.serve(async (req) => {
       .single()
 
     if (mappingError || !platformAccount) {
-      // For unknown accounts, log to audit (we can't flag without account_id)
-      // The flags table requires account_id, so skip that
-
-      // For unknown accounts, we can't flag without account_id
-      // Log to audit instead
+      // Log unknown platform account to audit
       await supabase.from('audit_logs').insert({
         action: 'account_created', // Using closest available action
+        request_id: requestId,
         details: {
           type: 'unknown_platform_account',
           platform_account_id: payload.platform_account_id,
-          platform_trade_id: payload.platform_trade_id
+          platform_trade_id: payload.platform_trade_id,
+          raw_payload: payload
         },
         reason: 'Trade received for unknown platform account'
       })
@@ -222,7 +276,8 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: 'Unknown platform account', 
-          platform_account_id: payload.platform_account_id 
+          platform_account_id: payload.platform_account_id,
+          request_id: requestId
         }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
@@ -239,7 +294,7 @@ Deno.serve(async (req) => {
 
     if (accountError || !account) {
       return new Response(
-        JSON.stringify({ error: 'Account not found' }),
+        JSON.stringify({ error: 'Account not found', request_id: requestId }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -250,18 +305,20 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: 'Account in terminal state', 
-          status: account.status 
+          status: account.status,
+          request_id: requestId
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Calculate PnL (use provided or estimate from trade data)
+    // PnL Source-of-Truth: Option A - Platform-provided PnL is authoritative
+    // We store the raw payload for audit trail
     const tradePnl = payload.pnl ?? 0
     const commission = payload.commission ?? 0
     const netPnl = tradePnl - commission
 
-    // Insert trade (idempotent via unique constraint)
+    // Insert trade with raw_payload for audit (idempotent via unique constraint)
     const { data: insertedTrade, error: tradeError } = await supabase
       .from('trades')
       .insert({
@@ -275,31 +332,61 @@ Deno.serve(async (req) => {
         pnl: netPnl,
         commission: commission,
         opened_at: payload.filled_at,
-        status: 'closed' // Assuming filled trades
+        status: 'closed',
+        raw_payload: payload // Store original for audit trail
       })
       .select()
       .single()
 
-    // Check for duplicate
+    // IDEMPOTENCY CHECK: On conflict/duplicate, exit BEFORE updating metrics
     if (tradeError?.code === '23505') {
       return new Response(
         JSON.stringify({ 
           success: true, 
           duplicate: true,
-          platform_trade_id: payload.platform_trade_id 
+          platform_trade_id: payload.platform_trade_id,
+          request_id: requestId
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
     if (tradeError) {
+      // Log processing failure
+      await supabase.from('audit_logs').insert({
+        account_id: accountId,
+        action: 'status_changed',
+        request_id: requestId,
+        details: {
+          type: 'trade_insert_failed',
+          error: tradeError.message,
+          platform_trade_id: payload.platform_trade_id
+        },
+        reason: 'Trade insertion failed'
+      })
       throw new Error(`Failed to insert trade: ${tradeError.message}`)
     }
 
-    // Update account metrics
+    // --- METRICS UPDATE (only after successful trade insert) ---
+
+    // Check for daily reset
+    const resetHour = 17 // 5 PM ET (could fetch from system_settings)
+    const timezone = 'America/New_York'
+    const shouldResetDaily = needsDailyReset(account.daily_reset_at, resetHour, timezone)
+
+    let dailyPnl = account.daily_pnl
+    let dailyPnlStartBalance = account.daily_pnl_start_balance
+
+    if (shouldResetDaily) {
+      // Reset daily counters
+      dailyPnl = 0
+      dailyPnlStartBalance = account.current_balance
+    }
+
+    // Calculate new metrics
     const newBalance = account.current_balance + netPnl
     const newTotalPnl = account.total_pnl + netPnl
-    const newDailyPnl = account.daily_pnl + netPnl
+    const newDailyPnl = dailyPnl + netPnl
     const newHighestBalance = Math.max(account.highest_balance, newBalance)
 
     // Detect breaches using frozen rule_snapshot
@@ -307,12 +394,12 @@ Deno.serve(async (req) => {
       starting_balance: account.starting_balance,
       current_balance: account.current_balance,
       highest_balance: account.highest_balance,
-      daily_pnl: account.daily_pnl,
-      daily_pnl_start_balance: account.daily_pnl_start_balance,
+      daily_pnl: dailyPnl,
+      daily_pnl_start_balance: dailyPnlStartBalance,
       rule_snapshot: account.rule_snapshot as RuleSnapshot
-    }, netPnl)
+    }, netPnl, newBalance)
 
-    // Update account
+    // Build update data
     const updateData: Record<string, unknown> = {
       current_balance: newBalance,
       total_pnl: newTotalPnl,
@@ -322,12 +409,15 @@ Deno.serve(async (req) => {
       updated_at: new Date().toISOString()
     }
 
-    // Set daily start balance if not set
-    if (!account.daily_pnl_start_balance) {
+    // Handle daily reset
+    if (shouldResetDaily) {
+      updateData.daily_pnl_start_balance = dailyPnlStartBalance
+      updateData.daily_reset_at = new Date().toISOString()
+    } else if (!account.daily_pnl_start_balance) {
       updateData.daily_pnl_start_balance = account.current_balance
     }
 
-    // If breach detected, update status
+    // If breach detected, update status (Detection Only - no terminal action)
     if (breachResult.breached) {
       updateData.status = 'breached_detected'
     }
@@ -338,12 +428,24 @@ Deno.serve(async (req) => {
       .eq('id', accountId)
 
     if (updateError) {
-      throw new Error(`Failed to update account: ${updateError.message}`)
+      // Log failure but don't throw - trade is already recorded
+      await supabase.from('audit_logs').insert({
+        account_id: accountId,
+        action: 'status_changed',
+        request_id: requestId,
+        details: {
+          type: 'account_update_failed',
+          error: updateError.message,
+          trade_id: insertedTrade?.id
+        },
+        reason: 'Account metrics update failed after trade insert'
+      })
+      console.error('Account update failed:', updateError)
     }
 
     // Handle breach detection
     if (breachResult.breached) {
-      // Insert violation (idempotent would be nice, but for MVP we allow multiples)
+      // Insert violation
       await supabase.from('violations').insert({
         account_id: accountId,
         rule_type: breachResult.rule_type!,
@@ -353,16 +455,22 @@ Deno.serve(async (req) => {
         detected_at: new Date().toISOString()
       })
 
-      // Write trader-visible account event
+      // Write trader-visible account event (transparency)
       await supabase.from('account_events').insert({
         account_id: accountId,
         event_type: 'breach_detected',
+        request_id: requestId,
         event_data: {
           rule: breachResult.rule_type,
           current_value_pct: breachResult.actual_value?.toFixed(2),
           limit_pct: breachResult.threshold,
           description: breachResult.description,
           threshold_crossed_at: payload.filled_at,
+          trade_id: insertedTrade?.id,
+          // Trader-friendly explanation
+          explanation: `Your account triggered a ${breachResult.rule_type === 'max_daily_loss' ? 'daily loss' : 'total drawdown'} limit. ` +
+            `Current: ${breachResult.actual_value?.toFixed(2)}% | Limit: ${breachResult.threshold}%. ` +
+            `This requires human review before any terminal decision.`,
           next_step: 'Under review — human confirmation required'
         }
       })
@@ -371,28 +479,36 @@ Deno.serve(async (req) => {
       await supabase.from('audit_logs').insert({
         account_id: accountId,
         action: 'breach_detected',
+        request_id: requestId,
         details: {
           rule_type: breachResult.rule_type,
           actual_value: breachResult.actual_value,
           threshold: breachResult.threshold,
           trade_id: insertedTrade?.id,
-          platform_trade_id: payload.platform_trade_id
+          platform_trade_id: payload.platform_trade_id,
+          net_pnl: netPnl,
+          new_balance: newBalance
         },
         reason: breachResult.description
       })
     }
 
-    // Return success
+    // Return success with request_id for correlation
     return new Response(
       JSON.stringify({
         success: true,
         duplicate: false,
+        request_id: requestId,
         trade_id: insertedTrade?.id,
         account_id: accountId,
         new_balance: newBalance,
+        daily_pnl: newDailyPnl,
+        daily_reset_occurred: shouldResetDaily,
         breach_detected: breachResult.breached,
         breach_details: breachResult.breached ? {
           rule: breachResult.rule_type,
+          actual_pct: breachResult.actual_value,
+          limit_pct: breachResult.threshold,
           description: breachResult.description
         } : undefined
       }),
@@ -402,8 +518,24 @@ Deno.serve(async (req) => {
   } catch (err) {
     const error = err as Error
     console.error('Trade ingestion error:', error)
+
+    // Log processing failure (best effort, don't await)
+    try {
+      await supabase.from('audit_logs').insert({
+        action: 'status_changed',
+        request_id: requestId,
+        details: {
+          type: 'ingestion_error',
+          error: error.message
+        },
+        reason: 'Trade ingestion failed with exception'
+      })
+    } catch {
+      // Ignore audit log failures in error handler
+    }
+
     return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error' }),
+      JSON.stringify({ error: error.message || 'Internal server error', request_id: requestId }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
