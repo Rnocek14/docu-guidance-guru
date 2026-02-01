@@ -14,16 +14,547 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      accounts: {
+        Row: {
+          account_number: string
+          cohort_id: string
+          created_at: string
+          current_balance: number
+          daily_pnl: number
+          failed_at: string | null
+          highest_balance: number
+          id: string
+          passed_at: string | null
+          starting_balance: number
+          status: Database["public"]["Enums"]["account_status"]
+          total_pnl: number
+          trading_days_count: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_number: string
+          cohort_id: string
+          created_at?: string
+          current_balance?: number
+          daily_pnl?: number
+          failed_at?: string | null
+          highest_balance?: number
+          id?: string
+          passed_at?: string | null
+          starting_balance?: number
+          status?: Database["public"]["Enums"]["account_status"]
+          total_pnl?: number
+          trading_days_count?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_number?: string
+          cohort_id?: string
+          created_at?: string
+          current_balance?: number
+          daily_pnl?: number
+          failed_at?: string | null
+          highest_balance?: number
+          id?: string
+          passed_at?: string | null
+          starting_balance?: number
+          status?: Database["public"]["Enums"]["account_status"]
+          total_pnl?: number
+          trading_days_count?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounts_cohort_id_fkey"
+            columns: ["cohort_id"]
+            isOneToOne: false
+            referencedRelation: "cohorts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      audit_logs: {
+        Row: {
+          account_id: string | null
+          action: Database["public"]["Enums"]["audit_action"]
+          created_at: string
+          details: Json
+          id: string
+          ip_address: string | null
+          reason: string | null
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          account_id?: string | null
+          action: Database["public"]["Enums"]["audit_action"]
+          created_at?: string
+          details?: Json
+          id?: string
+          ip_address?: string | null
+          reason?: string | null
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          account_id?: string | null
+          action?: Database["public"]["Enums"]["audit_action"]
+          created_at?: string
+          details?: Json
+          id?: string
+          ip_address?: string | null
+          reason?: string | null
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_logs_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cohorts: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          intake_active: boolean
+          is_active: boolean
+          max_daily_loss_percent: number
+          max_position_size_percent: number
+          max_total_drawdown_percent: number
+          min_trading_days: number
+          name: string
+          profit_target_percent: number
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          intake_active?: boolean
+          is_active?: boolean
+          max_daily_loss_percent?: number
+          max_position_size_percent?: number
+          max_total_drawdown_percent?: number
+          min_trading_days?: number
+          name: string
+          profit_target_percent?: number
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          intake_active?: boolean
+          is_active?: boolean
+          max_daily_loss_percent?: number
+          max_position_size_percent?: number
+          max_total_drawdown_percent?: number
+          min_trading_days?: number
+          name?: string
+          profit_target_percent?: number
+          version?: number
+        }
+        Relationships: []
+      }
+      flags: {
+        Row: {
+          account_id: string
+          created_at: string
+          escalated_at: string | null
+          escalated_to: string | null
+          flag_type: string
+          id: string
+          reason: string
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          severity: string
+          status: Database["public"]["Enums"]["flag_status"]
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          escalated_at?: string | null
+          escalated_to?: string | null
+          flag_type: string
+          id?: string
+          reason: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          severity?: string
+          status?: Database["public"]["Enums"]["flag_status"]
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          escalated_at?: string | null
+          escalated_to?: string | null
+          flag_type?: string
+          id?: string
+          reason?: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          severity?: string
+          status?: Database["public"]["Enums"]["flag_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flags_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payouts: {
+        Row: {
+          account_id: string
+          amount: number
+          id: string
+          paid_at: string | null
+          payment_reference: string | null
+          requested_at: string
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: Database["public"]["Enums"]["payout_status"]
+        }
+        Insert: {
+          account_id: string
+          amount: number
+          id?: string
+          paid_at?: string | null
+          payment_reference?: string | null
+          requested_at?: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["payout_status"]
+        }
+        Update: {
+          account_id?: string
+          amount?: number
+          id?: string
+          paid_at?: string | null
+          payment_reference?: string | null
+          requested_at?: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["payout_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payouts_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          email: string
+          full_name: string | null
+          id: string
+          kyc_status: string | null
+          kyc_verified_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          email: string
+          full_name?: string | null
+          id?: string
+          kyc_status?: string | null
+          kyc_verified_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string
+          full_name?: string | null
+          id?: string
+          kyc_status?: string | null
+          kyc_verified_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      risk_scores: {
+        Row: {
+          abuse_factors: Json | null
+          abuse_score: number
+          account_id: string
+          calculated_at: string
+          edge_factors: Json | null
+          edge_score: number
+          id: string
+          payment_factors: Json | null
+          payment_risk_score: number
+          updated_at: string
+        }
+        Insert: {
+          abuse_factors?: Json | null
+          abuse_score?: number
+          account_id: string
+          calculated_at?: string
+          edge_factors?: Json | null
+          edge_score?: number
+          id?: string
+          payment_factors?: Json | null
+          payment_risk_score?: number
+          updated_at?: string
+        }
+        Update: {
+          abuse_factors?: Json | null
+          abuse_score?: number
+          account_id?: string
+          calculated_at?: string
+          edge_factors?: Json | null
+          edge_score?: number
+          id?: string
+          payment_factors?: Json | null
+          payment_risk_score?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "risk_scores_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      system_settings: {
+        Row: {
+          id: string
+          key: string
+          updated_at: string
+          updated_by: string | null
+          value: Json
+        }
+        Insert: {
+          id?: string
+          key: string
+          updated_at?: string
+          updated_by?: string | null
+          value: Json
+        }
+        Update: {
+          id?: string
+          key?: string
+          updated_at?: string
+          updated_by?: string | null
+          value?: Json
+        }
+        Relationships: []
+      }
+      trades: {
+        Row: {
+          account_id: string
+          closed_at: string | null
+          entry_price: number
+          exit_price: number | null
+          id: string
+          opened_at: string
+          pnl: number | null
+          quantity: number
+          side: string
+          status: string
+          symbol: string
+        }
+        Insert: {
+          account_id: string
+          closed_at?: string | null
+          entry_price: number
+          exit_price?: number | null
+          id?: string
+          opened_at?: string
+          pnl?: number | null
+          quantity: number
+          side: string
+          status?: string
+          symbol: string
+        }
+        Update: {
+          account_id?: string
+          closed_at?: string | null
+          entry_price?: number
+          exit_price?: number | null
+          id?: string
+          opened_at?: string
+          pnl?: number | null
+          quantity?: number
+          side?: string
+          status?: string
+          symbol?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trades_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      violations: {
+        Row: {
+          account_id: string
+          actual_value: number | null
+          confirmation_notes: string | null
+          confirmed_at: string | null
+          confirmed_by: string | null
+          description: string
+          detected_at: string
+          id: string
+          rule_threshold: number | null
+          rule_type: string
+        }
+        Insert: {
+          account_id: string
+          actual_value?: number | null
+          confirmation_notes?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          description: string
+          detected_at?: string
+          id?: string
+          rule_threshold?: number | null
+          rule_type: string
+        }
+        Update: {
+          account_id?: string
+          actual_value?: number | null
+          confirmation_notes?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          description?: string
+          detected_at?: string
+          id?: string
+          rule_threshold?: number | null
+          rule_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "violations_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_user_roles: {
+        Args: { _user_id: string }
+        Returns: Database["public"]["Enums"]["app_role"][]
+      }
+      has_any_role: {
+        Args: {
+          _roles: Database["public"]["Enums"]["app_role"][]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      account_status:
+        | "active"
+        | "breached_detected"
+        | "under_review"
+        | "failed_confirmed"
+        | "passed"
+        | "payout_requested"
+        | "payout_under_review"
+        | "payout_approved"
+        | "closed"
+      app_role: "trader" | "risk_officer" | "support" | "admin"
+      audit_action:
+        | "account_created"
+        | "status_changed"
+        | "breach_detected"
+        | "flag_created"
+        | "flag_cleared"
+        | "flag_escalated"
+        | "payout_requested"
+        | "payout_approved"
+        | "payout_rejected"
+        | "failure_confirmed"
+        | "role_assigned"
+        | "role_revoked"
+        | "cohort_assigned"
+        | "intake_paused"
+        | "intake_resumed"
+      flag_status: "pending" | "cleared" | "escalated" | "resolved"
+      payout_status:
+        | "pending"
+        | "under_review"
+        | "approved"
+        | "rejected"
+        | "paid"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +681,44 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      account_status: [
+        "active",
+        "breached_detected",
+        "under_review",
+        "failed_confirmed",
+        "passed",
+        "payout_requested",
+        "payout_under_review",
+        "payout_approved",
+        "closed",
+      ],
+      app_role: ["trader", "risk_officer", "support", "admin"],
+      audit_action: [
+        "account_created",
+        "status_changed",
+        "breach_detected",
+        "flag_created",
+        "flag_cleared",
+        "flag_escalated",
+        "payout_requested",
+        "payout_approved",
+        "payout_rejected",
+        "failure_confirmed",
+        "role_assigned",
+        "role_revoked",
+        "cohort_assigned",
+        "intake_paused",
+        "intake_resumed",
+      ],
+      flag_status: ["pending", "cleared", "escalated", "resolved"],
+      payout_status: [
+        "pending",
+        "under_review",
+        "approved",
+        "rejected",
+        "paid",
+      ],
+    },
   },
 } as const
