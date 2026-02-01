@@ -5,13 +5,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-interface ToggleIntakeRequest {
-  action: 'toggle_intake'
-  value: boolean
-}
-
 interface AdminActionRequest {
   action: string
+  value?: boolean
   [key: string]: unknown
 }
 
@@ -31,31 +27,25 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Create client with user's auth for role checking
-    const supabaseAuth = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: authHeader } } }
-    )
-
-    // Verify user and get claims
     const token = authHeader.replace('Bearer ', '')
-    const { data: claimsData, error: claimsError } = await supabaseAuth.auth.getClaims(token)
-    
-    if (claimsError || !claimsData?.claims) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    const userId = claimsData.claims.sub as string
 
     // Create service role client for privileged operations
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
+
+    // FIX 2: Use getUser() instead of getClaims() for token validation
+    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token)
+    
+    if (userError || !userData?.user) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const userId = userData.user.id
 
     // Check if user is admin
     const { data: roleData } = await supabaseAdmin
@@ -76,13 +66,22 @@ Deno.serve(async (req) => {
     const body: AdminActionRequest = await req.json()
 
     if (body.action === 'toggle_intake') {
-      const value = body.value as boolean
+      const newValue = body.value as boolean
+
+      // FIX 3: Get current value first for idempotent audit logging
+      const { data: currentSetting } = await supabaseAdmin
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'global_intake_active')
+        .single()
+
+      const previousValue = currentSetting?.value
 
       // Update system setting
       const { error: updateError } = await supabaseAdmin
         .from('system_settings')
         .update({ 
-          value: value, 
+          value: newValue, 
           updated_by: userId,
           updated_at: new Date().toISOString()
         })
@@ -92,23 +91,31 @@ Deno.serve(async (req) => {
         throw new Error(`Failed to update setting: ${updateError.message}`)
       }
 
-      // Create audit log entry (server-side, bypasses RLS)
+      // FIX 3: Idempotent audit log with previous and new values
       const { error: auditError } = await supabaseAdmin
         .from('audit_logs')
         .insert({
           user_id: userId,
-          action: value ? 'intake_resumed' : 'intake_paused',
-          details: { global_intake: value },
-          reason: `Global intake ${value ? 'resumed' : 'paused'} by admin`,
+          action: newValue ? 'intake_resumed' : 'intake_paused',
+          details: { 
+            previous_value: previousValue,
+            new_value: newValue,
+            setting_key: 'global_intake_active'
+          },
+          reason: `Global intake ${newValue ? 'resumed' : 'paused'} by admin`,
         })
 
       if (auditError) {
         console.error('Failed to create audit log:', auditError)
-        // Don't fail the request if audit log fails, but log it
+        // Log but don't fail - the action succeeded
       }
 
       return new Response(
-        JSON.stringify({ success: true, intake_active: value }),
+        JSON.stringify({ 
+          success: true, 
+          intake_active: newValue,
+          previous_value: previousValue 
+        }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

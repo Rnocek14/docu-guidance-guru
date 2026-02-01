@@ -1,16 +1,13 @@
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, CreditCard, Shield, Settings, AlertTriangle } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
 export default function AdminDashboard() {
-  const { user } = useAuth();
   const queryClient = useQueryClient();
 
   // Fetch summary stats
@@ -53,7 +50,7 @@ export default function AdminDashboard() {
       if (!session) throw new Error('Not authenticated');
 
       const response = await fetch(
-        'https://sfxmgwkrjwuerfkqxokq.supabase.co/functions/v1/admin-actions',
+        `${SUPABASE_FUNCTIONS_URL}/admin-actions`,
         {
           method: 'POST',
           headers: {
