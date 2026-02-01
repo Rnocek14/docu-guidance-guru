@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import type { Profile, AppRole } from '@/lib/types';
@@ -24,94 +24,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const initializedRef = useRef(false);
 
-  // Fetch user profile
-  const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-
-    if (error) {
-      console.error('Error fetching profile:', error);
-      return null;
-    }
-    return data as Profile;
-  };
-
-  // Fetch user roles
-  const fetchRoles = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId);
-
-    if (error) {
-      console.error('Error fetching roles:', error);
-      return [];
-    }
-    return data.map((r) => r.role as AppRole);
-  };
-
-  // Initialize auth state
   useEffect(() => {
-    // Prevent double initialization in StrictMode
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-
     let isMounted = true;
 
-    // Set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, newSession) => {
-        if (!isMounted) return;
-        
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
-
-        if (newSession?.user) {
-          // Defer to avoid race conditions with Supabase triggers
-          const [profileData, rolesData] = await Promise.all([
-            fetchProfile(newSession.user.id),
-            fetchRoles(newSession.user.id),
-          ]);
-          if (isMounted) {
-            setProfile(profileData);
-            setRoles(rolesData);
-            setIsLoading(false);
-          }
-        } else {
-          setProfile(null);
-          setRoles([]);
-          setIsLoading(false);
-        }
+    // Helper to load profile and roles
+    const loadUserData = async (userId: string) => {
+      const [profileRes, rolesRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('user_id', userId).single(),
+        supabase.from('user_roles').select('role').eq('user_id', userId),
+      ]);
+      
+      if (isMounted) {
+        setProfile(profileRes.data as Profile | null);
+        setRoles((rolesRes.data || []).map((r) => r.role as AppRole));
       }
-    );
+    };
 
-    // Get initial session
-    supabase.auth.getSession().then(async ({ data: { session: initialSession } }) => {
+    // Get initial session first
+    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
       if (!isMounted) return;
       
       setSession(initialSession);
       setUser(initialSession?.user ?? null);
 
       if (initialSession?.user) {
-        const [profileData, rolesData] = await Promise.all([
-          fetchProfile(initialSession.user.id),
-          fetchRoles(initialSession.user.id),
-        ]);
-        if (isMounted) {
-          setProfile(profileData);
-          setRoles(rolesData);
-        }
-      }
-      
-      if (isMounted) {
+        loadUserData(initialSession.user.id).finally(() => {
+          if (isMounted) setIsLoading(false);
+        });
+      } else {
         setIsLoading(false);
       }
     });
+
+    // Then set up listener for changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, newSession) => {
+        if (!isMounted) return;
+        
+        // Only process actual changes, not initial session
+        if (event === 'INITIAL_SESSION') return;
+        
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
+
+        if (newSession?.user) {
+          await loadUserData(newSession.user.id);
+        } else {
+          setProfile(null);
+          setRoles([]);
+        }
+        
+        setIsLoading(false);
+      }
+    );
 
     return () => {
       isMounted = false;
@@ -125,19 +91,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password,
       options: {
         emailRedirectTo: window.location.origin,
-        data: {
-          full_name: fullName,
-        },
+        data: { full_name: fullName },
       },
     });
     return { error };
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     return { error };
   };
 
@@ -148,9 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const hasRole = (role: AppRole) => roles.includes(role);
-  
-  const hasAnyRole = (checkRoles: AppRole[]) => 
-    checkRoles.some((role) => roles.includes(role));
+  const hasAnyRole = (checkRoles: AppRole[]) => checkRoles.some((role) => roles.includes(role));
 
   return (
     <AuthContext.Provider
