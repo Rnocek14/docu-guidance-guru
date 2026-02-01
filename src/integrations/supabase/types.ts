@@ -53,9 +53,12 @@ export type Database = {
           created_at: string
           current_balance: number
           daily_pnl: number
+          daily_pnl_start_balance: number | null
+          daily_reset_at: string | null
           failed_at: string | null
           highest_balance: number
           id: string
+          last_trade_at: string | null
           passed_at: string | null
           rule_snapshot: Json | null
           starting_balance: number
@@ -71,9 +74,12 @@ export type Database = {
           created_at?: string
           current_balance?: number
           daily_pnl?: number
+          daily_pnl_start_balance?: number | null
+          daily_reset_at?: string | null
           failed_at?: string | null
           highest_balance?: number
           id?: string
+          last_trade_at?: string | null
           passed_at?: string | null
           rule_snapshot?: Json | null
           starting_balance?: number
@@ -89,9 +95,12 @@ export type Database = {
           created_at?: string
           current_balance?: number
           daily_pnl?: number
+          daily_pnl_start_balance?: number | null
+          daily_reset_at?: string | null
           failed_at?: string | null
           highest_balance?: number
           id?: string
+          last_trade_at?: string | null
           passed_at?: string | null
           rule_snapshot?: Json | null
           starting_balance?: number
@@ -303,6 +312,38 @@ export type Database = {
           },
         ]
       }
+      platform_accounts: {
+        Row: {
+          account_id: string
+          created_at: string
+          id: string
+          platform_account_id: string
+          platform_name: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          id?: string
+          platform_account_id: string
+          platform_name?: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          id?: string
+          platform_account_id?: string
+          platform_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_accounts_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -414,10 +455,13 @@ export type Database = {
         Row: {
           account_id: string
           closed_at: string | null
+          commission: number | null
           entry_price: number
           exit_price: number | null
           id: string
           opened_at: string
+          platform_account_id: string | null
+          platform_trade_id: string | null
           pnl: number | null
           quantity: number
           side: string
@@ -427,10 +471,13 @@ export type Database = {
         Insert: {
           account_id: string
           closed_at?: string | null
+          commission?: number | null
           entry_price: number
           exit_price?: number | null
           id?: string
           opened_at?: string
+          platform_account_id?: string | null
+          platform_trade_id?: string | null
           pnl?: number | null
           quantity: number
           side: string
@@ -440,10 +487,13 @@ export type Database = {
         Update: {
           account_id?: string
           closed_at?: string | null
+          commission?: number | null
           entry_price?: number
           exit_price?: number | null
           id?: string
           opened_at?: string
+          platform_account_id?: string | null
+          platform_trade_id?: string | null
           pnl?: number | null
           quantity?: number
           side?: string
