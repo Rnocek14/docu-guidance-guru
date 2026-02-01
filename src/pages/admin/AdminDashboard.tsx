@@ -46,30 +46,40 @@ export default function AdminDashboard() {
     },
   });
 
-  // Toggle intake mutation
+  // Toggle intake mutation - calls Edge Function (server-side audit logging)
   const toggleIntake = useMutation({
     mutationFn: async (newValue: boolean) => {
-      const { error } = await supabase
-        .from('system_settings')
-        .update({ value: newValue, updated_by: user?.id })
-        .eq('key', 'global_intake_active');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
 
-      if (error) throw error;
+      const response = await fetch(
+        'https://sfxmgwkrjwuerfkqxokq.supabase.co/functions/v1/admin-actions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            action: 'toggle_intake',
+            value: newValue,
+          }),
+        }
+      );
 
-      // Log the action
-      await supabase.from('audit_logs').insert({
-        user_id: user?.id,
-        action: newValue ? 'intake_resumed' : 'intake_paused',
-        details: { global_intake: newValue },
-        reason: `Global intake ${newValue ? 'resumed' : 'paused'} by admin`,
-      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to toggle intake');
+      }
+
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['intake-setting'] });
       toast.success('Intake setting updated');
     },
-    onError: () => {
-      toast.error('Failed to update intake setting');
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update intake setting');
     },
   });
 
