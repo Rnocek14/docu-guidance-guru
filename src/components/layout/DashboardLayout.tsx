@@ -210,6 +210,7 @@ export const riskNavItems: NavItem[] = [
 
 export const adminNavItems: NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: <LayoutDashboard className="h-5 w-5" /> },
+  { label: 'Risk Dashboard', href: '/risk', icon: <Shield className="h-5 w-5" /> },
   { label: 'Risk Queue', href: '/risk/queue', icon: <AlertTriangle className="h-5 w-5" /> },
   { label: 'Users', href: '/admin/users', icon: <Users className="h-5 w-5" /> },
   { label: 'Cohorts', href: '/admin/cohorts', icon: <Settings className="h-5 w-5" /> },
