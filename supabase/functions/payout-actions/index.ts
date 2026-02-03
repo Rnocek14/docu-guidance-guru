@@ -37,27 +37,41 @@ const PAYOUT_TRANSITIONS: Record<PayoutAction, { from: string[]; to: string }> =
 }
 
 // Helper: Idempotent insert for audit_logs (ignores duplicates on account_id + request_id)
+// Returns { inserted: boolean } to track if this was a duplicate
 // deno-lint-ignore no-explicit-any
-async function insertAuditLog(supabase: any, data: any) {
-  const { error } = await supabase
+async function insertAuditLog(supabase: any, data: any): Promise<{ inserted: boolean }> {
+  const { data: result, error } = await supabase
     .from('audit_logs')
     .upsert(data, { 
       onConflict: 'account_id,request_id',
       ignoreDuplicates: true 
     })
-  if (error) console.error('Audit log insert error:', error)
+    .select('id')
+  
+  if (error) {
+    console.error('Audit log insert error:', error)
+    return { inserted: false }
+  }
+  return { inserted: result && result.length > 0 }
 }
 
 // Helper: Idempotent insert for account_events (ignores duplicates on account_id + request_id)
+// Returns { inserted: boolean } to track if this was a duplicate
 // deno-lint-ignore no-explicit-any
-async function insertAccountEvent(supabase: any, data: any) {
-  const { error } = await supabase
+async function insertAccountEvent(supabase: any, data: any): Promise<{ inserted: boolean }> {
+  const { data: result, error } = await supabase
     .from('account_events')
     .upsert(data, { 
       onConflict: 'account_id,request_id',
       ignoreDuplicates: true 
     })
-  if (error) console.error('Account event insert error:', error)
+    .select('id')
+  
+  if (error) {
+    console.error('Account event insert error:', error)
+    return { inserted: false }
+  }
+  return { inserted: result && result.length > 0 }
 }
 
 Deno.serve(async (req) => {
@@ -253,8 +267,8 @@ Deno.serve(async (req) => {
       mark_paid: 'payout_paid',
     }
 
-    // Create audit log (idempotent)
-    await insertAuditLog(supabaseAdmin, {
+    // Create audit log (idempotent) - track if this was a duplicate
+    const auditResult = await insertAuditLog(supabaseAdmin, {
       user_id: userId,
       account_id: payout.account_id,
       action: auditActions[body.action],
@@ -280,7 +294,7 @@ Deno.serve(async (req) => {
       mark_paid: `Your payout of $${formattedAmount} has been sent. Reference: ${body.payment_reference}`,
     }
 
-    await insertAccountEvent(supabaseAdmin, {
+    const eventResult = await insertAccountEvent(supabaseAdmin, {
       account_id: payout.account_id,
       event_type: eventTypes[body.action],
       request_id: requestId,
@@ -295,6 +309,9 @@ Deno.serve(async (req) => {
       },
     })
 
+    // Determine if this was a duplicate request
+    const wasDuplicate = !auditResult.inserted && !eventResult.inserted
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -305,6 +322,7 @@ Deno.serve(async (req) => {
         action: body.action,
         request_id: requestId,
         idempotent: !!body.idempotency_key,
+        duplicate: wasDuplicate,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

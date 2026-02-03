@@ -43,27 +43,43 @@ const STATE_TRANSITIONS: Record<string, { from: string[]; to: string }> = {
 }
 
 // Helper: Idempotent insert for audit_logs (ignores duplicates on account_id + request_id)
+// Returns { inserted: boolean } to track if this was a duplicate
 // deno-lint-ignore no-explicit-any
-async function insertAuditLog(supabase: any, data: any) {
-  const { error } = await supabase
+async function insertAuditLog(supabase: any, data: any): Promise<{ inserted: boolean }> {
+  const { data: result, error } = await supabase
     .from('audit_logs')
     .upsert(data, { 
       onConflict: 'account_id,request_id',
       ignoreDuplicates: true 
     })
-  if (error) console.error('Audit log insert error:', error)
+    .select('id')
+  
+  if (error) {
+    console.error('Audit log insert error:', error)
+    return { inserted: false }
+  }
+  // If result is empty array, it was a duplicate that was ignored
+  return { inserted: result && result.length > 0 }
 }
 
 // Helper: Idempotent insert for account_events (ignores duplicates on account_id + request_id)
+// Returns { inserted: boolean } to track if this was a duplicate
 // deno-lint-ignore no-explicit-any
-async function insertAccountEvent(supabase: any, data: any) {
-  const { error } = await supabase
+async function insertAccountEvent(supabase: any, data: any): Promise<{ inserted: boolean }> {
+  const { data: result, error } = await supabase
     .from('account_events')
     .upsert(data, { 
       onConflict: 'account_id,request_id',
       ignoreDuplicates: true 
     })
-  if (error) console.error('Account event insert error:', error)
+    .select('id')
+  
+  if (error) {
+    console.error('Account event insert error:', error)
+    return { inserted: false }
+  }
+  // If result is empty array, it was a duplicate that was ignored
+  return { inserted: result && result.length > 0 }
 }
 
 Deno.serve(async (req) => {
@@ -171,10 +187,11 @@ Deno.serve(async (req) => {
     // Client-provided keys enable true retry safety
     const requestId = body.idempotency_key || crypto.randomUUID()
     const previousStatus = account.status
+    let wasDuplicate = false
     let result: Record<string, unknown> = { 
       success: true, 
       account_id: body.account_id, 
-      action: body.action, 
+      action: body.action,
       request_id: requestId,
       idempotent: !!body.idempotency_key // Let client know if their key was used
     }
@@ -214,8 +231,8 @@ Deno.serve(async (req) => {
         // Determine audit action type
         const auditAction = body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed'
 
-        // Create audit log (idempotent)
-        await insertAuditLog(supabaseAdmin, {
+        // Create audit log (idempotent) - track if this was a duplicate
+        const auditResult = await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
           action: auditAction,
@@ -237,7 +254,7 @@ Deno.serve(async (req) => {
           escalate: `Your account has been escalated for additional review.`,
         }
 
-        await insertAccountEvent(supabaseAdmin, {
+        const eventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
           event_type: body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed',
           request_id: requestId,
@@ -249,6 +266,9 @@ Deno.serve(async (req) => {
             actor_role: actorRole,
           },
         })
+
+        // If neither audit nor event was inserted, this was a duplicate request
+        wasDuplicate = !auditResult.inserted && !eventResult.inserted
 
         // Mark violations as confirmed if confirming failure
         if (body.action === 'confirm_failure') {
@@ -263,13 +283,13 @@ Deno.serve(async (req) => {
             .is('confirmed_at', null)
         }
 
-        result = { ...result, previous_status: previousStatus, new_status: newStatus }
+        result = { ...result, previous_status: previousStatus, new_status: newStatus, duplicate: wasDuplicate }
         break
       }
 
       case 'add_note': {
         // Notes are audit-only, no state change (idempotent)
-        await insertAuditLog(supabaseAdmin, {
+        const noteResult = await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
           action: 'status_changed',
@@ -281,7 +301,7 @@ Deno.serve(async (req) => {
             actor_role: actorRole,
           },
         })
-        result = { ...result, note_added: true }
+        result = { ...result, note_added: true, duplicate: !noteResult.inserted }
         break
       }
 
@@ -310,7 +330,7 @@ Deno.serve(async (req) => {
         }
 
         // Audit the flag closure (idempotent)
-        await insertAuditLog(supabaseAdmin, {
+        const flagAuditResult = await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
           action: 'flag_cleared',
@@ -324,7 +344,7 @@ Deno.serve(async (req) => {
         })
 
         // Create trader-visible event for transparency (idempotent)
-        await insertAccountEvent(supabaseAdmin, {
+        const flagEventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
           event_type: 'status_changed',
           request_id: requestId,
@@ -336,7 +356,7 @@ Deno.serve(async (req) => {
           },
         })
 
-        result = { ...result, flag_id: body.flag_id, flag_closed: true }
+        result = { ...result, flag_id: body.flag_id, flag_closed: true, duplicate: !flagAuditResult.inserted && !flagEventResult.inserted }
         break
       }
     }
