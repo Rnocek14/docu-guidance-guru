@@ -202,10 +202,6 @@ export const traderNavItems: NavItem[] = [
 export const riskNavItems: NavItem[] = [
   { label: 'Dashboard', href: '/risk', icon: <LayoutDashboard className="h-5 w-5" /> },
   { label: 'Review Queue', href: '/risk/queue', icon: <AlertTriangle className="h-5 w-5" /> },
-  { label: 'Accounts', href: '/risk/accounts', icon: <Users className="h-5 w-5" /> },
-  { label: 'Flags', href: '/risk/flags', icon: <Flag className="h-5 w-5" /> },
-  { label: 'Violations', href: '/risk/violations', icon: <AlertTriangle className="h-5 w-5" /> },
-  { label: 'Audit Logs', href: '/risk/audit', icon: <FileText className="h-5 w-5" /> },
 ];
 
 export const adminNavItems: NavItem[] = [
