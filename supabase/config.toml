@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.review-actions]
 verify_jwt = false
+
+[functions.payout-actions]
+verify_jwt = false

@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -23,7 +24,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { toast } from '@/hooks/use-toast';
-import { CheckCircle, XCircle, ArrowUpCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, ArrowUpCircle, Loader2, MessageSquarePlus, Flag } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface AccountReviewActionsProps {
@@ -33,16 +34,19 @@ interface AccountReviewActionsProps {
   onActionComplete?: () => void;
 }
 
-type ActionType = 'confirm_failure' | 'clear_breach' | 'escalate';
+type ActionType = 'confirm_failure' | 'clear_breach' | 'escalate' | 'add_note' | 'close_flag';
 
-const actionConfig: Record<ActionType, { 
-  title: string; 
-  description: string; 
-  buttonLabel: string; 
-  buttonVariant: 'default' | 'destructive' | 'outline';
+interface ActionConfig {
+  title: string;
+  description: string;
+  buttonLabel: string;
+  buttonVariant: 'default' | 'destructive' | 'outline' | 'secondary';
   icon: typeof CheckCircle;
   requiresConfirm: boolean;
-}> = {
+  isTerminal: boolean;
+}
+
+const actionConfig: Record<ActionType, ActionConfig> = {
   confirm_failure: {
     title: 'Confirm Failure',
     description: 'This will permanently mark the account as failed. This action cannot be undone.',
@@ -50,6 +54,7 @@ const actionConfig: Record<ActionType, {
     buttonVariant: 'destructive',
     icon: XCircle,
     requiresConfirm: true,
+    isTerminal: true,
   },
   clear_breach: {
     title: 'Clear Breach',
@@ -58,6 +63,7 @@ const actionConfig: Record<ActionType, {
     buttonVariant: 'outline',
     icon: CheckCircle,
     requiresConfirm: true,
+    isTerminal: false,
   },
   escalate: {
     title: 'Escalate to Admin',
@@ -66,6 +72,25 @@ const actionConfig: Record<ActionType, {
     buttonVariant: 'default',
     icon: ArrowUpCircle,
     requiresConfirm: false,
+    isTerminal: false,
+  },
+  add_note: {
+    title: 'Add Review Note',
+    description: 'Add a note to the account review history.',
+    buttonLabel: 'Add Note',
+    buttonVariant: 'secondary',
+    icon: MessageSquarePlus,
+    requiresConfirm: false,
+    isTerminal: false,
+  },
+  close_flag: {
+    title: 'Close Flag',
+    description: 'Mark the flag as reviewed and closed.',
+    buttonLabel: 'Close Flag',
+    buttonVariant: 'outline',
+    icon: Flag,
+    requiresConfirm: false,
+    isTerminal: false,
   },
 };
 
@@ -119,7 +144,9 @@ export function AccountReviewActions({
     onSuccess: (data) => {
       toast({
         title: 'Action completed',
-        description: `Account status changed to: ${data.new_status}`,
+        description: data.new_status 
+          ? `Account status changed to: ${data.new_status}` 
+          : 'Action recorded successfully',
       });
       queryClient.invalidateQueries({ queryKey: ['review-queue'] });
       queryClient.invalidateQueries({ queryKey: ['account-details', accountId] });
@@ -140,11 +167,6 @@ export function AccountReviewActions({
 
   const handleActionClick = (action: ActionType) => {
     setSelectedAction(action);
-    if (actionConfig[action].requiresConfirm) {
-      // Show reason dialog first
-    } else {
-      // For escalate, still need reason
-    }
   };
 
   const handleSubmit = () => {
@@ -167,20 +189,31 @@ export function AccountReviewActions({
   // Determine which actions are available based on account status and user role
   const availableActions: ActionType[] = [];
   
+  // Risk officers and admins can always add notes
+  if (isAdmin || isRiskOfficer) {
+    availableActions.push('add_note');
+  }
+
   if (accountStatus === 'breached_detected') {
-    if (isAdmin || isRiskOfficer) {
-      availableActions.push('clear_breach');
-    }
-    if (isAdmin) {
-      availableActions.push('confirm_failure');
-    }
+    // Risk officers: reversible actions only
     if (isRiskOfficer && !isAdmin) {
       availableActions.push('escalate');
     }
-  } else if (accountStatus === 'under_review') {
+    // Admins: all actions
     if (isAdmin) {
-      availableActions.push('confirm_failure');
       availableActions.push('clear_breach');
+      availableActions.push('confirm_failure');
+    }
+  } else if (accountStatus === 'under_review') {
+    // Only admins can take terminal actions on escalated accounts
+    if (isAdmin) {
+      availableActions.push('clear_breach');
+      availableActions.push('confirm_failure');
+    }
+  } else if (accountStatus === 'active') {
+    // Risk officers can escalate active accounts for review
+    if (isRiskOfficer && !isAdmin) {
+      availableActions.push('escalate');
     }
   }
 
@@ -188,25 +221,69 @@ export function AccountReviewActions({
     return null;
   }
 
+  // Group actions by type for better UI
+  const terminalActions = availableActions.filter(a => actionConfig[a].isTerminal);
+  const nonTerminalActions = availableActions.filter(a => !actionConfig[a].isTerminal);
+
   return (
     <>
-      <div className="flex flex-wrap gap-2">
-        {availableActions.map((action) => {
-          const config = actionConfig[action];
-          const Icon = config.icon;
-          return (
-            <Button
-              key={action}
-              variant={config.buttonVariant}
-              size="sm"
-              onClick={() => handleActionClick(action)}
-              disabled={reviewMutation.isPending}
-            >
-              <Icon className="h-4 w-4 mr-1" />
-              {config.buttonLabel}
-            </Button>
-          );
-        })}
+      <div className="space-y-3">
+        {/* Permission indicator */}
+        <div className="flex items-center gap-2">
+          <Badge variant={isAdmin ? 'default' : 'secondary'} className="text-xs">
+            {isAdmin ? 'Admin View' : 'Risk Officer View'}
+          </Badge>
+          {isAdmin && (
+            <span className="text-xs text-muted-foreground">Full action permissions</span>
+          )}
+        </div>
+
+        {/* Non-terminal actions (notes, escalate, clear flag) */}
+        {nonTerminalActions.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {nonTerminalActions.map((action) => {
+              const config = actionConfig[action];
+              const Icon = config.icon;
+              return (
+                <Button
+                  key={action}
+                  variant={config.buttonVariant}
+                  size="sm"
+                  onClick={() => handleActionClick(action)}
+                  disabled={reviewMutation.isPending}
+                >
+                  <Icon className="h-4 w-4 mr-1" />
+                  {config.buttonLabel}
+                </Button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Terminal actions (separate row, more prominent warning) */}
+        {terminalActions.length > 0 && (
+          <div className="pt-2 border-t">
+            <p className="text-xs text-muted-foreground mb-2">Irreversible actions (Admin only)</p>
+            <div className="flex flex-wrap gap-2">
+              {terminalActions.map((action) => {
+                const config = actionConfig[action];
+                const Icon = config.icon;
+                return (
+                  <Button
+                    key={action}
+                    variant={config.buttonVariant}
+                    size="sm"
+                    onClick={() => handleActionClick(action)}
+                    disabled={reviewMutation.isPending}
+                  >
+                    <Icon className="h-4 w-4 mr-1" />
+                    {config.buttonLabel}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Reason Dialog */}
