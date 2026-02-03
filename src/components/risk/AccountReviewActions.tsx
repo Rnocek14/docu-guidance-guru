@@ -106,6 +106,8 @@ export function AccountReviewActions({
   const [reason, setReason] = useState('');
   const [notes, setNotes] = useState('');
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  // Idempotency key persists across the entire action flow (click → dialog → confirm → submit)
+  const [pendingIdempotencyKey, setPendingIdempotencyKey] = useState<string | null>(null);
 
   const isAdmin = roles.includes('admin');
   const isRiskOfficer = roles.includes('risk_officer');
@@ -160,6 +162,7 @@ export function AccountReviewActions({
       setSelectedAction(null);
       setReason('');
       setNotes('');
+      setPendingIdempotencyKey(null); // Clear key after successful action
       onActionComplete?.();
     },
     onError: (error: Error) => {
@@ -173,6 +176,8 @@ export function AccountReviewActions({
 
   const handleActionClick = (action: ActionType) => {
     setSelectedAction(action);
+    // Generate idempotency key when action is first selected - reused through entire flow
+    setPendingIdempotencyKey(crypto.randomUUID());
   };
 
   const handleSubmit = () => {
@@ -187,14 +192,13 @@ export function AccountReviewActions({
   };
 
   const executeAction = () => {
-    if (!selectedAction || !reason.trim()) return;
-    // Generate idempotency key once per action execution (protects against double-clicks/retries)
-    const idempotencyKey = crypto.randomUUID();
+    if (!selectedAction || !reason.trim() || !pendingIdempotencyKey) return;
+    // Reuse the idempotency key generated when action was selected (retry-safe)
     reviewMutation.mutate({ 
       action: selectedAction, 
       reason: reason.trim(), 
       notes: notes.trim() || undefined,
-      idempotencyKey,
+      idempotencyKey: pendingIdempotencyKey,
     });
     setShowConfirmDialog(false);
   };
