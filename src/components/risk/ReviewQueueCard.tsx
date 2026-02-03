@@ -8,9 +8,12 @@ import {
   Eye, 
   Flag,
   TrendingDown,
-  User
+  User,
+  Activity
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
+import { getPriorityLabel } from '@/lib/queue-priority';
+import { cn } from '@/lib/utils';
 
 interface QueueAccount {
   id: string;
@@ -22,6 +25,8 @@ interface QueueAccount {
   highest_balance: number;
   created_at: string;
   updated_at: string;
+  last_trade_at?: string | null;
+  last_event_at?: string | null;
   profile?: {
     full_name: string | null;
     email: string;
@@ -33,6 +38,8 @@ interface QueueAccount {
 interface ReviewQueueCardProps {
   account: QueueAccount;
   onViewDetails: (accountId: string) => void;
+  isSelected?: boolean;
+  priorityScore?: number;
 }
 
 const statusConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: typeof Clock }> = {
@@ -42,24 +49,47 @@ const statusConfig: Record<string, { label: string; variant: 'default' | 'second
   payout_requested: { label: 'Payout Requested', variant: 'outline', icon: DollarSign },
 };
 
-export function ReviewQueueCard({ account, onViewDetails }: ReviewQueueCardProps) {
+export function ReviewQueueCard({ account, onViewDetails, isSelected, priorityScore }: ReviewQueueCardProps) {
   const config = statusConfig[account.status] || statusConfig.under_review;
   const StatusIcon = config.icon;
   
   const drawdownPercent = ((account.highest_balance - account.current_balance) / account.highest_balance) * 100;
   const pnlPercent = (account.total_pnl / account.starting_balance) * 100;
 
+  // Get priority label for display
+  const priority = priorityScore !== undefined ? getPriorityLabel(priorityScore) : null;
+  
+  // Calculate recency display
+  const lastActivity = account.last_event_at || account.last_trade_at || account.updated_at;
+  const recencyText = formatDistanceToNow(new Date(lastActivity), { addSuffix: true });
+
   return (
-    <Card className="hover:border-primary/50 transition-colors">
+    <Card 
+      className={cn(
+        "hover:border-primary/50 transition-colors cursor-pointer",
+        isSelected && "ring-2 ring-primary border-primary"
+      )}
+      data-queue-card
+      onClick={() => onViewDetails(account.id)}
+    >
       <CardHeader className="pb-3">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
+        <div className="flex items-start justify-between gap-2">
+          <div className="space-y-1 min-w-0">
             <CardTitle className="text-base flex items-center gap-2">
-              <User className="h-4 w-4 text-muted-foreground" />
-              {account.profile?.full_name || 'Unknown Trader'}
+              <User className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span className="truncate">{account.profile?.full_name || 'Unknown Trader'}</span>
             </CardTitle>
-            <CardDescription className="text-xs">
-              Account #{account.account_number} • {account.profile?.email}
+            <CardDescription className="text-xs flex items-center gap-2 flex-wrap">
+              <span>#{account.account_number}</span>
+              {priority && (
+                <Badge variant={priority.variant} className="text-[10px] px-1.5 py-0">
+                  {priority.label}
+                </Badge>
+              )}
+              <span className="flex items-center gap-1 text-muted-foreground">
+                <Activity className="h-3 w-3" />
+                {recencyText}
+              </span>
             </CardDescription>
           </div>
           <Badge variant={config.variant} className="shrink-0">
@@ -111,7 +141,14 @@ export function ReviewQueueCard({ account, onViewDetails }: ReviewQueueCardProps
           <span className="text-xs text-muted-foreground">
             Updated {format(new Date(account.updated_at), 'MMM d, h:mm a')}
           </span>
-          <Button size="sm" variant="outline" onClick={() => onViewDetails(account.id)}>
+          <Button 
+            size="sm" 
+            variant="outline" 
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewDetails(account.id);
+            }}
+          >
             <Eye className="h-4 w-4 mr-1" />
             Review
           </Button>

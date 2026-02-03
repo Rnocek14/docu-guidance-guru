@@ -1,8 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Info, AlertTriangle, TrendingUp, Calendar, Clock } from 'lucide-react';
-import { format, differenceInDays } from 'date-fns';
+import { Info, AlertTriangle, TrendingUp, Calendar, Clock, Activity } from 'lucide-react';
+import { format, differenceInDays, formatDistanceToNow } from 'date-fns';
 
 interface RuleSnapshot {
   max_daily_loss_percent: number;
@@ -32,15 +32,25 @@ interface ReviewBriefProps {
     daily_pnl: number;
     trading_days_count: number;
     created_at: string;
+    last_trade_at?: string | null;
     rule_snapshot: RuleSnapshot | null;
   };
   violations: Violation[];
   flagsCount: number;
+  lastEventAt?: string | null;
 }
 
-export function ReviewBrief({ account, violations, flagsCount }: ReviewBriefProps) {
+export function ReviewBrief({ account, violations, flagsCount, lastEventAt }: ReviewBriefProps) {
   const ruleSnapshot = account.rule_snapshot;
   const accountAge = differenceInDays(new Date(), new Date(account.created_at));
+  
+  // Recency calculations
+  const lastTradeRecency = account.last_trade_at 
+    ? formatDistanceToNow(new Date(account.last_trade_at), { addSuffix: true })
+    : 'Never';
+  const lastEventRecency = lastEventAt
+    ? formatDistanceToNow(new Date(lastEventAt), { addSuffix: true })
+    : 'No events';
   
   // Calculate metrics
   const drawdownPercent = ((account.highest_balance - account.current_balance) / account.highest_balance) * 100;
@@ -115,6 +125,20 @@ export function ReviewBrief({ account, violations, flagsCount }: ReviewBriefProp
             <span className={`font-medium ${drawdownPercent > 8 ? 'text-destructive' : ''}`}>
               {drawdownPercent.toFixed(2)}%
             </span>
+          </div>
+        </div>
+
+        {/* Recency info */}
+        <div className="flex items-center gap-4 p-2 bg-muted/30 rounded text-xs">
+          <div className="flex items-center gap-1.5">
+            <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground">Last trade:</span>
+            <span className="font-medium">{lastTradeRecency}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground">Last event:</span>
+            <span className="font-medium">{lastEventRecency}</span>
           </div>
         </div>
 
