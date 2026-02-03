@@ -171,6 +171,11 @@ export function AccountReviewActions({
         description: error.message,
         variant: 'destructive',
       });
+      // Clear state on error so user can retry with a fresh key
+      setSelectedAction(null);
+      setReason('');
+      setNotes('');
+      setPendingIdempotencyKey(null);
     },
   });
 
@@ -304,7 +309,15 @@ export function AccountReviewActions({
       </div>
 
       {/* Reason Dialog */}
-      <Dialog open={selectedAction !== null && !showConfirmDialog} onOpenChange={(open) => !open && setSelectedAction(null)}>
+      <Dialog open={selectedAction !== null && !showConfirmDialog} onOpenChange={(open) => {
+        if (!open) {
+          // Clear all state on dialog close/cancel
+          setSelectedAction(null);
+          setReason('');
+          setNotes('');
+          setPendingIdempotencyKey(null);
+        }
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -341,7 +354,12 @@ export function AccountReviewActions({
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedAction(null)}>
+            <Button variant="outline" onClick={() => {
+              setSelectedAction(null);
+              setReason('');
+              setNotes('');
+              setPendingIdempotencyKey(null);
+            }}>
               Cancel
             </Button>
             <Button 
@@ -357,7 +375,16 @@ export function AccountReviewActions({
       </Dialog>
 
       {/* Confirmation Dialog for destructive actions */}
-      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+      <AlertDialog open={showConfirmDialog} onOpenChange={(open) => {
+        setShowConfirmDialog(open);
+        if (!open) {
+          // Clear all state on confirm dialog cancel
+          setSelectedAction(null);
+          setReason('');
+          setNotes('');
+          setPendingIdempotencyKey(null);
+        }
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
