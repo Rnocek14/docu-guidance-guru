@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.ingest-trade]
 verify_jwt = false
+
+[functions.review-actions]
+verify_jwt = false

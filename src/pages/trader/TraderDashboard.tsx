@@ -1,11 +1,13 @@
+import { Link } from 'react-router-dom';
 import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, TrendingDown, AlertTriangle, Target, Calendar, DollarSign } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertTriangle, Target, Calendar, DollarSign, Eye } from 'lucide-react';
 import type { Account, Cohort } from '@/lib/types';
 
 export default function TraderDashboard() {
@@ -217,10 +219,20 @@ export default function TraderDashboard() {
             {/* Account status */}
             <Card>
               <CardHeader>
-                <CardTitle>Account Status</CardTitle>
-                <CardDescription>
-                  Account #{activeAccount.account_number}
-                </CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Account Status</CardTitle>
+                    <CardDescription>
+                      Account #{activeAccount.account_number}
+                    </CardDescription>
+                  </div>
+                  <Button asChild size="sm" variant="outline">
+                    <Link to={`/trader/accounts/${activeAccount.id}`}>
+                      <Eye className="h-4 w-4 mr-2" />
+                      View Details
+                    </Link>
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="flex items-center gap-4">
