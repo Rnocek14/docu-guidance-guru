@@ -15,6 +15,7 @@ import { format, formatDistanceToNow } from 'date-fns';
 import { getPriorityLabel } from '@/lib/queue-priority';
 import { cn } from '@/lib/utils';
 import { QueueCardSummary } from './QueueCardSummary';
+import { QueueCardActions } from './QueueCardActions';
 
 interface Violation {
   rule_type: string;
@@ -47,6 +48,7 @@ interface QueueAccount {
 interface ReviewQueueCardProps {
   account: QueueAccount;
   onViewDetails: (accountId: string) => void;
+  onActionComplete?: () => void;
   isSelected?: boolean;
   priorityScore?: number;
 }
@@ -58,7 +60,7 @@ const statusConfig: Record<string, { label: string; variant: 'default' | 'second
   payout_requested: { label: 'Payout Requested', variant: 'outline', icon: DollarSign },
 };
 
-export function ReviewQueueCard({ account, onViewDetails, isSelected, priorityScore }: ReviewQueueCardProps) {
+export function ReviewQueueCard({ account, onViewDetails, onActionComplete, isSelected, priorityScore }: ReviewQueueCardProps) {
   const config = statusConfig[account.status] || statusConfig.under_review;
   const StatusIcon = config.icon;
   
@@ -101,10 +103,19 @@ export function ReviewQueueCard({ account, onViewDetails, isSelected, prioritySc
               </span>
             </CardDescription>
           </div>
-          <Badge variant={config.variant} className="shrink-0">
-            <StatusIcon className="h-3 w-3 mr-1" />
-            {config.label}
-          </Badge>
+          <div className="flex items-center gap-1 shrink-0">
+            <Badge variant={config.variant}>
+              <StatusIcon className="h-3 w-3 mr-1" />
+              {config.label}
+            </Badge>
+            <QueueCardActions
+              accountId={account.id}
+              accountNumber={account.account_number}
+              accountStatus={account.status}
+              flagsCount={account.flags_count}
+              onActionComplete={onActionComplete}
+            />
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
