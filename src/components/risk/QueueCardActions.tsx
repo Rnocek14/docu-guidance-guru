@@ -50,7 +50,7 @@ interface ActionConfig {
   adminOnly: boolean;
 }
 
-const actionConfig: Record<ActionType, ActionConfig> = {
+const actionConfig: Record<ActionType, ActionConfig & { requiresConfirm?: boolean }> = {
   escalate: {
     label: 'Escalate to Admin',
     icon: ArrowUpCircle,
@@ -74,12 +74,14 @@ const actionConfig: Record<ActionType, ActionConfig> = {
     icon: CheckCircle,
     isTerminal: false,
     adminOnly: true,
+    requiresConfirm: true, // Impactful action requiring confirmation
   },
   confirm_failure: {
     label: 'Confirm Failure',
     icon: XCircle,
     isTerminal: true,
     adminOnly: true,
+    requiresConfirm: true,
   },
 };
 
@@ -88,6 +90,7 @@ interface QueueCardActionsProps {
   accountNumber: string;
   accountStatus: string;
   flagsCount: number;
+  singleFlagId?: string | null;
   onActionComplete?: () => void;
 }
 
@@ -96,6 +99,7 @@ export function QueueCardActions({
   accountNumber,
   accountStatus,
   flagsCount,
+  singleFlagId,
   onActionComplete,
 }: QueueCardActionsProps) {
   const { roles } = useAuth();
@@ -110,11 +114,12 @@ export function QueueCardActions({
   const isRiskOfficer = roles.includes('risk_officer');
 
   const reviewMutation = useMutation({
-    mutationFn: async ({ action, reason, notes, idempotencyKey }: { 
+    mutationFn: async ({ action, reason, notes, idempotencyKey, flagId }: { 
       action: ActionType; 
       reason: string; 
       notes?: string;
       idempotencyKey: string;
+      flagId?: string;
     }) => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
@@ -135,6 +140,7 @@ export function QueueCardActions({
             reason,
             notes,
             idempotency_key: idempotencyKey,
+            ...(flagId && { flag_id: flagId }),
           }),
         }
       );
@@ -183,7 +189,8 @@ export function QueueCardActions({
     if (!selectedAction || !reason.trim()) return;
     
     const config = actionConfig[selectedAction];
-    if (config.isTerminal) {
+    // Show confirm dialog for terminal actions OR actions that require confirmation
+    if (config.isTerminal || config.requiresConfirm) {
       setShowConfirmDialog(true);
     } else {
       executeAction();
@@ -197,6 +204,7 @@ export function QueueCardActions({
       reason: reason.trim(), 
       notes: notes.trim() || undefined,
       idempotencyKey: pendingIdempotencyKey,
+      flagId: selectedAction === 'close_flag' ? (singleFlagId || undefined) : undefined,
     });
     setShowConfirmDialog(false);
   };
@@ -243,8 +251,9 @@ export function QueueCardActions({
     return null;
   }
 
-  const nonTerminalActions = availableActions.filter(a => !actionConfig[a].isTerminal);
-  const terminalActions = availableActions.filter(a => actionConfig[a].isTerminal);
+  // Split actions: safe ones vs those requiring confirmation (admin-only / terminal)
+  const safeActions = availableActions.filter(a => !actionConfig[a].adminOnly && !actionConfig[a].isTerminal);
+  const adminActions = availableActions.filter(a => actionConfig[a].adminOnly);
 
   return (
     <>
@@ -261,7 +270,7 @@ export function QueueCardActions({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          {nonTerminalActions.map((action) => {
+          {safeActions.map((action) => {
             const config = actionConfig[action];
             const Icon = config.icon;
             return (
@@ -275,18 +284,23 @@ export function QueueCardActions({
             );
           })}
           
-          {terminalActions.length > 0 && nonTerminalActions.length > 0 && (
-            <DropdownMenuSeparator />
+          {adminActions.length > 0 && safeActions.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                Admin Only
+              </div>
+            </>
           )}
           
-          {terminalActions.map((action) => {
+          {adminActions.map((action) => {
             const config = actionConfig[action];
             const Icon = config.icon;
             return (
               <DropdownMenuItem
                 key={action}
                 onClick={(e) => handleActionClick(action, e)}
-                className="text-destructive focus:text-destructive"
+                className={config.isTerminal ? "text-destructive focus:text-destructive" : ""}
               >
                 <Icon className="h-4 w-4 mr-2" />
                 {config.label}
@@ -362,6 +376,12 @@ export function QueueCardActions({
                 <>
                   This will permanently mark account #{accountNumber} as <strong>failed</strong>. 
                   This action cannot be undone.
+                </>
+              )}
+              {selectedAction === 'clear_breach' && (
+                <>
+                  This will clear the breach on account #{accountNumber} and restore it to <strong>active</strong> status.
+                  The trader will be able to continue trading.
                 </>
               )}
             </AlertDialogDescription>

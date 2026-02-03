@@ -43,6 +43,7 @@ interface QueueAccount {
   violations_count: number;
   violations?: Violation[];
   payout_amount?: number;
+  single_flag_id?: string | null;
 }
 
 interface ReviewQueueCardProps {
@@ -113,6 +114,7 @@ export function ReviewQueueCard({ account, onViewDetails, onActionComplete, isSe
               accountNumber={account.account_number}
               accountStatus={account.status}
               flagsCount={account.flags_count}
+              singleFlagId={account.single_flag_id}
               onActionComplete={onActionComplete}
             />
           </div>
