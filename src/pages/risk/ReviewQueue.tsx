@@ -94,12 +94,12 @@ export default function ReviewQueue() {
       const accountIds = data.map(a => a.id);
       const userIds = [...new Set(data.map(a => a.user_id))];
 
-      const [profilesRes, flagsRes, violationsRes, eventsRes] = await Promise.all([
+      const [profilesRes, flagsRes, violationsRes, lastEventsRes] = await Promise.all([
         supabase.from('profiles').select('user_id, full_name, email').in('user_id', userIds),
         supabase.from('flags').select('account_id').in('account_id', accountIds).eq('status', 'pending'),
         supabase.from('violations').select('account_id, rule_type, actual_value, rule_threshold').in('account_id', accountIds).is('confirmed_at', null),
-        // Fetch last event time for each account
-        supabase.from('account_events').select('account_id, created_at').in('account_id', accountIds).order('created_at', { ascending: false }),
+        // Use the view for efficient last_event lookup (1 row per account)
+        supabase.from('account_last_event').select('account_id, last_event_at').in('account_id', accountIds),
       ]);
 
       const profilesMap = new Map(profilesRes.data?.map(p => [p.user_id, p]) || []);
@@ -117,11 +117,11 @@ export default function ReviewQueue() {
         violationsMap.set(v.account_id, existing);
       });
 
-      // Get last event time per account (first occurrence in desc order)
+      // Get last event time per account from the view (already aggregated)
       const lastEventMap = new Map<string, string>();
-      eventsRes.data?.forEach(e => {
-        if (!lastEventMap.has(e.account_id)) {
-          lastEventMap.set(e.account_id, e.created_at);
+      lastEventsRes.data?.forEach(e => {
+        if (e.last_event_at) {
+          lastEventMap.set(e.account_id, e.last_event_at);
         }
       });
 

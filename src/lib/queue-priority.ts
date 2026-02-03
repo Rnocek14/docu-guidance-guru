@@ -61,7 +61,12 @@ export function calculatePriorityScore(
   // Violation modifiers
   if (violations && violations.length > 0) {
     // Check for total drawdown breach (more severe than daily loss)
-    const hasDrawdownBreach = violations.some(v => v.rule_type === 'max_total_drawdown');
+    // Support multiple possible naming conventions
+    const hasDrawdownBreach = violations.some(v => 
+      v.rule_type === 'max_total_drawdown' || 
+      v.rule_type === 'total_drawdown' || 
+      v.rule_type === 'max_drawdown'
+    );
     if (hasDrawdownBreach) {
       score += 5;
     }
