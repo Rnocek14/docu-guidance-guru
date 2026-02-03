@@ -1,33 +1,64 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, RefObject } from 'react';
 
 interface UseKeyboardNavigationProps<T> {
   items: T[];
   onSelect?: (item: T, index: number) => void;
   enabled?: boolean;
+  searchInputRef?: RefObject<HTMLInputElement>;
+  onSearchClear?: () => void;
+  hasSearchText?: boolean;
 }
 
 /**
  * Hook for keyboard navigation in lists
  * J/K or Arrow keys to navigate, Enter to select
+ * "/" to focus search, Esc to clear search or selection
  */
 export function useKeyboardNavigation<T>({
   items,
   onSelect,
   enabled = true,
+  searchInputRef,
+  onSearchClear,
+  hasSearchText = false,
 }: UseKeyboardNavigationProps<T>) {
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    if (!enabled || items.length === 0) return;
+    if (!enabled) return;
 
-    // Don't handle if focus is on an input/textarea
+    // Don't handle if focus is on an input/textarea (except for Esc and /)
     const target = event.target as HTMLElement;
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+    const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+    const key = event.key.toLowerCase();
+
+    // "/" focuses search from anywhere (except when already in search)
+    if (key === '/' && !isInInput && searchInputRef?.current) {
+      event.preventDefault();
+      searchInputRef.current.focus();
       return;
     }
 
-    const key = event.key.toLowerCase();
-    
+    // Esc: clear search if has text, otherwise clear selection, also blur search
+    if (key === 'escape') {
+      event.preventDefault();
+      if (hasSearchText && onSearchClear) {
+        onSearchClear();
+      } else {
+        setSelectedIndex(-1);
+      }
+      // Blur search input if focused
+      if (isInInput && searchInputRef?.current) {
+        searchInputRef.current.blur();
+      }
+      return;
+    }
+
+    // Don't handle navigation if in input
+    if (isInInput) return;
+    if (items.length === 0) return;
+
     switch (key) {
       case 'j':
       case 'arrowdown':
@@ -51,11 +82,8 @@ export function useKeyboardNavigation<T>({
           onSelect?.(items[selectedIndex], selectedIndex);
         }
         break;
-      case 'escape':
-        setSelectedIndex(-1);
-        break;
     }
-  }, [enabled, items, selectedIndex, onSelect]);
+  }, [enabled, items, selectedIndex, onSelect, searchInputRef, onSearchClear, hasSearchText]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);

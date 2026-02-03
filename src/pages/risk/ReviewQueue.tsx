@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
 import {
   Sheet,
   SheetContent,
@@ -22,7 +23,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { AlertTriangle, Clock, DollarSign, RefreshCw, Users, Keyboard } from 'lucide-react';
+import { AlertTriangle, Clock, DollarSign, RefreshCw, Users, Keyboard, Search, X } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Violation } from '@/lib/types';
 import { sortByPriority, calculatePriorityScore, getPriorityLabel } from '@/lib/queue-priority';
@@ -70,7 +71,9 @@ export default function ReviewQueue() {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const gridRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch accounts needing review
   const { data: accounts, isLoading, refetch } = useQuery({
@@ -154,11 +157,28 @@ export default function ReviewQueue() {
     },
   });
 
+  // Client-side search filter
+  const filteredAccounts = useMemo(() => {
+    if (!accounts || !searchQuery.trim()) return accounts || [];
+    
+    const query = searchQuery.toLowerCase().trim();
+    return accounts.filter(account => 
+      account.account_number.toLowerCase().includes(query) ||
+      account.profile?.full_name?.toLowerCase().includes(query) ||
+      account.profile?.email?.toLowerCase().includes(query)
+    );
+  }, [accounts, searchQuery]);
+
+  const clearSearch = () => setSearchQuery('');
+
   // Keyboard navigation
   const { selectedIndex, setSelectedIndex } = useKeyboardNavigation({
-    items: accounts || [],
+    items: filteredAccounts,
     onSelect: (account) => handleViewDetails(account.id),
     enabled: selectedAccountId === null, // Disable when sheet is open
+    searchInputRef,
+    onSearchClear: clearSearch,
+    hasSearchText: searchQuery.length > 0,
   });
 
   // Scroll selected card into view
@@ -236,6 +256,28 @@ export default function ReviewQueue() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Search input */}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search... (press /)"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 pr-8 h-9 w-48 md:w-64"
+              />
+              {searchQuery && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6"
+                  onClick={clearSearch}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -244,10 +286,11 @@ export default function ReviewQueue() {
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
                 <p className="font-medium mb-1">Keyboard shortcuts</p>
+                <p>/ — Focus search</p>
                 <p>J/↓ — Next account</p>
                 <p>K/↑ — Previous account</p>
                 <p>Enter — Open selected</p>
-                <p>Esc — Clear selection</p>
+                <p>Esc — Clear search/selection</p>
               </TooltipContent>
             </Tooltip>
             <Button variant="outline" size="sm" onClick={() => refetch()}>
@@ -258,19 +301,28 @@ export default function ReviewQueue() {
         </div>
 
         {/* Filter tabs */}
-        <Tabs value={statusFilter} onValueChange={setStatusFilter}>
-          <TabsList>
-            {statusFilters.map((filter) => (
-              <TabsTrigger key={filter.value} value={filter.value} className="gap-2">
-                <filter.icon className="h-4 w-4" />
-                {filter.label}
-                <Badge variant="secondary" className="ml-1 text-xs">
-                  {queueCounts[filter.value as keyof typeof queueCounts] || 0}
-                </Badge>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Tabs value={statusFilter} onValueChange={setStatusFilter}>
+            <TabsList>
+              {statusFilters.map((filter) => (
+                <TabsTrigger key={filter.value} value={filter.value} className="gap-2">
+                  <filter.icon className="h-4 w-4" />
+                  {filter.label}
+                  <Badge variant="secondary" className="ml-1 text-xs">
+                    {queueCounts[filter.value as keyof typeof queueCounts] || 0}
+                  </Badge>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          
+          {/* Search results indicator */}
+          {searchQuery && (
+            <p className="text-sm text-muted-foreground">
+              Showing {filteredAccounts.length} of {accounts?.length || 0} accounts
+            </p>
+          )}
+        </div>
 
         {/* Queue list */}
         {isLoading ? (
@@ -279,9 +331,9 @@ export default function ReviewQueue() {
               <Skeleton key={i} className="h-48" />
             ))}
           </div>
-        ) : accounts && accounts.length > 0 ? (
+        ) : filteredAccounts.length > 0 ? (
           <div ref={gridRef} className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {accounts.map((account, index) => (
+            {filteredAccounts.map((account, index) => (
               <ReviewQueueCard
                 key={account.id}
                 account={account}
@@ -291,6 +343,15 @@ export default function ReviewQueue() {
               />
             ))}
           </div>
+        ) : searchQuery ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>No Matches</CardTitle>
+              <CardDescription>
+                No accounts match "{searchQuery}". Try a different search term.
+              </CardDescription>
+            </CardHeader>
+          </Card>
         ) : (
           <Card>
             <CardHeader>
