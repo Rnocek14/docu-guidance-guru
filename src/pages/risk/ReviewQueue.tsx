@@ -169,7 +169,10 @@ export default function ReviewQueue() {
     );
   }, [accounts, searchQuery]);
 
-  const clearSearch = () => setSearchQuery('');
+  const clearSearch = () => {
+    setSearchQuery('');
+    setSelectedIndex(-1); // Reset selection when clearing search
+  };
 
   // Keyboard navigation
   const { selectedIndex, setSelectedIndex } = useKeyboardNavigation({
@@ -338,6 +341,7 @@ export default function ReviewQueue() {
                 key={account.id}
                 account={account}
                 onViewDetails={handleViewDetails}
+                onActionComplete={() => refetch()}
                 isSelected={index === selectedIndex}
                 priorityScore={account.priority_score}
               />
