@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -22,8 +22,11 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { AlertTriangle, Clock, DollarSign, RefreshCw, Users } from 'lucide-react';
+import { AlertTriangle, Clock, DollarSign, RefreshCw, Users, Keyboard } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Violation } from '@/lib/types';
+import { sortByPriority, calculatePriorityScore, getPriorityLabel } from '@/lib/queue-priority';
+import { useKeyboardNavigation } from '@/hooks/use-keyboard-navigation';
 
 interface RuleSnapshot {
   cohort_id: string;
@@ -51,6 +54,9 @@ interface QueueAccount {
   updated_at: string;
   user_id: string;
   rule_snapshot: RuleSnapshot | null;
+  last_trade_at: string | null;
+  last_event_at?: string | null;
+  priority_score?: number;
 }
 
 const statusFilters = [
@@ -64,6 +70,7 @@ export default function ReviewQueue() {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   // Fetch accounts needing review
   const { data: accounts, isLoading, refetch } = useQuery({
@@ -87,32 +94,70 @@ export default function ReviewQueue() {
       const accountIds = data.map(a => a.id);
       const userIds = [...new Set(data.map(a => a.user_id))];
 
-      const [profilesRes, flagsRes, violationsRes] = await Promise.all([
+      const [profilesRes, flagsRes, violationsRes, eventsRes] = await Promise.all([
         supabase.from('profiles').select('user_id, full_name, email').in('user_id', userIds),
         supabase.from('flags').select('account_id').in('account_id', accountIds).eq('status', 'pending'),
-        supabase.from('violations').select('account_id').in('account_id', accountIds).is('confirmed_at', null),
+        supabase.from('violations').select('account_id, rule_type, actual_value, rule_threshold').in('account_id', accountIds).is('confirmed_at', null),
+        // Fetch last event time for each account
+        supabase.from('account_events').select('account_id, created_at').in('account_id', accountIds).order('created_at', { ascending: false }),
       ]);
 
       const profilesMap = new Map(profilesRes.data?.map(p => [p.user_id, p]) || []);
       const flagsCounts = new Map<string, number>();
       const violationsCounts = new Map<string, number>();
+      const violationsMap = new Map<string, typeof violationsRes.data>();
 
       flagsRes.data?.forEach(f => {
         flagsCounts.set(f.account_id, (flagsCounts.get(f.account_id) || 0) + 1);
       });
       violationsRes.data?.forEach(v => {
         violationsCounts.set(v.account_id, (violationsCounts.get(v.account_id) || 0) + 1);
+        const existing = violationsMap.get(v.account_id) || [];
+        existing.push(v);
+        violationsMap.set(v.account_id, existing);
       });
 
-      return data.map(account => ({
+      // Get last event time per account (first occurrence in desc order)
+      const lastEventMap = new Map<string, string>();
+      eventsRes.data?.forEach(e => {
+        if (!lastEventMap.has(e.account_id)) {
+          lastEventMap.set(e.account_id, e.created_at);
+        }
+      });
+
+      const enrichedAccounts = data.map(account => ({
         ...account,
         rule_snapshot: account.rule_snapshot as unknown as RuleSnapshot | null,
         profile: profilesMap.get(account.user_id),
         flags_count: flagsCounts.get(account.id) || 0,
         violations_count: violationsCounts.get(account.id) || 0,
+        last_event_at: lastEventMap.get(account.id) || null,
       }));
+
+      // Calculate priority scores and sort
+      const withPriority = enrichedAccounts.map(account => ({
+        ...account,
+        priority_score: calculatePriorityScore(account, violationsMap.get(account.id)),
+      }));
+
+      return sortByPriority(withPriority, violationsMap as unknown as Map<string, { rule_type: string; actual_value: number | null; rule_threshold: number | null }[]>);
     },
   });
+
+  // Keyboard navigation
+  const { selectedIndex, setSelectedIndex } = useKeyboardNavigation({
+    items: accounts || [],
+    onSelect: (account) => handleViewDetails(account.id),
+    enabled: selectedAccountId === null, // Disable when sheet is open
+  });
+
+  // Scroll selected card into view
+  useEffect(() => {
+    if (selectedIndex >= 0 && gridRef.current) {
+      const cards = gridRef.current.querySelectorAll('[data-queue-card]');
+      cards[selectedIndex]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedIndex]);
 
   // Fetch selected account details
   const { data: selectedAccount } = useQuery({
@@ -120,9 +165,10 @@ export default function ReviewQueue() {
     queryFn: async () => {
       if (!selectedAccountId) return null;
 
-      const [accountRes, violationsRes] = await Promise.all([
+      const [accountRes, violationsRes, lastEventRes] = await Promise.all([
         supabase.from('accounts').select('*').eq('id', selectedAccountId).single(),
         supabase.from('violations').select('*').eq('account_id', selectedAccountId).order('detected_at', { ascending: false }),
+        supabase.from('account_events').select('created_at').eq('account_id', selectedAccountId).order('created_at', { ascending: false }).limit(1),
       ]);
 
       if (accountRes.error) throw accountRes.error;
@@ -147,6 +193,7 @@ export default function ReviewQueue() {
         violations: violationsRes.data as Violation[],
         profile,
         flags_count: flagsCount || 0,
+        last_event_at: lastEventRes.data?.[0]?.created_at || null,
       };
     },
     enabled: !!selectedAccountId,
@@ -175,13 +222,29 @@ export default function ReviewQueue() {
           <div>
             <h2 className="text-2xl font-bold tracking-tight">Review Queue</h2>
             <p className="text-muted-foreground">
-              Accounts requiring human review. All actions are logged.
+              Accounts requiring human review. Sorted by severity.
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <Keyboard className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                <p className="font-medium mb-1">Keyboard shortcuts</p>
+                <p>J/↓ — Next account</p>
+                <p>K/↑ — Previous account</p>
+                <p>Enter — Open selected</p>
+                <p>Esc — Clear selection</p>
+              </TooltipContent>
+            </Tooltip>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {/* Filter tabs */}
@@ -207,12 +270,14 @@ export default function ReviewQueue() {
             ))}
           </div>
         ) : accounts && accounts.length > 0 ? (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {accounts.map((account) => (
+          <div ref={gridRef} className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {accounts.map((account, index) => (
               <ReviewQueueCard
                 key={account.id}
                 account={account}
                 onViewDetails={handleViewDetails}
+                isSelected={index === selectedIndex}
+                priorityScore={account.priority_score}
               />
             ))}
           </div>
@@ -267,6 +332,7 @@ export default function ReviewQueue() {
                     }}
                     violations={selectedAccount.violations || []}
                     flagsCount={selectedAccount.flags_count}
+                    lastEventAt={selectedAccount.last_event_at}
                   />
 
                   {/* Breach Explainer */}
