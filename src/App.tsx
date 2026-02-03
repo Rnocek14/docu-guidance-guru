@@ -16,8 +16,10 @@ import Dashboard from "./pages/Dashboard";
 // Role-specific dashboards
 import TraderDashboard from "./pages/trader/TraderDashboard";
 import RiskDashboard from "./pages/risk/RiskDashboard";
+import ReviewQueue from "./pages/risk/ReviewQueue";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import SupportDashboard from "./pages/support/SupportDashboard";
+import AccountDetails from "./pages/trader/AccountDetails";
 
 const queryClient = new QueryClient();
 
@@ -54,6 +56,14 @@ const App = () => (
               }
             />
             <Route
+              path="/trader/accounts/:id"
+              element={
+                <ProtectedRoute allowedRoles={['trader', 'admin']}>
+                  <AccountDetails />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/trader/*"
               element={
                 <ProtectedRoute allowedRoles={['trader', 'admin']}>
@@ -68,6 +78,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['risk_officer', 'admin']}>
                   <RiskDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/risk/queue"
+              element={
+                <ProtectedRoute allowedRoles={['risk_officer', 'admin']}>
+                  <ReviewQueue />
                 </ProtectedRoute>
               }
             />
