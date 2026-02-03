@@ -42,6 +42,30 @@ const STATE_TRANSITIONS: Record<string, { from: string[]; to: string }> = {
   },
 }
 
+// Helper: Idempotent insert for audit_logs (ignores duplicates on account_id + request_id)
+// deno-lint-ignore no-explicit-any
+async function insertAuditLog(supabase: any, data: any) {
+  const { error } = await supabase
+    .from('audit_logs')
+    .upsert(data, { 
+      onConflict: 'account_id,request_id',
+      ignoreDuplicates: true 
+    })
+  if (error) console.error('Audit log insert error:', error)
+}
+
+// Helper: Idempotent insert for account_events (ignores duplicates on account_id + request_id)
+// deno-lint-ignore no-explicit-any
+async function insertAccountEvent(supabase: any, data: any) {
+  const { error } = await supabase
+    .from('account_events')
+    .upsert(data, { 
+      onConflict: 'account_id,request_id',
+      ignoreDuplicates: true 
+    })
+  if (error) console.error('Account event insert error:', error)
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -143,9 +167,17 @@ Deno.serve(async (req) => {
       )
     }
 
+    // Use client-provided idempotency key or generate one
+    // Client-provided keys enable true retry safety
     const requestId = body.idempotency_key || crypto.randomUUID()
     const previousStatus = account.status
-    let result: Record<string, unknown> = { success: true, account_id: body.account_id, action: body.action, request_id: requestId }
+    let result: Record<string, unknown> = { 
+      success: true, 
+      account_id: body.account_id, 
+      action: body.action, 
+      request_id: requestId,
+      idempotent: !!body.idempotency_key // Let client know if their key was used
+    }
 
     switch (body.action) {
       case 'confirm_failure':
@@ -182,8 +214,8 @@ Deno.serve(async (req) => {
         // Determine audit action type
         const auditAction = body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed'
 
-        // Create audit log
-        await supabaseAdmin.from('audit_logs').insert({
+        // Create audit log (idempotent)
+        await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
           action: auditAction,
@@ -198,14 +230,14 @@ Deno.serve(async (req) => {
           },
         })
 
-        // Create trader-visible event
+        // Create trader-visible event (idempotent)
         const eventExplanations: Record<string, string> = {
           confirm_failure: `Your account has been reviewed and the breach has been confirmed. Reason: ${body.reason}`,
           clear_breach: `The detected breach has been cleared after review. Your account is now active. Reason: ${body.reason}`,
           escalate: `Your account has been escalated for additional review.`,
         }
 
-        await supabaseAdmin.from('account_events').insert({
+        await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
           event_type: body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed',
           request_id: requestId,
@@ -236,11 +268,11 @@ Deno.serve(async (req) => {
       }
 
       case 'add_note': {
-        // Notes are audit-only, no state change
-        await supabaseAdmin.from('audit_logs').insert({
+        // Notes are audit-only, no state change (idempotent)
+        await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
-          action: 'status_changed', // Using existing enum, but details clarify it's a note
+          action: 'status_changed',
           request_id: requestId,
           reason: body.reason || 'Review note added',
           details: {
@@ -271,14 +303,14 @@ Deno.serve(async (req) => {
             review_notes: body.notes || body.reason,
           })
           .eq('id', body.flag_id)
-          .eq('account_id', body.account_id) // Ensure flag belongs to this account
+          .eq('account_id', body.account_id)
 
         if (flagError) {
           throw new Error(`Failed to close flag: ${flagError.message}`)
         }
 
-        // Audit the flag closure
-        await supabaseAdmin.from('audit_logs').insert({
+        // Audit the flag closure (idempotent)
+        await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
           action: 'flag_cleared',
@@ -291,8 +323,8 @@ Deno.serve(async (req) => {
           },
         })
 
-        // Create trader-visible event for transparency
-        await supabaseAdmin.from('account_events').insert({
+        // Create trader-visible event for transparency (idempotent)
+        await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
           event_type: 'status_changed',
           request_id: requestId,

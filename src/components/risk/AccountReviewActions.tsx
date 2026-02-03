@@ -111,7 +111,12 @@ export function AccountReviewActions({
   const isRiskOfficer = roles.includes('risk_officer');
 
   const reviewMutation = useMutation({
-    mutationFn: async ({ action, reason, notes }: { action: ActionType; reason: string; notes?: string }) => {
+    mutationFn: async ({ action, reason, notes, idempotencyKey }: { 
+      action: ActionType; 
+      reason: string; 
+      notes?: string;
+      idempotencyKey: string;
+    }) => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
         throw new Error('Not authenticated');
@@ -130,6 +135,7 @@ export function AccountReviewActions({
             account_id: accountId,
             reason,
             notes,
+            idempotency_key: idempotencyKey, // Client-provided key for retry safety
           }),
         }
       );
@@ -182,7 +188,14 @@ export function AccountReviewActions({
 
   const executeAction = () => {
     if (!selectedAction || !reason.trim()) return;
-    reviewMutation.mutate({ action: selectedAction, reason: reason.trim(), notes: notes.trim() || undefined });
+    // Generate idempotency key once per action execution (protects against double-clicks/retries)
+    const idempotencyKey = crypto.randomUUID();
+    reviewMutation.mutate({ 
+      action: selectedAction, 
+      reason: reason.trim(), 
+      notes: notes.trim() || undefined,
+      idempotencyKey,
+    });
     setShowConfirmDialog(false);
   };
 
