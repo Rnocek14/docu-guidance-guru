@@ -138,9 +138,26 @@ Deno.serve(async (req) => {
       )
     }
 
+    // Normalize join result (can be object or array depending on cardinality)
+    const account = Array.isArray(payout.accounts) ? payout.accounts[0] : payout.accounts
+    if (!account) {
+      return new Response(
+        JSON.stringify({ error: 'Account data not found for payout' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Convert amount from Postgres DECIMAL (may be string) to number
+    const amountNum = Number(payout.amount)
+    if (isNaN(amountNum)) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid payout amount' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Validate account is in compatible state for approval
     if (body.action === 'approve') {
-      const account = payout.accounts
       if (!['passed', 'payout_requested', 'payout_under_review'].includes(account.status)) {
         return new Response(
           JSON.stringify({ 
@@ -223,18 +240,19 @@ Deno.serve(async (req) => {
         previous_status: previousStatus,
         new_status: newStatus,
         action_type: body.action,
-        amount: payout.amount,
+        amount: amountNum,
         payment_reference: body.payment_reference || null,
         actor_role: 'admin',
       },
     })
 
-    // Create trader-visible event
+    // Create trader-visible event with properly formatted amount
+    const formattedAmount = amountNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const eventExplanations: Record<PayoutAction, string> = {
-      approve: `Your payout request for $${payout.amount.toLocaleString()} has been approved.`,
+      approve: `Your payout request for $${formattedAmount} has been approved.`,
       reject: `Your payout request has been declined. Reason: ${body.reason}`,
       request_more_info: `Additional information has been requested for your payout. Reason: ${body.reason}`,
-      mark_paid: `Your payout of $${payout.amount.toLocaleString()} has been sent. Reference: ${body.payment_reference}`,
+      mark_paid: `Your payout of $${formattedAmount} has been sent. Reference: ${body.payment_reference}`,
     }
 
     await supabaseAdmin.from('account_events').insert({
@@ -245,7 +263,7 @@ Deno.serve(async (req) => {
         payout_id: body.payout_id,
         previous_status: previousStatus,
         new_status: newStatus,
-        amount: payout.amount,
+        amount: amountNum,
         explanation: eventExplanations[body.action],
         payment_reference: body.payment_reference || null,
         actor_role: 'admin',
