@@ -291,6 +291,19 @@ Deno.serve(async (req) => {
           },
         })
 
+        // Create trader-visible event for transparency
+        await supabaseAdmin.from('account_events').insert({
+          account_id: body.account_id,
+          event_type: 'status_changed',
+          request_id: requestId,
+          event_data: {
+            action_type: 'flag_cleared',
+            flag_id: body.flag_id,
+            explanation: 'A flag on your account has been reviewed and cleared.',
+            actor_role: actorRole,
+          },
+        })
+
         result = { ...result, flag_id: body.flag_id, flag_closed: true }
         break
       }
