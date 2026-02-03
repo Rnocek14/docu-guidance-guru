@@ -26,9 +26,11 @@ export function useKeyboardNavigation<T>({
       return;
     }
 
-    switch (event.key) {
+    const key = event.key.toLowerCase();
+    
+    switch (key) {
       case 'j':
-      case 'ArrowDown':
+      case 'arrowdown':
         event.preventDefault();
         setSelectedIndex(prev => {
           const next = prev < items.length - 1 ? prev + 1 : prev;
@@ -36,20 +38,20 @@ export function useKeyboardNavigation<T>({
         });
         break;
       case 'k':
-      case 'ArrowUp':
+      case 'arrowup':
         event.preventDefault();
         setSelectedIndex(prev => {
           const next = prev > 0 ? prev - 1 : 0;
           return next;
         });
         break;
-      case 'Enter':
+      case 'enter':
         if (selectedIndex >= 0 && selectedIndex < items.length) {
           event.preventDefault();
           onSelect?.(items[selectedIndex], selectedIndex);
         }
         break;
-      case 'Escape':
+      case 'escape':
         setSelectedIndex(-1);
         break;
     }

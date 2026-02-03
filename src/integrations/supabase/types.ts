@@ -592,7 +592,21 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      account_last_event: {
+        Row: {
+          account_id: string | null
+          last_event_at: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_events_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       bootstrap_first_admin: { Args: { _user_id: string }; Returns: boolean }
