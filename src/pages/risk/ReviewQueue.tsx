@@ -356,7 +356,10 @@ export default function ReviewQueue() {
                 key={account.id}
                 account={account}
                 onViewDetails={handleViewDetails}
-                onActionComplete={() => refetch()}
+                onActionComplete={() => {
+                  setSelectedIndex(-1); // Reset selection to avoid jump after resort
+                  refetch();
+                }}
                 isSelected={index === selectedIndex}
                 priorityScore={account.priority_score}
               />

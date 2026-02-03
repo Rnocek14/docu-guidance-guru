@@ -48,9 +48,10 @@ interface ActionConfig {
   icon: typeof CheckCircle;
   isTerminal: boolean;
   adminOnly: boolean;
+  requiresConfirm?: boolean;
 }
 
-const actionConfig: Record<ActionType, ActionConfig & { requiresConfirm?: boolean }> = {
+const actionConfig: Record<ActionType, ActionConfig> = {
   escalate: {
     label: 'Escalate to Admin',
     icon: ArrowUpCircle,
@@ -223,8 +224,8 @@ export function QueueCardActions({
     availableActions.push('add_note');
   }
 
-  // Close flag only if there's exactly 1 pending flag
-  if ((isAdmin || isRiskOfficer) && flagsCount === 1) {
+  // Close flag only available if we have the actual flag id
+  if ((isAdmin || isRiskOfficer) && !!singleFlagId) {
     availableActions.push('close_flag');
   }
 
