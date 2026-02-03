@@ -99,7 +99,8 @@ export default function ReviewQueue() {
 
       const [profilesRes, flagsRes, violationsRes, lastEventsRes, payoutsRes] = await Promise.all([
         supabase.from('profiles').select('user_id, full_name, email').in('user_id', userIds),
-        supabase.from('flags').select('account_id').in('account_id', accountIds).eq('status', 'pending'),
+        // Include flag id for single-flag close action
+        supabase.from('flags').select('id, account_id').in('account_id', accountIds).eq('status', 'pending'),
         supabase.from('violations').select('account_id, rule_type, actual_value, rule_threshold').in('account_id', accountIds).is('confirmed_at', null),
         // Use the view for efficient last_event lookup (1 row per account)
         supabase.from('account_last_event').select('account_id, last_event_at').in('account_id', accountIds),
@@ -109,12 +110,25 @@ export default function ReviewQueue() {
 
       const profilesMap = new Map(profilesRes.data?.map(p => [p.user_id, p]) || []);
       const flagsCounts = new Map<string, number>();
+      // Map single flag id when count is exactly 1
+      const singleFlagIdMap = new Map<string, string>();
+      const flagsByAccount = new Map<string, Array<{ id: string; account_id: string }>>();
       const violationsCounts = new Map<string, number>();
       const violationsMap = new Map<string, typeof violationsRes.data>();
 
       flagsRes.data?.forEach(f => {
         flagsCounts.set(f.account_id, (flagsCounts.get(f.account_id) || 0) + 1);
+        const existing = flagsByAccount.get(f.account_id) || [];
+        existing.push(f);
+        flagsByAccount.set(f.account_id, existing);
       });
+      // Set single flag id for accounts with exactly 1 pending flag
+      flagsByAccount.forEach((flags, accountId) => {
+        if (flags.length === 1) {
+          singleFlagIdMap.set(accountId, flags[0].id);
+        }
+      });
+      
       violationsRes.data?.forEach(v => {
         violationsCounts.set(v.account_id, (violationsCounts.get(v.account_id) || 0) + 1);
         const existing = violationsMap.get(v.account_id) || [];
@@ -141,6 +155,7 @@ export default function ReviewQueue() {
         rule_snapshot: account.rule_snapshot as unknown as RuleSnapshot | null,
         profile: profilesMap.get(account.user_id),
         flags_count: flagsCounts.get(account.id) || 0,
+        single_flag_id: singleFlagIdMap.get(account.id) || null,
         violations_count: violationsCounts.get(account.id) || 0,
         violations: violationsMap.get(account.id) || [],
         last_event_at: lastEventMap.get(account.id) || null,
