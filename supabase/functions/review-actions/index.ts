@@ -62,7 +62,9 @@ Deno.serve(async (req) => {
       )
     }
 
-    const userRole = roleData[0].role
+    const userRoles = roleData.map(r => r.role)
+    const isAdmin = userRoles.includes('admin')
+    const isRiskOfficer = userRoles.includes('risk_officer')
 
     // Parse request body
     const body: ReviewActionRequest = await req.json()
@@ -96,6 +98,13 @@ Deno.serve(async (req) => {
 
     switch (body.action) {
       case 'confirm_failure':
+        // ADMIN ONLY: Terminal action requires admin role
+        if (!isAdmin) {
+          return new Response(
+            JSON.stringify({ error: 'Forbidden: Only admins can confirm failures' }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
         // Can only confirm failure from breached_detected or under_review
         if (!['breached_detected', 'under_review'].includes(account.status)) {
           return new Response(
@@ -168,7 +177,7 @@ Deno.serve(async (req) => {
           new_status: newStatus,
           action_type: body.action,
           notes: body.notes || null,
-          reviewer_role: userRole,
+          reviewer_role: isAdmin ? 'admin' : 'risk_officer',
         },
       })
 
