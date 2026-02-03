@@ -36,6 +36,30 @@ const PAYOUT_TRANSITIONS: Record<PayoutAction, { from: string[]; to: string }> =
   },
 }
 
+// Helper: Idempotent insert for audit_logs (ignores duplicates on account_id + request_id)
+// deno-lint-ignore no-explicit-any
+async function insertAuditLog(supabase: any, data: any) {
+  const { error } = await supabase
+    .from('audit_logs')
+    .upsert(data, { 
+      onConflict: 'account_id,request_id',
+      ignoreDuplicates: true 
+    })
+  if (error) console.error('Audit log insert error:', error)
+}
+
+// Helper: Idempotent insert for account_events (ignores duplicates on account_id + request_id)
+// deno-lint-ignore no-explicit-any
+async function insertAccountEvent(supabase: any, data: any) {
+  const { error } = await supabase
+    .from('account_events')
+    .upsert(data, { 
+      onConflict: 'account_id,request_id',
+      ignoreDuplicates: true 
+    })
+  if (error) console.error('Account event insert error:', error)
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -169,6 +193,7 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Use client-provided idempotency key or generate one
     const requestId = body.idempotency_key || crypto.randomUUID()
     const previousStatus = payout.status
     const newStatus = transition.to
@@ -228,8 +253,8 @@ Deno.serve(async (req) => {
       mark_paid: 'payout_paid',
     }
 
-    // Create audit log
-    await supabaseAdmin.from('audit_logs').insert({
+    // Create audit log (idempotent)
+    await insertAuditLog(supabaseAdmin, {
       user_id: userId,
       account_id: payout.account_id,
       action: auditActions[body.action],
@@ -246,7 +271,7 @@ Deno.serve(async (req) => {
       },
     })
 
-    // Create trader-visible event with properly formatted amount
+    // Create trader-visible event with properly formatted amount (idempotent)
     const formattedAmount = amountNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const eventExplanations: Record<PayoutAction, string> = {
       approve: `Your payout request for $${formattedAmount} has been approved.`,
@@ -255,7 +280,7 @@ Deno.serve(async (req) => {
       mark_paid: `Your payout of $${formattedAmount} has been sent. Reference: ${body.payment_reference}`,
     }
 
-    await supabaseAdmin.from('account_events').insert({
+    await insertAccountEvent(supabaseAdmin, {
       account_id: payout.account_id,
       event_type: eventTypes[body.action],
       request_id: requestId,
@@ -279,6 +304,7 @@ Deno.serve(async (req) => {
         new_status: newStatus,
         action: body.action,
         request_id: requestId,
+        idempotent: !!body.idempotency_key,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
