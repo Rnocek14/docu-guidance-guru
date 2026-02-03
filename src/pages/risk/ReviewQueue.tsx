@@ -94,12 +94,14 @@ export default function ReviewQueue() {
       const accountIds = data.map(a => a.id);
       const userIds = [...new Set(data.map(a => a.user_id))];
 
-      const [profilesRes, flagsRes, violationsRes, lastEventsRes] = await Promise.all([
+      const [profilesRes, flagsRes, violationsRes, lastEventsRes, payoutsRes] = await Promise.all([
         supabase.from('profiles').select('user_id, full_name, email').in('user_id', userIds),
         supabase.from('flags').select('account_id').in('account_id', accountIds).eq('status', 'pending'),
         supabase.from('violations').select('account_id, rule_type, actual_value, rule_threshold').in('account_id', accountIds).is('confirmed_at', null),
         // Use the view for efficient last_event lookup (1 row per account)
         supabase.from('account_last_event').select('account_id, last_event_at').in('account_id', accountIds),
+        // Fetch pending payout amounts for inline summaries
+        supabase.from('payouts').select('account_id, amount').in('account_id', accountIds).in('status', ['pending', 'under_review']),
       ]);
 
       const profilesMap = new Map(profilesRes.data?.map(p => [p.user_id, p]) || []);
@@ -125,13 +127,21 @@ export default function ReviewQueue() {
         }
       });
 
+      // Get payout amounts for inline summaries
+      const payoutAmountMap = new Map<string, number>();
+      payoutsRes.data?.forEach(p => {
+        payoutAmountMap.set(p.account_id, p.amount);
+      });
+
       const enrichedAccounts = data.map(account => ({
         ...account,
         rule_snapshot: account.rule_snapshot as unknown as RuleSnapshot | null,
         profile: profilesMap.get(account.user_id),
         flags_count: flagsCounts.get(account.id) || 0,
         violations_count: violationsCounts.get(account.id) || 0,
+        violations: violationsMap.get(account.id) || [],
         last_event_at: lastEventMap.get(account.id) || null,
+        payout_amount: payoutAmountMap.get(account.id),
       }));
 
       // Calculate priority scores and sort

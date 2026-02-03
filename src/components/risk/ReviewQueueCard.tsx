@@ -14,6 +14,13 @@ import {
 import { format, formatDistanceToNow } from 'date-fns';
 import { getPriorityLabel } from '@/lib/queue-priority';
 import { cn } from '@/lib/utils';
+import { QueueCardSummary } from './QueueCardSummary';
+
+interface Violation {
+  rule_type: string;
+  actual_value: number | null;
+  rule_threshold: number | null;
+}
 
 interface QueueAccount {
   id: string;
@@ -33,6 +40,8 @@ interface QueueAccount {
   };
   flags_count: number;
   violations_count: number;
+  violations?: Violation[];
+  payout_amount?: number;
 }
 
 interface ReviewQueueCardProps {
@@ -120,21 +129,13 @@ export function ReviewQueueCard({ account, onViewDetails, isSelected, prioritySc
           </div>
         </div>
 
-        {/* Flags and violations count */}
-        <div className="flex items-center gap-4 text-sm">
-          {account.flags_count > 0 && (
-            <span className="flex items-center gap-1 text-warning">
-              <Flag className="h-3 w-3" />
-              {account.flags_count} pending flag{account.flags_count !== 1 ? 's' : ''}
-            </span>
-          )}
-          {account.violations_count > 0 && (
-            <span className="flex items-center gap-1 text-destructive">
-              <AlertTriangle className="h-3 w-3" />
-              {account.violations_count} violation{account.violations_count !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
+        {/* Inline summary - the one-liner */}
+        <QueueCardSummary
+          status={account.status}
+          violations={account.violations}
+          flagsCount={account.flags_count}
+          payoutAmount={account.payout_amount}
+        />
 
         {/* Timestamp and action */}
         <div className="flex items-center justify-between pt-2 border-t">
