@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import type { Profile, AppRole } from '@/lib/types';
@@ -25,57 +25,85 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    // Helper to load profile and roles
-    const loadUserData = async (userId: string) => {
+  // Stable function to load user data
+  const loadUserData = useCallback(async (userId: string): Promise<{ profile: Profile | null; roles: AppRole[] }> => {
+    try {
       const [profileRes, rolesRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('user_id', userId).single(),
+        supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
         supabase.from('user_roles').select('role').eq('user_id', userId),
       ]);
       
-      if (isMounted) {
-        setProfile(profileRes.data as Profile | null);
-        setRoles((rolesRes.data || []).map((r) => r.role as AppRole));
+      return {
+        profile: profileRes.data as Profile | null,
+        roles: (rolesRes.data || []).map((r) => r.role as AppRole),
+      };
+    } catch (error) {
+      console.error('Failed to load user data:', error);
+      return { profile: null, roles: [] };
+    }
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const initialize = async () => {
+      try {
+        // Get current session
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        
+        if (!isMounted) return;
+
+        if (currentSession?.user) {
+          setSession(currentSession);
+          setUser(currentSession.user);
+          
+          const userData = await loadUserData(currentSession.user.id);
+          
+          if (isMounted) {
+            setProfile(userData.profile);
+            setRoles(userData.roles);
+          }
+        }
+      } catch (error) {
+        console.error('Auth initialization error:', error);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
-    // Get initial session first
-    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
-      if (!isMounted) return;
-      
-      setSession(initialSession);
-      setUser(initialSession?.user ?? null);
+    initialize();
 
-      if (initialSession?.user) {
-        loadUserData(initialSession.user.id).finally(() => {
-          if (isMounted) setIsLoading(false);
-        });
-      } else {
-        setIsLoading(false);
-      }
-    });
-
-    // Then set up listener for changes
+    // Listen for auth changes AFTER initial load
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
         if (!isMounted) return;
         
-        // Only process actual changes, not initial session
+        // Skip initial session event - we handle it above
         if (event === 'INITIAL_SESSION') return;
-        
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
+
+        console.log('Auth event:', event);
 
         if (newSession?.user) {
-          await loadUserData(newSession.user.id);
+          setSession(newSession);
+          setUser(newSession.user);
+          
+          // Use setTimeout to avoid potential Supabase deadlock
+          setTimeout(async () => {
+            if (!isMounted) return;
+            const userData = await loadUserData(newSession.user.id);
+            if (isMounted) {
+              setProfile(userData.profile);
+              setRoles(userData.roles);
+            }
+          }, 0);
         } else {
+          setSession(null);
+          setUser(null);
           setProfile(null);
           setRoles([]);
         }
-        
-        setIsLoading(false);
       }
     );
 
@@ -83,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [loadUserData]);
 
   const signUp = async (email: string, password: string, fullName?: string) => {
     const { error } = await supabase.auth.signUp({
