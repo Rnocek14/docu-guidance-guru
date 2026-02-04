@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -9,7 +9,6 @@ import { AccountReviewActions } from '@/components/risk/AccountReviewActions';
 import { RuleSnapshotCard } from '@/components/trader/RuleSnapshotCard';
 import { AccountTimeline } from '@/components/trader/AccountTimeline';
 import { BreachExplainer } from '@/components/trader/BreachExplainer';
-import { QueueHotkeyBar } from '@/components/risk/QueueHotkeyBar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -73,8 +72,6 @@ export default function ReviewQueue() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  // Selection stability: anchor by account ID rather than index
-  const [selectedNavAccountId, setSelectedNavAccountId] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -189,34 +186,17 @@ export default function ReviewQueue() {
 
   const clearSearch = () => {
     setSearchQuery('');
-    setSelectedNavAccountId(null);
+    setSelectedIndex(-1); // Reset selection when clearing search
   };
 
-  // Derive selectedIndex from selectedNavAccountId for ID-based stability
-  const selectedIndex = useMemo(() => {
-    if (!selectedNavAccountId || !filteredAccounts?.length) return -1;
-    return filteredAccounts.findIndex(a => a.id === selectedNavAccountId);
-  }, [selectedNavAccountId, filteredAccounts]);
-
-  // Wrapper to update both index and ID
-  const setSelectedIndex = useCallback((index: number) => {
-    if (index < 0 || !filteredAccounts?.length) {
-      setSelectedNavAccountId(null);
-    } else if (index < filteredAccounts.length) {
-      setSelectedNavAccountId(filteredAccounts[index].id);
-    }
-  }, [filteredAccounts]);
-
-  // Keyboard navigation with external state control for ID-based stability
-  useKeyboardNavigation({
+  // Keyboard navigation
+  const { selectedIndex, setSelectedIndex } = useKeyboardNavigation({
     items: filteredAccounts,
     onSelect: (account) => handleViewDetails(account.id),
     enabled: selectedAccountId === null, // Disable when sheet is open
     searchInputRef,
     onSearchClear: clearSearch,
     hasSearchText: searchQuery.length > 0,
-    externalSelectedIndex: selectedIndex,
-    onSelectedIndexChange: setSelectedIndex,
   });
 
   // Scroll selected card into view
@@ -377,7 +357,7 @@ export default function ReviewQueue() {
                 account={account}
                 onViewDetails={handleViewDetails}
                 onActionComplete={() => {
-                  setSelectedNavAccountId(null); // Reset selection to avoid jump after resort
+                  setSelectedIndex(-1); // Reset selection to avoid jump after resort
                   refetch();
                 }}
                 isSelected={index === selectedIndex}
@@ -404,17 +384,6 @@ export default function ReviewQueue() {
             </CardHeader>
           </Card>
         )}
-
-        {/* Keyboard Hotkey Bar */}
-        <QueueHotkeyBar
-          hasItems={(filteredAccounts?.length ?? 0) > 0}
-          disabled={selectedAccountId !== null}
-          selectedLabel={
-            selectedIndex >= 0 && filteredAccounts?.[selectedIndex]
-              ? `#${filteredAccounts[selectedIndex].account_number}`
-              : null
-          }
-        />
 
         {/* Account Review Sheet */}
         <Sheet open={selectedAccountId !== null} onOpenChange={(open) => !open && handleCloseSheet()}>
