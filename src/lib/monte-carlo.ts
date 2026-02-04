@@ -88,6 +88,28 @@ export interface MonteCarloResult {
     effectiveMargin: number;
   };
 
+  // NEW: Payout diagnostics for cap analysis
+  payoutDiagnostics: {
+    totalPayoutsPaidMean: number;
+    totalPayoutsPaidP95: number;
+    avgPayoutSize: number;
+    avgPayoutsPerAccount: number;
+    payoutRequestsTotal: number;
+    payoutsApprovedTotal: number;
+    
+    // First payout cap metrics
+    firstPayoutCapBindingRate: number;  // % of first payouts that hit the cap
+    avgFirstPayoutBeforeCap: number;
+    avgFirstPayoutAfterCap: number;
+    
+    // Lifetime cap metrics
+    lifetimeCapBindingRate: number;     // % of accounts that hit lifetime cap
+    avgLifetimePaidPerAccount: number;
+    avgLifetimeHeadroomAtEnd: number;
+    payoutsRejectedDueToLifetimeCap: number;
+    accountsCompletedByCap: number;
+  };
+
   rawSamples?: number[][]; // optional: all monthly profits per iteration
 }
 
@@ -99,6 +121,26 @@ export interface MonthResult {
   variableCosts: number;
   fixedCosts: number;
   netProfit: number;
+  
+  // NEW: Detailed payout tracking
+  payoutDetails: {
+    requestCount: number;
+    approvedCount: number;
+    totalPaid: number;
+    firstPayoutCapHits: number;
+    lifetimeCapHits: number;
+    lifetimeCapRejections: number;
+    accountsCompletedByCap: number;
+    payoutSizes: number[];
+    firstPayoutSizes: number[];  // before/after cap
+  };
+}
+
+// Per-account state tracking for lifetime caps
+interface AccountState {
+  lifetimePaid: number;
+  payoutCount: number;
+  isCompleted: boolean; // true when lifetime cap reached
 }
 
 // ============================================================================
@@ -120,10 +162,6 @@ function mulberry32(seed: number): () => number {
 
 /**
  * Triangular distribution - good for bounded rates with a most likely value
- * @param random - RNG function returning [0,1)
- * @param min - minimum value
- * @param mode - most likely value  
- * @param max - maximum value
  */
 function triangular(random: () => number, min: number, mode: number, max: number): number {
   const u = random();
@@ -138,18 +176,12 @@ function triangular(random: () => number, min: number, mode: number, max: number
 
 /**
  * Log-normal distribution - good for payout amounts (right-skewed, always positive)
- * Uses Box-Muller transform
- * @param random - RNG function
- * @param mean - desired mean of the distribution
- * @param stdDev - desired standard deviation
  */
 function logNormal(random: () => number, mean: number, stdDev: number): number {
-  // Convert mean/stdDev to log-space parameters
   const variance = stdDev * stdDev;
   const mu = Math.log(mean * mean / Math.sqrt(variance + mean * mean));
   const sigma = Math.sqrt(Math.log(1 + variance / (mean * mean)));
   
-  // Box-Muller transform for normal distribution
   const u1 = random();
   const u2 = random();
   const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
@@ -159,10 +191,8 @@ function logNormal(random: () => number, mean: number, stdDev: number): number {
 
 /**
  * Beta distribution - good for rates/probabilities
- * Uses Johnk's algorithm
  */
 function beta(random: () => number, alpha: number, betaParam: number): number {
-  // Simple rejection sampling for beta distribution
   let u1: number, u2: number, sum: number;
   
   do {
@@ -176,15 +206,10 @@ function beta(random: () => number, alpha: number, betaParam: number): number {
 
 /**
  * Convert triangular params to approximate beta distribution
- * Maps min/mode/max to alpha/beta parameters
  */
 function triangularToBeta(random: () => number, min: number, mode: number, max: number): number {
-  // Normalize to [0,1] range
   const normalizedMode = (mode - min) / (max - min);
-  
-  // Estimate alpha/beta from mode (simplified approach)
-  // For triangular-like behavior: use mode to set shape
-  const concentration = 4; // controls "peakiness"
+  const concentration = 4;
   const alpha = 1 + concentration * normalizedMode;
   const betaParam = 1 + concentration * (1 - normalizedMode);
   
@@ -204,17 +229,14 @@ function applyAttackIntensity(
   
   if (intensity <= 0) return assumptions;
   
-  // Clone to avoid mutation
   const modified = JSON.parse(JSON.stringify(assumptions)) as MonteCarloAssumptions;
   
-  // Scale factors based on intensity
-  const passRateMultiplier = 1 + (0.5 * intensity);      // +50% per intensity level
-  const fraudAttemptMultiplier = 1 + (1.0 * intensity);  // +100% per intensity level
-  const fraudSuccessMultiplier = 1 + (0.5 * intensity);  // +50% per intensity level
-  const chargebackMultiplier = 1 + (0.6 * intensity);    // +60% per intensity level
-  const payoutMultiplier = 1 + (0.3 * intensity);        // +30% per intensity level
+  const passRateMultiplier = 1 + (0.5 * intensity);
+  const fraudAttemptMultiplier = 1 + (1.0 * intensity);
+  const fraudSuccessMultiplier = 1 + (0.5 * intensity);
+  const chargebackMultiplier = 1 + (0.6 * intensity);
+  const payoutMultiplier = 1 + (0.3 * intensity);
   
-  // Apply multipliers (capped at reasonable maximums)
   modified.passRate = {
     min: Math.min(modified.passRate.min * passRateMultiplier, 0.35),
     mode: Math.min(modified.passRate.mode * passRateMultiplier, 0.40),
@@ -248,12 +270,14 @@ function applyAttackIntensity(
 }
 
 // ============================================================================
-// SINGLE MONTH SIMULATION
+// SINGLE MONTH SIMULATION (with lifetime cap tracking)
 // ============================================================================
 
 function simulateMonth(
   assumptions: MonteCarloAssumptions,
-  random: () => number
+  random: () => number,
+  accountStates: Map<number, AccountState>, // persistent across months
+  monthIndex: number
 ): MonthResult {
   const { knobs } = assumptions;
   
@@ -309,27 +333,100 @@ function simulateMonth(
   // Accounts requesting payout
   const accountsRequestingPayout = Math.round(passedAccounts * payoutRequestRate);
   
-  // Sample payout amounts
+  // Payout tracking
   let totalPayouts = 0;
+  let firstPayoutCapHits = 0;
+  let lifetimeCapHits = 0;
+  let lifetimeCapRejections = 0;
+  let accountsCompletedThisMonth = 0;
+  const payoutSizes: number[] = [];
+  const firstPayoutSizes: number[] = []; // [beforeCap, afterCap] pairs
+  let payoutRequestCount = 0;
+  let payoutApprovedCount = 0;
+  
+  // Assign unique IDs to new accounts this month
+  const baseAccountId = monthIndex * 10000;
+  
   for (let i = 0; i < accountsRequestingPayout; i++) {
+    const accountId = baseAccountId + i;
+    
+    // Get or create account state
+    let state = accountStates.get(accountId);
+    if (!state) {
+      state = { lifetimePaid: 0, payoutCount: 0, isCompleted: false };
+      accountStates.set(accountId, state);
+    }
+    
+    // Skip if account already completed by lifetime cap
+    if (state.isCompleted) {
+      continue;
+    }
+    
     const numPayouts = Math.max(1, Math.round(payoutsPerAccount));
     
     for (let j = 0; j < numPayouts; j++) {
-      let payoutAmount = logNormal(
+      payoutRequestCount++;
+      
+      // Check lifetime cap headroom BEFORE calculating payout
+      const lifetimeCap = knobs.lifetimeCapPerUser;
+      const headroom = lifetimeCap !== null 
+        ? lifetimeCap - state.lifetimePaid 
+        : Infinity;
+      
+      // If no headroom, reject immediately
+      if (headroom <= 0) {
+        lifetimeCapRejections++;
+        state.isCompleted = true;
+        continue;
+      }
+      
+      // Calculate raw payout amount
+      let rawPayoutAmount = logNormal(
         random,
         assumptions.avgPayoutAmount.mean,
         assumptions.avgPayoutAmount.stdDev
       );
       
+      const isFirstPayout = state.payoutCount === 0;
+      let payoutAmount = rawPayoutAmount;
+      
       // Apply first payout cap (only on first payout of each account)
-      if (j === 0 && knobs.firstPayoutCap !== null) {
-        payoutAmount = Math.min(payoutAmount, knobs.firstPayoutCap);
+      if (isFirstPayout && knobs.firstPayoutCap !== null) {
+        firstPayoutSizes.push(rawPayoutAmount); // track before cap
+        if (rawPayoutAmount > knobs.firstPayoutCap) {
+          payoutAmount = knobs.firstPayoutCap;
+          firstPayoutCapHits++;
+        }
+        firstPayoutSizes.push(payoutAmount); // track after cap
       }
       
       // Apply payout split
       payoutAmount = payoutAmount * knobs.payoutSplitPercent;
       
+      // Apply lifetime cap (this is the critical enforcement)
+      if (lifetimeCap !== null && payoutAmount > headroom) {
+        lifetimeCapHits++;
+        payoutAmount = headroom; // cap to remaining headroom
+        
+        // Check if this completes the account
+        if (state.lifetimePaid + payoutAmount >= lifetimeCap) {
+          state.isCompleted = true;
+          accountsCompletedThisMonth++;
+        }
+      }
+      
+      // Ensure minimum payout threshold ($50)
+      if (payoutAmount < 50) {
+        continue; // Skip payouts below minimum
+      }
+      
       totalPayouts += payoutAmount;
+      payoutSizes.push(payoutAmount);
+      payoutApprovedCount++;
+      
+      // Update account state
+      state.lifetimePaid += payoutAmount;
+      state.payoutCount++;
     }
   }
   
@@ -338,7 +435,7 @@ function simulateMonth(
   const successfulFrauds = fraudAttempts * fraudSuccessRate;
   const avgFraudPayout = logNormal(
     random,
-    assumptions.avgPayoutAmount.mean * 1.3, // fraudsters aim higher
+    assumptions.avgPayoutAmount.mean * 1.3,
     assumptions.avgPayoutAmount.stdDev * 1.5
   );
   const fraudLoss = successfulFrauds * avgFraudPayout * knobs.payoutSplitPercent;
@@ -361,6 +458,17 @@ function simulateMonth(
     variableCosts,
     fixedCosts,
     netProfit,
+    payoutDetails: {
+      requestCount: payoutRequestCount,
+      approvedCount: payoutApprovedCount,
+      totalPaid: totalPayouts,
+      firstPayoutCapHits,
+      lifetimeCapHits,
+      lifetimeCapRejections,
+      accountsCompletedByCap: accountsCompletedThisMonth,
+      payoutSizes,
+      firstPayoutSizes,
+    },
   };
 }
 
@@ -386,15 +494,49 @@ export function runMonteCarlo(
   const allMonthlyProfits: number[][] = [];
   const allMonthResults: MonthResult[][] = [];
   
+  // Aggregate payout diagnostics
+  let totalFirstCapHits = 0;
+  let totalFirstPayouts = 0;
+  let totalLifetimeCapHits = 0;
+  let totalLifetimeCapRejections = 0;
+  let totalAccountsCompletedByCap = 0;
+  let totalPayoutsRequested = 0;
+  let totalPayoutsApproved = 0;
+  let allPayoutSizes: number[] = [];
+  let allFirstPayoutsBefore: number[] = [];
+  let allFirstPayoutsAfter: number[] = [];
+  
   for (let iter = 0; iter < iterations; iter++) {
     const random = createRng(iter);
     const monthProfits: number[] = [];
     const monthResults: MonthResult[] = [];
     
+    // Fresh account state map for each iteration
+    const accountStates = new Map<number, AccountState>();
+    
     for (let month = 0; month < monthsPerIteration; month++) {
-      const result = simulateMonth(effectiveAssumptions, random);
+      const result = simulateMonth(effectiveAssumptions, random, accountStates, month);
       monthProfits.push(result.netProfit);
       monthResults.push(result);
+      
+      // Aggregate payout diagnostics
+      const pd = result.payoutDetails;
+      totalFirstCapHits += pd.firstPayoutCapHits;
+      totalLifetimeCapHits += pd.lifetimeCapHits;
+      totalLifetimeCapRejections += pd.lifetimeCapRejections;
+      totalAccountsCompletedByCap += pd.accountsCompletedByCap;
+      totalPayoutsRequested += pd.requestCount;
+      totalPayoutsApproved += pd.approvedCount;
+      allPayoutSizes.push(...pd.payoutSizes);
+      
+      // Track first payout sizes (pairs of before/after)
+      for (let i = 0; i < pd.firstPayoutSizes.length; i += 2) {
+        if (i + 1 < pd.firstPayoutSizes.length) {
+          allFirstPayoutsBefore.push(pd.firstPayoutSizes[i]);
+          allFirstPayoutsAfter.push(pd.firstPayoutSizes[i + 1]);
+          totalFirstPayouts++;
+        }
+      }
     }
     
     allMonthlyProfits.push(monthProfits);
@@ -451,6 +593,56 @@ export function runMonteCarlo(
   const avgChargebacks = allResults.reduce((s, r) => s + r.chargebacks, 0) / allResults.length;
   const avgCosts = allResults.reduce((s, r) => s + r.variableCosts + r.fixedCosts, 0) / allResults.length;
   
+  // Payout diagnostics
+  const sortedPayoutTotals = allResults.map(r => r.payouts).sort((a, b) => a - b);
+  const avgPayoutSize = allPayoutSizes.length > 0 
+    ? allPayoutSizes.reduce((a, b) => a + b, 0) / allPayoutSizes.length 
+    : 0;
+  const avgPayoutsPerAccount = totalPayoutsApproved / (iterations * config.monthsPerIteration * assumptions.accountsPerMonth * 0.12 * 0.65); // rough estimate
+  
+  const avgFirstPayoutBefore = allFirstPayoutsBefore.length > 0
+    ? allFirstPayoutsBefore.reduce((a, b) => a + b, 0) / allFirstPayoutsBefore.length
+    : 0;
+  const avgFirstPayoutAfter = allFirstPayoutsAfter.length > 0
+    ? allFirstPayoutsAfter.reduce((a, b) => a + b, 0) / allFirstPayoutsAfter.length
+    : 0;
+  
+  // Calculate lifetime cap binding rate across all accounts
+  // Need to look at final state of all accounts across all iterations
+  let totalAccountsSimulated = 0;
+  let accountsHitLifetimeCap = 0;
+  let totalLifetimePaidAcrossAccounts = 0;
+  let totalHeadroomAtEnd = 0;
+  
+  // Re-run a single iteration to get account-level stats (more accurate)
+  const statsRng = mulberry32(seed);
+  const statsAccountStates = new Map<number, AccountState>();
+  for (let month = 0; month < monthsPerIteration; month++) {
+    simulateMonth(effectiveAssumptions, statsRng, statsAccountStates, month);
+  }
+  
+  const lifetimeCap = assumptions.knobs.lifetimeCapPerUser;
+  statsAccountStates.forEach((state) => {
+    totalAccountsSimulated++;
+    totalLifetimePaidAcrossAccounts += state.lifetimePaid;
+    if (state.isCompleted) {
+      accountsHitLifetimeCap++;
+    }
+    if (lifetimeCap !== null) {
+      totalHeadroomAtEnd += Math.max(0, lifetimeCap - state.lifetimePaid);
+    }
+  });
+  
+  const lifetimeCapBindingRate = totalAccountsSimulated > 0 
+    ? accountsHitLifetimeCap / totalAccountsSimulated 
+    : 0;
+  const avgLifetimePaidPerAccount = totalAccountsSimulated > 0
+    ? totalLifetimePaidAcrossAccounts / totalAccountsSimulated
+    : 0;
+  const avgLifetimeHeadroomAtEnd = totalAccountsSimulated > 0
+    ? totalHeadroomAtEnd / totalAccountsSimulated
+    : 0;
+  
   return {
     config,
     assumptions,
@@ -482,6 +674,24 @@ export function runMonteCarlo(
       payoutToRevenueRatio: avgPayouts / avgRevenue,
       effectiveMargin: mean / avgRevenue,
     },
+    payoutDiagnostics: {
+      totalPayoutsPaidMean: avgPayouts,
+      totalPayoutsPaidP95: sortedPayoutTotals[Math.floor(sortedPayoutTotals.length * 0.95)] || 0,
+      avgPayoutSize,
+      avgPayoutsPerAccount,
+      payoutRequestsTotal: totalPayoutsRequested,
+      payoutsApprovedTotal: totalPayoutsApproved,
+      
+      firstPayoutCapBindingRate: totalFirstPayouts > 0 ? totalFirstCapHits / totalFirstPayouts : 0,
+      avgFirstPayoutBeforeCap: avgFirstPayoutBefore,
+      avgFirstPayoutAfterCap: avgFirstPayoutAfter,
+      
+      lifetimeCapBindingRate,
+      avgLifetimePaidPerAccount,
+      avgLifetimeHeadroomAtEnd,
+      payoutsRejectedDueToLifetimeCap: totalLifetimeCapRejections,
+      accountsCompletedByCap: totalAccountsCompletedByCap,
+    },
     rawSamples: allMonthlyProfits,
   };
 }
@@ -493,7 +703,7 @@ export function runMonteCarlo(
 export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
   // Acquisition
   accountsPerMonth: 500,
-  pricePerAccount: 150,
+  pricePerAccount: 149, // Updated to match pricing decision
 
   // Trading funnel
   passRate: { min: 0.08, mode: 0.12, max: 0.18 },
@@ -514,13 +724,13 @@ export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
   variableCostPerAccount: 8,
   fixedMonthlyCosts: 18000,
 
-  // Default knobs (conservative)
+  // Default knobs (with $300 first payout cap)
   knobs: {
-    firstPayoutCap: null,           // no cap by default
+    firstPayoutCap: 300,            // $300 first payout cap
     payoutSplitPercent: 0.80,       // 80% to trader
     maxPayoutPercent: 0.80,         // max 80% of profits
     resetPrice: 99,                 // $99 reset
-    lifetimeCapPerUser: null,       // no lifetime cap
+    lifetimeCapPerUser: null,       // no lifetime cap by default
     attackIntensity: 0,             // no attack scenario
   },
 };
@@ -549,7 +759,7 @@ export const SCENARIO_PRESETS = {
   tiktokViral: {
     ...DEFAULT_ASSUMPTIONS,
     accountsPerMonth: 2000,
-    passRate: { min: 0.06, mode: 0.10, max: 0.16 }, // more noise, lower quality
+    passRate: { min: 0.06, mode: 0.10, max: 0.16 },
     fraudAttemptRate: { min: 0.08, mode: 0.12, max: 0.18 },
     chargebackRate: { min: 0.03, mode: 0.04, max: 0.06 },
     knobs: {
@@ -573,6 +783,39 @@ export const SCENARIO_PRESETS = {
       firstPayoutCap: 300,
       payoutSplitPercent: 0.70,
       maxPayoutPercent: 0.70,
+    },
+  },
+  
+  // NEW: Lifetime cap scenarios for testing
+  withLifetimeCap3x: {
+    ...DEFAULT_ASSUMPTIONS,
+    knobs: {
+      ...DEFAULT_ASSUMPTIONS.knobs,
+      lifetimeCapPerUser: 149 * 3, // 3× entry = $447
+    },
+  },
+  
+  withLifetimeCap5x: {
+    ...DEFAULT_ASSUMPTIONS,
+    knobs: {
+      ...DEFAULT_ASSUMPTIONS.knobs,
+      lifetimeCapPerUser: 149 * 5, // 5× entry = $745
+    },
+  },
+  
+  withLifetimeCap7x: {
+    ...DEFAULT_ASSUMPTIONS,
+    knobs: {
+      ...DEFAULT_ASSUMPTIONS.knobs,
+      lifetimeCapPerUser: 149 * 7, // 7× entry = $1,043
+    },
+  },
+  
+  withLifetimeCap10x: {
+    ...DEFAULT_ASSUMPTIONS,
+    knobs: {
+      ...DEFAULT_ASSUMPTIONS.knobs,
+      lifetimeCapPerUser: 149 * 10, // 10× entry = $1,490
     },
   },
 } as const;
@@ -663,4 +906,62 @@ export function runSensitivityAnalysis(
     profits,
     lossProbs,
   };
+}
+
+// ============================================================================
+// LIFETIME CAP SWEEP ANALYSIS (with real binding diagnostics)
+// ============================================================================
+
+export interface LifetimeCapSweepResult {
+  multiple: number | null; // null = unlimited
+  capDollars: number | null;
+  result: MonteCarloResult;
+  capBindingRate: number;
+  accountsCompletedByCap: number;
+  avgLifetimePaidPerAccount: number;
+  avgHeadroomAtEnd: number;
+  payoutsRejected: number;
+  marginDelta: number; // vs unlimited baseline
+  profitDelta: number; // vs unlimited baseline
+}
+
+export function runLifetimeCapSweep(
+  config: MonteCarloConfig,
+  baseAssumptions: MonteCarloAssumptions,
+  multiples: (number | null)[] = [null, 15, 10, 7, 5, 3]
+): LifetimeCapSweepResult[] {
+  const results: LifetimeCapSweepResult[] = [];
+  let baselineMargin = 0;
+  let baselineProfit = 0;
+  
+  for (const multiple of multiples) {
+    const assumptions = JSON.parse(JSON.stringify(baseAssumptions)) as MonteCarloAssumptions;
+    assumptions.knobs.lifetimeCapPerUser = multiple !== null 
+      ? assumptions.pricePerAccount * multiple 
+      : null;
+    
+    const result = runMonteCarlo(config, assumptions);
+    const pd = result.payoutDiagnostics;
+    
+    // First result (unlimited) is baseline
+    if (multiple === null) {
+      baselineMargin = result.diagnostics.effectiveMargin;
+      baselineProfit = result.profit.mean;
+    }
+    
+    results.push({
+      multiple,
+      capDollars: multiple !== null ? assumptions.pricePerAccount * multiple : null,
+      result,
+      capBindingRate: pd.lifetimeCapBindingRate,
+      accountsCompletedByCap: pd.accountsCompletedByCap,
+      avgLifetimePaidPerAccount: pd.avgLifetimePaidPerAccount,
+      avgHeadroomAtEnd: pd.avgLifetimeHeadroomAtEnd,
+      payoutsRejected: pd.payoutsRejectedDueToLifetimeCap,
+      marginDelta: result.diagnostics.effectiveMargin - baselineMargin,
+      profitDelta: result.profit.mean - baselineProfit,
+    });
+  }
+  
+  return results;
 }
