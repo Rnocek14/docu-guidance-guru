@@ -127,19 +127,21 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       
       const { capHitsByMonth, zombiesByMonth, resetsByMonth, activeCohortSizeByMonth, eligibleCohortSizeByMonth, newPassedByMonth } = result.cohortDiagnostics;
       
-      // All count series must be finite, non-negative integers
-      // Integer check catches leaking expectation values, accidental averaging, or mixing aggregates
-      expect(capHitsByMonth.every(n => Number.isInteger(n) && n >= 0)).toBe(true);
-      expect(zombiesByMonth.every(n => Number.isInteger(n) && n >= 0)).toBe(true);
-      expect(resetsByMonth.every(n => Number.isInteger(n) && n >= 0)).toBe(true);
-      expect(activeCohortSizeByMonth.every(n => Number.isInteger(n) && n >= 0)).toBe(true);
-      expect(eligibleCohortSizeByMonth.every(n => Number.isInteger(n) && n >= 0)).toBe(true);
+      // Reusable invariant: counts must be finite, non-negative integers
+      // - Number.isFinite guards against NaN/Infinity propagation
+      // - Number.isInteger catches leaking expectation values, accidental averaging, or mixing aggregates
+      const isCount = (n: number) => Number.isFinite(n) && Number.isInteger(n) && n >= 0;
       
-      // newPassedByMonth: finite, non-negative integers, bounded by accountsPerMonth + 1
-      // Integer check catches accidental removal of Math.round()
-      // +1 tolerance for rounding edge cases if derivation changes
+      expect(capHitsByMonth.every(isCount)).toBe(true);
+      expect(zombiesByMonth.every(isCount)).toBe(true);
+      expect(resetsByMonth.every(isCount)).toBe(true);
+      expect(activeCohortSizeByMonth.every(isCount)).toBe(true);
+      expect(eligibleCohortSizeByMonth.every(isCount)).toBe(true);
+      expect(newPassedByMonth.every(isCount)).toBe(true);
+      
+      // newPassedByMonth has additional bound: cannot exceed accountsPerMonth + 1 (rounding tolerance)
       const maxNew = assumptions.accountsPerMonth + 1;
-      expect(newPassedByMonth.every(n => Number.isInteger(n) && n >= 0 && n <= maxNew)).toBe(true);
+      expect(newPassedByMonth.every(n => n <= maxNew)).toBe(true);
     });
 
     it('per-month series sums are internally consistent (conservation check)', () => {
