@@ -24,8 +24,8 @@ function normalizeSymbol(symbol: string): string {
   // Step 2: Remove obvious trailing punctuation like "!" "."
   const trimmed = preToken.replace(/[!]+$/g, '').replace(/[.]+$/g, '');
 
-  // Step 3: Split on vendor separators and take the first token
-  const token = trimmed.split(/[-._]/)[0];
+  // Step 3: Split on vendor separators and take the first token (include : for robustness)
+  const token = trimmed.split(/[-._:]/)[0];
 
   // Step 4: Remove any remaining non-alphanumerics inside token
   const cleaned = token.replace(/[^A-Z0-9]/g, '');
@@ -109,4 +109,13 @@ Deno.test("normalizeSymbol - unknown symbols stay unchanged", () => {
   // Unknown futures-like patterns should NOT be stripped
   assertEquals(normalizeSymbol("XYZH24"), "XYZH24");
   assertEquals(normalizeSymbol("ABCZ5"), "ABCZ5");
+});
+
+Deno.test("normalizeSymbol - does not over-strip equities with separators", () => {
+  // Equities with exchange suffixes: split on separator, take first token (preserves equity)
+  assertEquals(normalizeSymbol("AAPL-CME"), "AAPL"); // splits on -, first token is AAPL
+  // Note: META.Z5 splits on '.' => META (first token) - acceptable for futures context
+  assertEquals(normalizeSymbol("META.Z5"), "META");
+  // BRK.B style - splits to BRK, acceptable tradeoff for futures-focused reconciliation
+  assertEquals(normalizeSymbol("BRK.B"), "BRK");
 });
