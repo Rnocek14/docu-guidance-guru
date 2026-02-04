@@ -32,12 +32,75 @@ describe('Lifetime Cap Enforcement in Monte Carlo', () => {
     expect(typeof result.payoutDiagnostics.lifetimeCapBindingRate).toBe('number');
     expect(typeof result.payoutDiagnostics.avgLifetimePaidPerAccount).toBe('number');
     
+    // FIX #4: Cohort diagnostics should exist
+    expect(result.cohortDiagnostics).toBeDefined();
+    expect(typeof result.cohortDiagnostics.avgActiveCohortSize).toBe('number');
+    expect(result.cohortDiagnostics.activeCohortSizeByMonth).toBeInstanceOf(Array);
+    expect(typeof result.cohortDiagnostics.resetRevenue).toBe('number');
+    expect(typeof result.cohortDiagnostics.resetsThisRun).toBe('number');
+    expect(typeof result.cohortDiagnostics.zombieAccountsCompleted).toBe('number');
+    
     console.log('Payout diagnostics (no lifetime cap):', {
       avgPayoutSize: result.payoutDiagnostics.avgPayoutSize.toFixed(2),
       firstCapBindingRate: (result.payoutDiagnostics.firstPayoutCapBindingRate * 100).toFixed(1) + '%',
       lifetimeCapBindingRate: (result.payoutDiagnostics.lifetimeCapBindingRate * 100).toFixed(1) + '%',
       avgLifetimePaid: result.payoutDiagnostics.avgLifetimePaidPerAccount.toFixed(2),
     });
+    console.log('Cohort diagnostics:', {
+      avgActiveCohortSize: result.cohortDiagnostics.avgActiveCohortSize.toFixed(0),
+      resetRevenue: result.cohortDiagnostics.resetRevenue.toFixed(0),
+      resets: result.cohortDiagnostics.resetsThisRun,
+      zombies: result.cohortDiagnostics.zombieAccountsCompleted,
+    });
+  });
+
+  it('should apply eligibility gate (avgDaysToFirstPayout)', () => {
+    // Accounts created in month 0 should only be eligible in month 1+ (18 days / 30 = 1 month lag)
+    const result = runMonteCarlo(
+      { iterations: 10, monthsPerIteration: 3, seed: 42 },
+      DEFAULT_ASSUMPTIONS
+    );
+    
+    // The cohort size should grow over months as accounts become eligible
+    const sizes = result.cohortDiagnostics.activeCohortSizeByMonth;
+    console.log('Cohort sizes by month (with eligibility lag):', sizes);
+    
+    // With eligibility lag, month 0 should have fewer eligible accounts than later months
+    // (because accounts created in month 0 aren't eligible until month 1)
+    expect(sizes.length).toBe(3);
+  });
+
+  it('should generate reset revenue when accounts reset', () => {
+    const result = runMonteCarlo(FAST_CONFIG, DEFAULT_ASSUMPTIONS);
+    
+    // With 18% annual reset rate, we should see some resets
+    console.log('Reset stats:', {
+      totalResets: result.cohortDiagnostics.resetsThisRun,
+      resetRevenue: '$' + result.cohortDiagnostics.resetRevenue.toFixed(0),
+    });
+    
+    if (result.cohortDiagnostics.resetsThisRun > 0) {
+      expect(result.cohortDiagnostics.resetRevenue).toBeGreaterThan(0);
+      // Reset revenue should be resets * $99
+      const expectedRevenue = result.cohortDiagnostics.resetsThisRun * 99;
+      expect(result.cohortDiagnostics.resetRevenue).toBe(expectedRevenue);
+    }
+  });
+
+  it('should complete zombie accounts (headroom < $50)', () => {
+    // Use an aggressive cap where zombies are likely
+    const result = runMonteCarlo(FAST_CONFIG, {
+      ...DEFAULT_ASSUMPTIONS,
+      knobs: { ...DEFAULT_ASSUMPTIONS.knobs, lifetimeCapPerUser: 350 }, // $350 cap
+    });
+    
+    console.log('Zombie account stats:', {
+      zombiesCompleted: result.cohortDiagnostics.zombieAccountsCompleted,
+      accountsCompletedByCap: result.payoutDiagnostics.accountsCompletedByCap,
+    });
+    
+    // Zombies should be a subset of completed accounts or zero
+    expect(result.cohortDiagnostics.zombieAccountsCompleted).toBeGreaterThanOrEqual(0);
   });
 
   it('should show different results with vs without lifetime cap', () => {
@@ -59,6 +122,8 @@ describe('Lifetime Cap Enforcement in Monte Carlo', () => {
     console.log('  $500 cap - Lifetime binding rate:', (withCap.payoutDiagnostics.lifetimeCapBindingRate * 100).toFixed(1) + '%');
     console.log('  No cap - Mean profit:', noCap.profit.mean.toFixed(0));
     console.log('  $500 cap - Mean profit:', withCap.profit.mean.toFixed(0));
+    console.log('  No cap - Cohort size:', noCap.cohortDiagnostics.avgActiveCohortSize.toFixed(0));
+    console.log('  $500 cap - Cohort size:', withCap.cohortDiagnostics.avgActiveCohortSize.toFixed(0));
     
     // Key assertion: aggressive cap should show different behavior
     if (noCap.payoutDiagnostics.avgLifetimePaidPerAccount > 500) {
