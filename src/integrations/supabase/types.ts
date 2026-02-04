@@ -63,6 +63,7 @@ export type Database = {
           id: string
           last_trade_at: string | null
           passed_at: string | null
+          payout_cycle_start_balance: number | null
           rule_snapshot: Json | null
           starting_balance: number
           status: Database["public"]["Enums"]["account_status"]
@@ -84,6 +85,7 @@ export type Database = {
           id?: string
           last_trade_at?: string | null
           passed_at?: string | null
+          payout_cycle_start_balance?: number | null
           rule_snapshot?: Json | null
           starting_balance?: number
           status?: Database["public"]["Enums"]["account_status"]
@@ -105,6 +107,7 @@ export type Database = {
           id?: string
           last_trade_at?: string | null
           passed_at?: string | null
+          payout_cycle_start_balance?: number | null
           rule_snapshot?: Json | null
           starting_balance?: number
           status?: Database["public"]["Enums"]["account_status"]
@@ -1036,6 +1039,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      reset_payout_cycle: { Args: { _account_id: string }; Returns: undefined }
       validate_payout_request: {
         Args: { _account_id: string; _requested_amount: number }
         Returns: Json
