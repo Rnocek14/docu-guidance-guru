@@ -1042,6 +1042,14 @@ export type Database = {
         }
         Returns: boolean
       }
+      mark_payout_paid: {
+        Args: {
+          _payment_reference: string
+          _payout_id: string
+          _reviewed_by: string
+        }
+        Returns: Json
+      }
       reset_payout_cycle: { Args: { _account_id: string }; Returns: undefined }
       validate_payout_request: {
         Args: { _account_id: string; _requested_amount: number }
