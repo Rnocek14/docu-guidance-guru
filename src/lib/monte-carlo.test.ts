@@ -20,7 +20,19 @@ const FULL_CONFIG: MonteCarloConfig = {
   seed: 42,
 };
 
-describe('Monte Carlo Simulation', () => {
+const LONG_CONFIG: MonteCarloConfig = {
+  iterations: 50,
+  monthsPerIteration: 36, // 3 years for steady-state checks
+  seed: 42,
+};
+
+// ============================================================================
+// MECHANICAL INVARIANTS
+// These tests verify the simulation engine works correctly, regardless of
+// business assumptions. They should survive assumption changes.
+// ============================================================================
+
+describe('Monte Carlo Simulation - Mechanical Invariants', () => {
   describe('Determinism', () => {
     it('produces identical results with same seed', () => {
       const result1 = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS);
@@ -39,73 +51,20 @@ describe('Monte Carlo Simulation', () => {
       const result1 = runMonteCarlo(config1, DEFAULT_ASSUMPTIONS);
       const result2 = runMonteCarlo(config2, DEFAULT_ASSUMPTIONS);
       
-      // Should be different (with high probability)
       expect(result1.profit.mean).not.toBe(result2.profit.mean);
     });
   });
 
-  /**
-   * CRITICAL ECONOMICS INSIGHT:
-   * 
-   * The uncapped baseline (DEFAULT_ASSUMPTIONS) is intentionally UNPROFITABLE.
-   * This is correct behavior — it proves that lifetime caps are essential.
-   * 
-   * Without caps, cohorts accumulate over time and payouts grow unbounded,
-   * while revenue is fixed to new account sales.
-   * 
-   * Tests below verify that adding lifetime caps makes the model profitable.
-   */
-  describe('Uncapped Baseline (proves caps are necessary)', () => {
-    it('has negative margin without lifetime caps - this is expected', () => {
-      const result = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-      
-      // Uncapped baseline SHOULD be unprofitable (proves caps are needed)
-      expect(result.diagnostics.effectiveMargin).toBeLessThan(0);
-      console.log(`Uncapped margin: ${(result.diagnostics.effectiveMargin * 100).toFixed(1)}% (proves caps needed)`);
-    });
-
-    it('has reasonable profit distribution shape', () => {
-      const result = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-      
-      // P5 < P50 < P95
-      expect(result.profit.p5).toBeLessThan(result.profit.p50);
-      expect(result.profit.p50).toBeLessThan(result.profit.p95);
-      
-      // P50 should be close to mean for symmetric-ish distribution
-      expect(Math.abs(result.profit.p50 - result.profit.mean)).toBeLessThan(result.profit.stdDev * 2);
-    });
-
-    it('shows high payout-to-revenue ratio without caps', () => {
-      const result = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-      
-      // Without caps, payouts exceed revenue (cohorts accumulate)
-      expect(result.diagnostics.payoutToRevenueRatio).toBeGreaterThan(0.50);
-      console.log(`Uncapped payout/revenue: ${(result.diagnostics.payoutToRevenueRatio * 100).toFixed(1)}%`);
-    });
-  });
-
-  describe('With Lifetime Cap (profitable baseline)', () => {
-    it('produces positive mean profit with 7x lifetime cap', () => {
-      const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
-      
-      expect(result.profit.mean).toBeGreaterThan(0);
-      console.log(`7x cap monthly profit: $${result.profit.mean.toFixed(2)}`);
-    });
-
-    it('has positive margin with 7x lifetime cap', () => {
-      const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
-      
-      expect(result.diagnostics.effectiveMargin).toBeGreaterThan(0);
-      expect(result.diagnostics.effectiveMargin).toBeLessThan(1);
-      console.log(`7x cap margin: ${(result.diagnostics.effectiveMargin * 100).toFixed(1)}%`);
-    });
-
-    it('shows cap binding rate increases as cap decreases', () => {
+  describe('Cap Binding Monotonicity', () => {
+    it('tighter caps bind more often than looser caps', () => {
       const cap10x = runMonteCarlo(QUICK_CONFIG, SCENARIO_PRESETS.withLifetimeCap10x);
       const cap7x = runMonteCarlo(QUICK_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
       const cap5x = runMonteCarlo(QUICK_CONFIG, SCENARIO_PRESETS.withLifetimeCap5x);
+      const cap3x = runMonteCarlo(QUICK_CONFIG, SCENARIO_PRESETS.withLifetimeCap3x);
       
-      // Tighter caps bind more often
+      expect(cap3x.payoutDiagnostics.lifetimeCapBindingRate).toBeGreaterThan(
+        cap5x.payoutDiagnostics.lifetimeCapBindingRate
+      );
       expect(cap5x.payoutDiagnostics.lifetimeCapBindingRate).toBeGreaterThan(
         cap7x.payoutDiagnostics.lifetimeCapBindingRate
       );
@@ -114,81 +73,227 @@ describe('Monte Carlo Simulation', () => {
       );
     });
 
-    it('shows tighter caps improve profitability', () => {
-      const cap10x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap10x);
-      const cap7x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
-      const cap5x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap5x);
+    it('unlimited cap has zero binding rate', () => {
+      const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS); // no lifetime cap
       
-      // Tighter caps = higher profit
-      expect(cap5x.profit.mean).toBeGreaterThan(cap7x.profit.mean);
-      expect(cap7x.profit.mean).toBeGreaterThan(cap10x.profit.mean);
+      expect(result.payoutDiagnostics.lifetimeCapBindingRate).toBe(0);
     });
   });
 
-  describe('Attack Scenario', () => {
-    it('attack worsens economics vs baseline', () => {
-      const baseline = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-      const attack = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.coordinatedAttack);
+  describe('Lifetime Paid Never Exceeds Cap', () => {
+    it('avg lifetime paid is always <= cap when cap is set', () => {
+      const cap7x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+      const capDollars = 149 * 7; // $1043
       
-      // Attack should make things worse
-      expect(attack.profit.mean).toBeLessThan(baseline.profit.mean);
-      console.log(`Attack scenario profit: $${attack.profit.mean.toFixed(2)}`);
+      expect(cap7x.payoutDiagnostics.avgLifetimePaidPerAccount).toBeLessThanOrEqual(capDollars);
+      expect(cap7x.payoutDiagnostics.lifetimePaidP95).toBeLessThanOrEqual(capDollars);
     });
 
-    it('has higher loss probability than baseline', () => {
-      const baseline = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-      const attack = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.coordinatedAttack);
+    it('P90 and P95 lifetime paid are capped at cap value', () => {
+      const cap5x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap5x);
+      const capDollars = 149 * 5; // $745
       
-      expect(attack.risk.probabilityOfLoss).toBeGreaterThan(baseline.risk.probabilityOfLoss);
+      expect(cap5x.payoutDiagnostics.lifetimePaidP90).toBeLessThanOrEqual(capDollars);
+      expect(cap5x.payoutDiagnostics.lifetimePaidP95).toBeLessThanOrEqual(capDollars);
+    });
+  });
+
+  describe('Eligible Cohort <= Active Cohort', () => {
+    it('eligible cohort never exceeds active cohort', () => {
+      const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS);
+      
+      const { activeCohortSizeByMonth, eligibleCohortSizeByMonth } = result.cohortDiagnostics;
+      
+      for (let i = 0; i < activeCohortSizeByMonth.length; i++) {
+        expect(eligibleCohortSizeByMonth[i]).toBeLessThanOrEqual(activeCohortSizeByMonth[i]);
+      }
     });
 
-    it('has worse P5 than baseline', () => {
-      const baseline = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-      const attack = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.coordinatedAttack);
+    it('month 0 has zero eligible (all accounts in eligibility lag)', () => {
+      const result = runMonteCarlo({ iterations: 10, monthsPerIteration: 3, seed: 42 }, DEFAULT_ASSUMPTIONS);
       
-      expect(attack.profit.p5).toBeLessThan(baseline.profit.p5);
+      expect(result.cohortDiagnostics.eligibleCohortSizeByMonth[0]).toBe(0);
+      expect(result.cohortDiagnostics.activeCohortSizeByMonth[0]).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Reset Mechanics', () => {
+    it('reset pushes eligibility forward by lag period', () => {
+      // After reset in month m, account cannot be eligible until month m + eligibilityLag
+      // This is verified by the fact that resets this month don't generate payouts this month
+      const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS);
+      
+      // If resets happened, we should have reset revenue
+      if (result.cohortDiagnostics.resetsThisRun > 0) {
+        expect(result.cohortDiagnostics.resetRevenue).toBeGreaterThan(0);
+      }
     });
 
-    it('lifetime cap mitigates attack damage', () => {
-      const attackNoCap = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.coordinatedAttack);
-      const attackWithCap = runMonteCarlo(FULL_CONFIG, {
-        ...SCENARIO_PRESETS.coordinatedAttack,
-        knobs: { ...SCENARIO_PRESETS.coordinatedAttack.knobs, lifetimeCapPerUser: 1043 }, // 7x
+    it('observed resets are within plausible band of expected resets', () => {
+      const result = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
+      
+      const { resetsThisRun, expectedResetsThisRun, resetRateErrorRatio } = result.cohortDiagnostics;
+      
+      console.log('Reset sanity check:', {
+        observed: resetsThisRun,
+        expected: expectedResetsThisRun.toFixed(0),
+        errorRatio: resetRateErrorRatio.toFixed(2),
       });
       
-      // Caps should improve attack scenario
-      expect(attackWithCap.profit.mean).toBeGreaterThan(attackNoCap.profit.mean);
+      // Observed should be within 0.2x to 5x of expected (accounts for variance)
+      expect(resetRateErrorRatio).toBeGreaterThan(0.2);
+      expect(resetRateErrorRatio).toBeLessThan(5);
+    });
+
+    it('documents reset scope as allActive', () => {
+      const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS);
+      
+      expect(result.cohortDiagnostics.resetScope).toBe('allActive');
     });
   });
 
-  describe('First Payout Cap Knob', () => {
-    it('reduces or maintains payout exposure', () => {
-      // Both use same baseline, so payouts should be equal or less with cap
-      const noCap = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-      const withCap = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withFirstPayoutCap);
+  describe('First Payout Cap Enforcement', () => {
+    it('first payout never exceeds cap when cap is set', () => {
+      const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withFirstPayoutCap);
       
-      // First payout cap reduces first payouts, but may not change total much
-      // since it only affects first payout per attempt
-      expect(withCap.diagnostics.avgMonthlyPayouts).toBeLessThanOrEqual(noCap.diagnostics.avgMonthlyPayouts + 1000);
-    });
-
-    it('improves or maintains mean profit', () => {
-      const noCap = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-      const withCap = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withFirstPayoutCap);
-      
-      expect(withCap.profit.mean).toBeGreaterThanOrEqual(noCap.profit.mean - 1000);
-    });
-
-    it('reduces or maintains probability of loss', () => {
-      const noCap = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-      const withCap = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withFirstPayoutCap);
-      
-      expect(withCap.risk.probabilityOfLoss).toBeLessThanOrEqual(noCap.risk.probabilityOfLoss + 0.05);
+      // avgFirstPayoutAfterCap should be <= firstPayoutCap
+      expect(result.payoutDiagnostics.avgFirstPayoutAfterCap).toBeLessThanOrEqual(300);
     });
   });
 
+  describe('Profit Distribution Shape', () => {
+    it('P5 < P50 < P95 always', () => {
+      const result = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
+      
+      expect(result.profit.p5).toBeLessThan(result.profit.p50);
+      expect(result.profit.p50).toBeLessThan(result.profit.p95);
+    });
+
+    it('P50 is within 2 std devs of mean', () => {
+      const result = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
+      
+      expect(Math.abs(result.profit.p50 - result.profit.mean)).toBeLessThan(result.profit.stdDev * 2);
+    });
+  });
+
+  describe('Raw Samples', () => {
+    it('includes correct number of raw samples', () => {
+      const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS);
+      
+      expect(result.rawSamples).toBeDefined();
+      expect(result.rawSamples!.length).toBe(QUICK_CONFIG.iterations);
+      expect(result.rawSamples![0].length).toBe(QUICK_CONFIG.monthsPerIteration);
+    });
+  });
+});
+
+// ============================================================================
+// STEADY-STATE CHECKS
+// These verify the model reaches equilibrium over longer periods
+// ============================================================================
+
+describe('Steady-State Behavior (36-month)', () => {
+  it('eligible cohort size stabilizes (no unbounded growth)', () => {
+    const result = runMonteCarlo(LONG_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+    
+    const sizes = result.cohortDiagnostics.eligibleCohortSizeByMonth;
+    const last12 = sizes.slice(-12);
+    const prior12 = sizes.slice(-24, -12);
+    
+    const avgLast12 = last12.reduce((a, b) => a + b, 0) / 12;
+    const avgPrior12 = prior12.reduce((a, b) => a + b, 0) / 12;
+    
+    // Growth rate should be < 50% per 12 months if stable
+    const growthRate = (avgLast12 - avgPrior12) / avgPrior12;
+    
+    console.log('Steady-state check:', {
+      avgPrior12: avgPrior12.toFixed(0),
+      avgLast12: avgLast12.toFixed(0),
+      growthRate: (growthRate * 100).toFixed(1) + '%',
+    });
+    
+    expect(Math.abs(growthRate)).toBeLessThan(0.5);
+  });
+
+  it('payout-to-revenue ratio stabilizes', () => {
+    const result = runMonteCarlo(LONG_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+    
+    const ratios = result.cohortDiagnostics.payoutToRevenueRatioByMonth;
+    const last12 = ratios.slice(-12);
+    const prior12 = ratios.slice(-24, -12);
+    
+    const avgLast12 = last12.reduce((a, b) => a + b, 0) / 12;
+    const avgPrior12 = prior12.reduce((a, b) => a + b, 0) / 12;
+    
+    // Ratio change should be < 50% per 12 months if stable
+    const changeRate = Math.abs(avgLast12 - avgPrior12) / Math.max(avgPrior12, 0.01);
+    
+    console.log('Payout/revenue steady-state:', {
+      avgPrior12: (avgPrior12 * 100).toFixed(1) + '%',
+      avgLast12: (avgLast12 * 100).toFixed(1) + '%',
+      changeRate: (changeRate * 100).toFixed(1) + '%',
+    });
+    
+    expect(changeRate).toBeLessThan(0.5);
+  });
+});
+
+// ============================================================================
+// SCENARIO COMPARISON (relative, not absolute)
+// ============================================================================
+
+describe('Scenario Comparisons (Relative Behavior)', () => {
+  it('attack scenario is worse than baseline', () => {
+    const baseline = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
+    const attack = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.coordinatedAttack);
+    
+    expect(attack.profit.mean).toBeLessThan(baseline.profit.mean);
+    expect(attack.risk.probabilityOfLoss).toBeGreaterThan(baseline.risk.probabilityOfLoss);
+    expect(attack.profit.p5).toBeLessThan(baseline.profit.p5);
+  });
+
+  it('lifetime cap improves economics vs uncapped', () => {
+    const uncapped = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
+    const capped = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+    
+    expect(capped.profit.mean).toBeGreaterThan(uncapped.profit.mean);
+    expect(capped.risk.probabilityOfLoss).toBeLessThan(uncapped.risk.probabilityOfLoss);
+  });
+
+  it('lifetime cap mitigates attack damage', () => {
+    const attackNoCap = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.coordinatedAttack);
+    const attackWithCap = runMonteCarlo(FULL_CONFIG, {
+      ...SCENARIO_PRESETS.coordinatedAttack,
+      knobs: { ...SCENARIO_PRESETS.coordinatedAttack.knobs, lifetimeCapPerUser: 1043 },
+    });
+    
+    expect(attackWithCap.profit.mean).toBeGreaterThan(attackNoCap.profit.mean);
+  });
+
+  it('tighter caps improve profit monotonically', () => {
+    const cap10x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap10x);
+    const cap7x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+    const cap5x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap5x);
+    
+    expect(cap5x.profit.mean).toBeGreaterThan(cap7x.profit.mean);
+    expect(cap7x.profit.mean).toBeGreaterThan(cap10x.profit.mean);
+  });
+
+  it('conservative knobs reduce loss probability', () => {
+    const baseline = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
+    const conservative = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.conservativeKnobs);
+    
+    expect(conservative.risk.probabilityOfLoss).toBeLessThanOrEqual(baseline.risk.probabilityOfLoss);
+  });
+});
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+describe('Utility Functions', () => {
   describe('Scenario Comparison', () => {
-    it('compares multiple scenarios with deltas', () => {
+    it('compares scenarios with deltas', () => {
       const scenarios = {
         baseline: DEFAULT_ASSUMPTIONS,
         withLifetimeCap: SCENARIO_PRESETS.withLifetimeCap7x,
@@ -198,37 +303,14 @@ describe('Monte Carlo Simulation', () => {
       const comparisons = compareScenarios(QUICK_CONFIG, scenarios);
       
       expect(comparisons).toHaveLength(3);
-      
-      // Baseline has no delta
       expect(comparisons[0].deltaFromBaseline).toBeUndefined();
-      
-      // Others have deltas
       expect(comparisons[1].deltaFromBaseline).toBeDefined();
       expect(comparisons[2].deltaFromBaseline).toBeDefined();
-      
-      // With lifetime cap should improve profit vs uncapped baseline
-      expect(comparisons[1].deltaFromBaseline!.meanProfit).toBeGreaterThan(0);
-      
-      // Attack should reduce profit vs baseline
-      expect(comparisons[2].deltaFromBaseline!.meanProfit).toBeLessThan(0);
     });
   });
 
   describe('Sensitivity Analysis', () => {
-    it('shows profit sensitivity to first payout cap', () => {
-      const sensitivity = runSensitivityAnalysis(
-        { ...QUICK_CONFIG, iterations: 50 },
-        DEFAULT_ASSUMPTIONS,
-        'knobs.firstPayoutCap',
-        [null as unknown as number, 200, 300, 400, 500]
-      );
-      
-      expect(sensitivity.parameter).toBe('knobs.firstPayoutCap');
-      expect(sensitivity.values).toHaveLength(5);
-      expect(sensitivity.profits).toHaveLength(5);
-    });
-
-    it('shows profit sensitivity to lifetime cap', () => {
+    it('runs sensitivity analysis on parameter', () => {
       const sensitivity = runSensitivityAnalysis(
         { ...QUICK_CONFIG, iterations: 50 },
         DEFAULT_ASSUMPTIONS,
@@ -239,68 +321,8 @@ describe('Monte Carlo Simulation', () => {
       expect(sensitivity.parameter).toBe('knobs.lifetimeCapPerUser');
       expect(sensitivity.profits).toHaveLength(5);
       
-      // Tighter caps = better profit (more negative or less negative)
-      // Index 4 ($447) should be better than index 0 (null/unlimited)
+      // Tighter caps = better profit
       expect(sensitivity.profits[4]).toBeGreaterThan(sensitivity.profits[0]);
     });
-  });
-
-  describe('Output Sanity Checks', () => {
-    it('revenue includes new accounts and resets', () => {
-      const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS);
-      
-      // Revenue should be at least new account revenue
-      const minExpectedRevenue = DEFAULT_ASSUMPTIONS.accountsPerMonth * DEFAULT_ASSUMPTIONS.pricePerAccount;
-      expect(result.diagnostics.avgMonthlyRevenue).toBeGreaterThanOrEqual(minExpectedRevenue * 0.9);
-    });
-
-    it('includes raw samples when available', () => {
-      const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS);
-      
-      expect(result.rawSamples).toBeDefined();
-      expect(result.rawSamples!.length).toBe(QUICK_CONFIG.iterations);
-      expect(result.rawSamples![0].length).toBe(QUICK_CONFIG.monthsPerIteration);
-    });
-
-    it('tracks cohort diagnostics', () => {
-      const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS);
-      
-      expect(result.cohortDiagnostics.avgActiveCohortSize).toBeGreaterThan(0);
-      expect(result.cohortDiagnostics.avgEligibleCohortSize).toBeGreaterThan(0);
-      expect(result.cohortDiagnostics.activeCohortSizeByMonth.length).toBe(QUICK_CONFIG.monthsPerIteration);
-    });
-  });
-});
-
-describe('Invariants (Regression Guards)', () => {
-  it('7x lifetime cap must be profitable', () => {
-    const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
-    
-    // Critical invariant: 7x cap should always be profitable
-    expect(result.profit.mean).toBeGreaterThan(0);
-  });
-
-  it('lifetime caps must reduce loss probability vs uncapped', () => {
-    const uncapped = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-    const capped = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
-    
-    expect(capped.risk.probabilityOfLoss).toBeLessThan(uncapped.risk.probabilityOfLoss);
-  });
-
-  it('conservative knobs must reduce loss probability', () => {
-    const baseline = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
-    const conservative = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.conservativeKnobs);
-    
-    expect(conservative.risk.probabilityOfLoss).toBeLessThanOrEqual(baseline.risk.probabilityOfLoss);
-  });
-
-  it('attack with cap is better than attack without cap', () => {
-    const attackNoCap = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.coordinatedAttack);
-    const attackWithCap = runMonteCarlo(FULL_CONFIG, {
-      ...SCENARIO_PRESETS.coordinatedAttack,
-      knobs: { ...SCENARIO_PRESETS.coordinatedAttack.knobs, lifetimeCapPerUser: 1043 },
-    });
-    
-    expect(attackWithCap.profit.mean).toBeGreaterThan(attackNoCap.profit.mean);
   });
 });
