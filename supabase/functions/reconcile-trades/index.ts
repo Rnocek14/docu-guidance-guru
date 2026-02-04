@@ -64,42 +64,61 @@ interface ReconcileResult {
 }
 
 // ============ SYMBOL NORMALIZATION ============
-// Known futures contract patterns to normalize
-const FUTURES_ALIASES: Record<string, string[]> = {
-  'ES': ['ESZ', 'ESH', 'ESM', 'ESU'], // E-mini S&P 500
-  'NQ': ['NQZ', 'NQH', 'NQM', 'NQU'], // E-mini Nasdaq
-  'MES': ['MESZ', 'MESH', 'MESM', 'MESU'], // Micro E-mini S&P
-  'MNQ': ['MNQZ', 'MNQH', 'MNQM', 'MNQU'], // Micro E-mini Nasdaq
-  'YM': ['YMZ', 'YMH', 'YMM', 'YMU'], // E-mini Dow
-  'RTY': ['RTYZ', 'RTYH', 'RTYM', 'RTYU'], // E-mini Russell
-  'CL': ['CLZ', 'CLF', 'CLG', 'CLH', 'CLJ', 'CLK', 'CLM', 'CLN', 'CLQ', 'CLU', 'CLV', 'CLX'], // Crude Oil
-  'GC': ['GCZ', 'GCG', 'GCJ', 'GCM', 'GCQ', 'GCV'], // Gold
-}
+// Futures month codes: F=Jan, G=Feb, H=Mar, J=Apr, K=May, M=Jun, N=Jul, Q=Aug, U=Sep, V=Oct, X=Nov, Z=Dec
+const MONTH_CODES = 'FGHJKMNQUVXZ'
+
+// Known base symbols for direct matching (covers edge cases like numeric-leading symbols)
+const KNOWN_BASE_SYMBOLS = new Set([
+  // E-mini and Micro indices
+  'ES', 'NQ', 'YM', 'RTY', 'MES', 'MNQ', 'MYM', 'M2K',
+  // Energy
+  'CL', 'NG', 'HO', 'RB', 'MCL',
+  // Metals
+  'GC', 'SI', 'HG', 'PL', 'MGC',
+  // Currencies (numeric-leading)
+  '6E', '6B', '6J', '6A', '6C', '6S', '6N', '6M',
+  // Bonds
+  'ZB', 'ZN', 'ZT', 'ZF', 'UB',
+  // Agricultural
+  'ZC', 'ZS', 'ZW', 'ZM', 'ZL', 'LE', 'HE', 'GF',
+])
 
 /**
  * Normalize a trading symbol for comparison
- * - Uppercase and trim
- * - Strip contract month/year suffixes (e.g., NQZ5 -> NQ, ESM24 -> ES)
- * - Handle known aliases
+ * Uses regex to extract base symbol from futures contract format: BASE + MONTH_CODE + YEAR
+ * Examples: NQZ5 -> NQ, ESM24 -> ES, 6EH6 -> 6E, MNQU5 -> MNQ
  */
 function normalizeSymbol(symbol: string): string {
   if (!symbol) return ''
   
-  let normalized = symbol.trim().toUpperCase()
+  const normalized = symbol.trim().toUpperCase()
   
-  // Remove trailing digits (contract year like '24', '5', '25')
-  normalized = normalized.replace(/\d+$/, '')
+  // Regex: capture base symbol, then optional month code + year digits
+  // Pattern: ^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,4})?$
+  const futuresMatch = normalized.match(/^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,4})?$/)
   
-  // Check if this matches any alias pattern and map to base symbol
-  for (const [base, aliases] of Object.entries(FUTURES_ALIASES)) {
-    if (aliases.some(alias => normalized === alias || normalized.startsWith(alias))) {
-      return base
-    }
-    if (normalized === base) {
+  if (futuresMatch) {
+    const [, base, monthCode] = futuresMatch
+    // Validate the month code is actually a month code (not part of the base)
+    if (MONTH_CODES.includes(monthCode)) {
+      // Check if base is a known symbol, or if base + monthCode would be known
+      if (KNOWN_BASE_SYMBOLS.has(base)) {
+        return base
+      }
+      // For unknown bases, still strip the contract suffix
       return base
     }
   }
   
+  // Fallback: just strip trailing digits (handles cases like ES24 without month code)
+  const strippedDigits = normalized.replace(/\d+$/, '')
+  
+  // Check if the result is a known base
+  if (KNOWN_BASE_SYMBOLS.has(strippedDigits)) {
+    return strippedDigits
+  }
+  
+  // Return as-is if no normalization applied
   return normalized
 }
 
@@ -412,6 +431,7 @@ Deno.serve(async (req) => {
       extra_in_db: resultData.extra_in_db,
       mismatched: resultData.mismatched,
       invalid_external: resultData.invalid_external,
+      timestamp_deltas: resultData.timestamp_deltas,
       integrity_hash: integrityHash,
       request_id: requestId,
       created_by: user.id
