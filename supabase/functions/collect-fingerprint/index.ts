@@ -159,14 +159,8 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Increment seen_count for existing fingerprints
-    await supabaseAdmin
-      .from('device_fingerprints')
-      .update({ 
-        seen_count: supabaseAdmin.rpc('increment', { row_id: fingerprint.id }),
-        last_seen_at: new Date().toISOString()
-      })
-      .eq('id', fingerprint.id)
+    // FIX: Use atomic RPC for seen_count increment (not .update with rpc())
+    await supabaseAdmin.rpc('bump_fingerprint_seen', { _id: fingerprint.id })
 
     return new Response(
       JSON.stringify({
