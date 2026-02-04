@@ -404,6 +404,7 @@ export type Database = {
           platform_account_id: string
           request_id: string
           summary: Json
+          timestamp_deltas: Json
           to_ts: string
         }
         Insert: {
@@ -420,6 +421,7 @@ export type Database = {
           platform_account_id: string
           request_id: string
           summary: Json
+          timestamp_deltas?: Json
           to_ts: string
         }
         Update: {
@@ -436,6 +438,7 @@ export type Database = {
           platform_account_id?: string
           request_id?: string
           summary?: Json
+          timestamp_deltas?: Json
           to_ts?: string
         }
         Relationships: [
