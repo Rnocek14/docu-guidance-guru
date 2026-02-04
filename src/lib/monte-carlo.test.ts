@@ -130,19 +130,19 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       // Reusable invariant: counts must be finite, non-negative integers
       // - Number.isFinite guards against NaN/Infinity propagation
       // - Number.isInteger catches leaking expectation values, accidental averaging, or mixing aggregates
-      const isCount = (n: number) => Number.isFinite(n) && Number.isInteger(n) && n >= 0;
+      // - Optional max bound for series with known upper limits
+      const isCount = (n: number, max?: number) =>
+        Number.isFinite(n) && Number.isInteger(n) && n >= 0 && (max === undefined || n <= max);
       
-      expect(capHitsByMonth.every(isCount)).toBe(true);
-      expect(zombiesByMonth.every(isCount)).toBe(true);
-      expect(resetsByMonth.every(isCount)).toBe(true);
-      expect(activeCohortSizeByMonth.every(isCount)).toBe(true);
-      expect(eligibleCohortSizeByMonth.every(isCount)).toBe(true);
-      expect(newPassedByMonth.every(isCount)).toBe(true);
+      expect(capHitsByMonth.every(n => isCount(n))).toBe(true);
+      expect(zombiesByMonth.every(n => isCount(n))).toBe(true);
+      expect(resetsByMonth.every(n => isCount(n))).toBe(true);
+      expect(activeCohortSizeByMonth.every(n => isCount(n))).toBe(true);
+      expect(eligibleCohortSizeByMonth.every(n => isCount(n))).toBe(true);
+      expect(newPassedByMonth.every(n => isCount(n))).toBe(true);
       
       // newPassedByMonth has additional bound: cannot exceed accountsPerMonth + 1 (rounding tolerance)
-      // Self-contained check so it can be safely copy-pasted
-      const maxNew = assumptions.accountsPerMonth + 1;
-      expect(newPassedByMonth.every(n => isCount(n) && n <= maxNew)).toBe(true);
+      expect(newPassedByMonth.every(n => isCount(n, assumptions.accountsPerMonth + 1))).toBe(true);
     });
 
     it('per-month series sums are internally consistent (conservation check)', () => {
