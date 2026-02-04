@@ -80,18 +80,14 @@ export default function AccountDetails() {
     enabled: !!id,
   });
 
-  // Check if current user is staff (risk_officer, support, or admin)
+  // Check if current user is staff (risk_officer, support, or admin) using RPC for RLS safety
   const { data: isStaff } = useQuery({
     queryKey: ['user-is-staff', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', user?.id)
-        .in('role', ['risk_officer', 'support', 'admin']);
-
+      const { data, error } = await supabase.rpc('get_user_roles', { _user_id: user?.id });
       if (error) throw error;
-      return (data?.length ?? 0) > 0;
+      const roles = (data as string[]) ?? [];
+      return roles.some(r => ['risk_officer', 'support', 'admin'].includes(r));
     },
     enabled: !!user?.id,
   });
