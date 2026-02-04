@@ -115,12 +115,22 @@ export interface MonteCarloResult {
     payoutsRejectedDueToLifetimeCap: number;
     accountsCompletedByCap: number;
     
-    // NEW: Distribution data for confidence
+    // Distribution data for confidence
     lifetimePaidP50: number;
     lifetimePaidP90: number;
     lifetimePaidP95: number;
     payoutsClippedByLifetimeCap: number;
     avgClippedAmount: number;
+  };
+  
+  // Cohort/steady-state diagnostics
+  cohortDiagnostics: {
+    avgActiveCohortSize: number;           // average active accounts per month
+    activeCohortSizeByMonth: number[];     // cohort size over time (last iteration)
+    payoutToRevenueRatioByMonth: number[]; // payout/revenue ratio over time
+    resetRevenue: number;                  // total revenue from resets
+    resetsThisRun: number;                 // count of resets
+    zombieAccountsCompleted: number;       // accounts completed due to headroom < minimum
   };
 
   rawSamples?: number[][]; // optional: all monthly profits per iteration
@@ -128,12 +138,17 @@ export interface MonteCarloResult {
 
 export interface MonthResult {
   revenue: number;
+  resetRevenue: number;         // NEW: revenue from resets
   payouts: number;
   fraudLoss: number;
   chargebacks: number;
   variableCosts: number;
   fixedCosts: number;
   netProfit: number;
+  
+  // Cohort tracking
+  activeCohortSize: number;     // NEW: active accounts at end of month
+  resetsThisMonth: number;      // NEW: count of resets
   
   // Detailed payout tracking
   payoutDetails: {
@@ -144,6 +159,7 @@ export interface MonthResult {
     lifetimeCapHits: number;
     lifetimeCapRejections: number;
     accountsCompletedByCap: number;
+    zombieAccountsCompleted: number;  // NEW: completed due to headroom < $50
     payoutSizes: number[];
     firstPayoutSizes: number[];  // before/after cap pairs
     lifetimeCapClippedAmounts: number[]; // amount clipped by lifetime cap
@@ -154,10 +170,12 @@ export interface MonthResult {
 export interface AccountState {
   id: number;
   createdMonth: number;
+  eligibleMonth: number;   // NEW: first month account can request payout
   lifetimePaid: number;
   payoutCount: number;
-  isCompleted: boolean; // true when lifetime cap reached
-  isActive: boolean;    // false if failed/churned
+  isCompleted: boolean;    // true when lifetime cap reached or zombie completed
+  isActive: boolean;       // false if failed/churned (can be reset back to true)
+  hasReset: boolean;       // NEW: track if this account has been reset
 }
 
 // Iteration-level account stats for aggregation
@@ -363,18 +381,45 @@ function simulateMonth(
   // =========================================================================
   const newPassedAccounts = Math.round(assumptions.accountsPerMonth * passRate);
   
+  // Calculate eligibility month based on avgDaysToFirstPayout
+  const eligibilityLag = Math.ceil(assumptions.avgDaysToFirstPayout / 30);
+  
   // Create new accounts with persistent IDs
   for (let i = 0; i < newPassedAccounts; i++) {
     const accountId = ctx.nextAccountId++;
     ctx.accountStates.set(accountId, {
       id: accountId,
       createdMonth: monthIndex,
+      eligibleMonth: monthIndex + eligibilityLag, // FIX #1: Eligibility gate
       lifetimePaid: 0,
       payoutCount: 0,
       isCompleted: false,
       isActive: true,
+      hasReset: false,
     });
   }
+  
+  // =========================================================================
+  // RESET PROCESSING - resets generate revenue and recycle accounts
+  // =========================================================================
+  let resetsThisMonth = 0;
+  let resetRevenue = 0;
+  let zombieAccountsCompleted = 0;
+  
+  // FIX #3: Check for zombie accounts (headroom < $50) and complete them
+  const lifetimeCap = knobs.lifetimeCapPerUser;
+  ctx.accountStates.forEach(state => {
+    if (!state.isActive || state.isCompleted) return;
+    
+    if (lifetimeCap !== null) {
+      const headroom = lifetimeCap - state.lifetimePaid;
+      if (headroom > 0 && headroom < 50) {
+        // Zombie account: not enough headroom for minimum payout
+        state.isCompleted = true;
+        zombieAccountsCompleted++;
+      }
+    }
+  });
   
   // =========================================================================
   // PAYOUT REQUESTS FROM ALL ELIGIBLE ACCOUNTS (new + existing cohorts)
@@ -390,10 +435,10 @@ function simulateMonth(
   let payoutRequestCount = 0;
   let payoutApprovedCount = 0;
   
-  // All active, non-completed accounts can request payouts
+  // All active, non-completed accounts that have reached eligibility can request payouts
   const eligibleAccounts: AccountState[] = [];
   ctx.accountStates.forEach(state => {
-    if (state.isActive && !state.isCompleted) {
+    if (state.isActive && !state.isCompleted && monthIndex >= state.eligibleMonth) {
       eligibleAccounts.push(state);
     }
   });
@@ -405,10 +450,18 @@ function simulateMonth(
       continue; // Didn't request this month
     }
     
-    // Churn: some accounts become inactive (reset/fail)
+    // FIX #2: Churn/reset logic - resets generate revenue and recycle account
     if (random() < assumptions.resetRate / 12) { // Monthly churn rate
-      account.isActive = false;
-      continue;
+      resetsThisMonth++;
+      resetRevenue += knobs.resetPrice;
+      
+      // Reset recycles the account: reset lifetime paid and keep active
+      account.lifetimePaid = 0;
+      account.payoutCount = 0;
+      account.isCompleted = false;
+      account.hasReset = true;
+      account.eligibleMonth = monthIndex + eligibilityLag; // Must wait again
+      continue; // No payout this month since they reset
     }
     
     const numPayouts = Math.max(1, Math.round(payoutsPerAccount));
@@ -417,7 +470,6 @@ function simulateMonth(
       payoutRequestCount++;
       
       // Check lifetime cap headroom BEFORE calculating payout
-      const lifetimeCap = knobs.lifetimeCapPerUser;
       const headroom = lifetimeCap !== null 
         ? lifetimeCap - account.lifetimePaid 
         : Infinity;
@@ -483,7 +535,15 @@ function simulateMonth(
     }
   }
   
-  // Fraud loss (successful fraud attempts)
+  // Count active cohort size at end of month
+  let activeCohortSize = 0;
+  ctx.accountStates.forEach(state => {
+    if (state.isActive && !state.isCompleted) {
+      activeCohortSize++;
+    }
+  });
+  
+  // Fraud loss (successful fraud attempts) - scaled by ELIGIBLE cohort size
   const fraudAttempts = eligibleAccounts.length * fraudAttemptRate;
   const successfulFrauds = fraudAttempts * fraudSuccessRate;
   const avgFraudPayout = logNormal(
@@ -493,24 +553,27 @@ function simulateMonth(
   );
   const fraudLoss = successfulFrauds * avgFraudPayout * knobs.payoutSplitPercent;
   
-  // Chargebacks
+  // Chargebacks - tied to NEW account revenue only
   const chargebacks = revenue * chargebackRate;
   
   // Costs
   const variableCosts = assumptions.accountsPerMonth * assumptions.variableCostPerAccount;
   const fixedCosts = assumptions.fixedMonthlyCosts;
   
-  // Net profit
-  const netProfit = revenue - totalPayouts - fraudLoss - chargebacks - variableCosts - fixedCosts;
+  // Net profit - now includes reset revenue
+  const netProfit = revenue + resetRevenue - totalPayouts - fraudLoss - chargebacks - variableCosts - fixedCosts;
   
   return {
     revenue,
+    resetRevenue,
     payouts: totalPayouts,
     fraudLoss,
     chargebacks,
     variableCosts,
     fixedCosts,
     netProfit,
+    activeCohortSize,
+    resetsThisMonth,
     payoutDetails: {
       requestCount: payoutRequestCount,
       approvedCount: payoutApprovedCount,
@@ -519,6 +582,7 @@ function simulateMonth(
       lifetimeCapHits,
       lifetimeCapRejections,
       accountsCompletedByCap: accountsCompletedThisMonth,
+      zombieAccountsCompleted,
       payoutSizes,
       firstPayoutSizes,
       lifetimeCapClippedAmounts,
@@ -681,10 +745,24 @@ export function runMonteCarlo(
   // Diagnostics (averages across all months)
   const allResults = allMonthResults.flat();
   const avgRevenue = allResults.reduce((s, r) => s + r.revenue, 0) / allResults.length;
+  const avgResetRevenue = allResults.reduce((s, r) => s + r.resetRevenue, 0) / allResults.length;
   const avgPayouts = allResults.reduce((s, r) => s + r.payouts, 0) / allResults.length;
   const avgFraudLoss = allResults.reduce((s, r) => s + r.fraudLoss, 0) / allResults.length;
   const avgChargebacks = allResults.reduce((s, r) => s + r.chargebacks, 0) / allResults.length;
   const avgCosts = allResults.reduce((s, r) => s + r.variableCosts + r.fixedCosts, 0) / allResults.length;
+  
+  // Cohort diagnostics
+  const totalResets = allResults.reduce((s, r) => s + r.resetsThisMonth, 0);
+  const totalResetRevenue = allResults.reduce((s, r) => s + r.resetRevenue, 0);
+  const totalZombieAccountsCompleted = allResults.reduce((s, r) => s + r.payoutDetails.zombieAccountsCompleted, 0);
+  const avgActiveCohortSize = allResults.reduce((s, r) => s + r.activeCohortSize, 0) / allResults.length;
+  
+  // Get cohort size over time from last iteration (for visualization)
+  const lastIterResults = allMonthResults[allMonthResults.length - 1] || [];
+  const activeCohortSizeByMonth = lastIterResults.map(r => r.activeCohortSize);
+  const payoutToRevenueRatioByMonth = lastIterResults.map(r => 
+    r.revenue > 0 ? r.payouts / (r.revenue + r.resetRevenue) : 0
+  );
   
   // Payout diagnostics
   const sortedPayoutTotals = allResults.map(r => r.payouts).sort((a, b) => a - b);
@@ -743,6 +821,9 @@ export function runMonteCarlo(
     ? totalPayoutsApproved / totalAccountsAcrossIterations
     : 0;
   
+  // Total revenue including resets
+  const avgTotalRevenue = avgRevenue + avgResetRevenue;
+  
   return {
     config,
     assumptions,
@@ -766,13 +847,13 @@ export function runMonteCarlo(
       consecutiveLossMonths: maxConsecutiveLoss,
     },
     diagnostics: {
-      avgMonthlyRevenue: avgRevenue,
+      avgMonthlyRevenue: avgTotalRevenue, // Now includes reset revenue
       avgMonthlyPayouts: avgPayouts,
       avgMonthlyFraudLoss: avgFraudLoss,
       avgMonthlyChargebacks: avgChargebacks,
       avgMonthlyCosts: avgCosts,
-      payoutToRevenueRatio: avgPayouts / avgRevenue,
-      effectiveMargin: mean / avgRevenue,
+      payoutToRevenueRatio: avgPayouts / avgTotalRevenue,
+      effectiveMargin: mean / avgTotalRevenue,
     },
     payoutDiagnostics: {
       totalPayoutsPaidMean: avgPayouts,
@@ -797,6 +878,14 @@ export function runMonteCarlo(
       lifetimePaidP95,
       payoutsClippedByLifetimeCap,
       avgClippedAmount,
+    },
+    cohortDiagnostics: {
+      avgActiveCohortSize,
+      activeCohortSizeByMonth,
+      payoutToRevenueRatioByMonth,
+      resetRevenue: totalResetRevenue,
+      resetsThisRun: totalResets,
+      zombieAccountsCompleted: totalZombieAccountsCompleted,
     },
     rawSamples: allMonthlyProfits,
   };
