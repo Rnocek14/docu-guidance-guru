@@ -685,9 +685,15 @@ export default function MonteCarloAnalytics() {
                           <span className="text-muted-foreground">Zombie Accounts Completed</span>
                           <span className="font-medium">{result.cohortDiagnostics.zombieAccountsCompleted}</span>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex justify-between border-b pb-2">
                           <span className="text-muted-foreground">Accounts Completed by Cap</span>
                           <span className="font-medium">{result.payoutDiagnostics.accountsCompletedByCap}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Cap-Hit Share of Completions</span>
+                          <span className="font-medium">
+                            {(result.cohortDiagnostics.capHitShareOfCompletions * 100).toFixed(1)}%
+                          </span>
                         </div>
                       </div>
                     </CardContent>
