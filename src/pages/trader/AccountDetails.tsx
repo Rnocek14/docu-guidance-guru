@@ -6,6 +6,7 @@ import { RuleSnapshotCard } from '@/components/trader/RuleSnapshotCard';
 import { AccountTimeline } from '@/components/trader/AccountTimeline';
 import { ProgressGauges } from '@/components/trader/ProgressGauges';
 import { BreachExplainer } from '@/components/trader/BreachExplainer';
+import { ReconciliationHistory } from '@/components/risk/ReconciliationHistory';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -77,6 +78,22 @@ export default function AccountDetails() {
       return data as Violation[];
     },
     enabled: !!id,
+  });
+
+  // Check if current user is staff (risk_officer, support, or admin)
+  const { data: isStaff } = useQuery({
+    queryKey: ['user-is-staff', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', user?.id)
+        .in('role', ['risk_officer', 'support', 'admin']);
+
+      if (error) throw error;
+      return (data?.length ?? 0) > 0;
+    },
+    enabled: !!user?.id,
   });
 
   const ruleSnapshot = account?.rule_snapshot as RuleSnapshot | null;
@@ -171,6 +188,9 @@ export default function AccountDetails() {
 
         {/* Account Timeline */}
         <AccountTimeline accountId={account.id} maxHeight="500px" />
+
+        {/* Reconciliation History (staff only) */}
+        {isStaff && <ReconciliationHistory accountId={account.id} />}
       </div>
     </DashboardLayout>
   );
