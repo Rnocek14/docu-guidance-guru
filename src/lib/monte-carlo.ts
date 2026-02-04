@@ -147,6 +147,7 @@ export interface MonteCarloResult {
     capHitsByMonth: number[];              // accounts hitting cap each month
     zombiesByMonth: number[];              // zombie completions each month
     resetsByMonth: number[];               // resets each month
+    newPassedByMonth: number[];            // new passed accounts each month (for test bounds)
     
     // Completion breakdown diagnostic
     capHitShareOfCompletions: number;      // cap-hit completions / total completions
@@ -170,6 +171,7 @@ export interface MonthResult {
   eligibleCohortSize: number;   // accounts eligible for payout (active + past eligibility gate)
   resetsThisMonth: number;      // count of resets
   expectedResetsThisMonth: number; // expected resets based on hazard rate (for sanity checks)
+  newPassedAccountsThisMonth: number; // new accounts that passed this month (for test bounds)
   
   // Detailed payout tracking
   payoutDetails: {
@@ -659,6 +661,7 @@ function simulateMonth(
     eligibleCohortSize,
     resetsThisMonth,
     expectedResetsThisMonth,
+    newPassedAccountsThisMonth: newPassedAccounts,
     payoutDetails: {
       requestCount: payoutRequestCount,
       approvedCount: payoutApprovedCount,
@@ -1001,6 +1004,7 @@ export function runMonteCarlo(
       capHitsByMonth: lastIterResults.map(r => r.payoutDetails.accountsCompletedByCap),
       zombiesByMonth: lastIterResults.map(r => r.payoutDetails.zombieAccountsCompleted),
       resetsByMonth: lastIterResults.map(r => r.resetsThisMonth),
+      newPassedByMonth: lastIterResults.map(r => r.newPassedAccountsThisMonth),
       
       // Completion breakdown: cap-hit share of ALL completions (not just cap+zombie)
       capHitShareOfCompletions,
