@@ -463,6 +463,13 @@ Deno.serve(async (req) => {
     // EXECUTE PAYOUT STATE CHANGE
     // =============================================
 
+    // Effective values - will be set from RPC result for mark_paid
+    let effectiveNewStatus = newStatus
+    let effectivePaymentReference = body.payment_reference || null
+    let effectivePaidAt: string | null = null
+    let effectiveAmount = submittedAmount
+    let wasIdempotentRpc = false
+
     // For mark_paid, use the atomic RPC that handles payout + cycle reset in one transaction
     if (body.action === 'mark_paid') {
       const { data: markPaidResult, error: markPaidError } = await supabaseAdmin.rpc('mark_payout_paid', {
@@ -483,6 +490,14 @@ Deno.serve(async (req) => {
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
+      
+      // Extract effective values from RPC result (DB truth)
+      effectiveNewStatus = result.payout?.status || 'paid'
+      effectivePaymentReference = result.payout?.payment_reference || body.payment_reference
+      effectivePaidAt = result.payout?.paid_at || new Date().toISOString()
+      effectiveAmount = result.payout?.amount || submittedAmount
+      wasIdempotentRpc = result.idempotent || false
+      
     } else {
       // For non-mark_paid actions, use regular update flow
       const updateData: Record<string, unknown> = {
@@ -545,7 +560,7 @@ Deno.serve(async (req) => {
       mark_paid: 'payout_paid',
     }
 
-    // Create audit log with full verification details
+    // Create audit log with full verification details (use effective values)
     const auditResult = await insertAuditLog(supabaseAdmin, {
       user_id: userId,
       account_id: payout.account_id,
@@ -555,9 +570,10 @@ Deno.serve(async (req) => {
       details: {
         payout_id: body.payout_id,
         previous_status: previousStatus,
-        new_status: newStatus,
+        new_status: effectiveNewStatus,
         action_type: body.action,
         submitted_amount: submittedAmount,
+        effective_amount: effectiveAmount,
         calculated_eligible_amount: calculatedEligibleAmount,
         eligibility_check: eligibility,
         correlations_check: correlations?.has_correlations ? {
@@ -566,18 +582,20 @@ Deno.serve(async (req) => {
         } : { found: false },
         fraud_review_id: fraudReviewId,
         skip_fraud_check: body.skip_fraud_check || false,
-        payment_reference: body.payment_reference || null,
+        payment_reference: effectivePaymentReference,
+        paid_at: effectivePaidAt,
+        was_idempotent_rpc: wasIdempotentRpc,
         actor_role: 'admin',
       },
     })
 
-    // Create trader-visible event
-    const formattedAmount = submittedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    // Create trader-visible event (use effective values)
+    const formattedAmount = effectiveAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const eventExplanations: Record<PayoutAction, string> = {
       approve: `Your payout request for $${formattedAmount} has been approved.`,
       reject: `Your payout request has been declined. Reason: ${body.reason}`,
       request_more_info: `Additional information has been requested for your payout. Reason: ${body.reason}`,
-      mark_paid: `Your payout of $${formattedAmount} has been sent. Reference: ${body.payment_reference}`,
+      mark_paid: `Your payout of $${formattedAmount} has been sent. Reference: ${effectivePaymentReference}`,
     }
 
     const eventResult = await insertAccountEvent(supabaseAdmin, {
@@ -587,16 +605,17 @@ Deno.serve(async (req) => {
       event_data: {
         payout_id: body.payout_id,
         previous_status: previousStatus,
-        new_status: newStatus,
-        amount: submittedAmount,
+        new_status: effectiveNewStatus,
+        amount: effectiveAmount,
         explanation: eventExplanations[body.action],
-        payment_reference: body.payment_reference || null,
+        payment_reference: effectivePaymentReference,
+        paid_at: effectivePaidAt,
         actor_role: 'admin',
       },
     })
 
     // Determine if this was a duplicate request
-    const wasDuplicate = !auditResult.inserted && !eventResult.inserted
+    const wasDuplicate = (!auditResult.inserted && !eventResult.inserted) || wasIdempotentRpc
 
     return new Response(
       JSON.stringify({
@@ -604,11 +623,16 @@ Deno.serve(async (req) => {
         payout_id: body.payout_id,
         account_id: payout.account_id,
         previous_status: previousStatus,
-        new_status: newStatus,
+        new_status: effectiveNewStatus,
         action: body.action,
         request_id: requestId,
-        idempotent: !!body.idempotency_key,
+        idempotent: !!body.idempotency_key || wasIdempotentRpc,
         duplicate: wasDuplicate,
+        // mark_paid specific fields
+        ...(body.action === 'mark_paid' ? {
+          paid_at: effectivePaidAt,
+          payment_reference: effectivePaymentReference,
+        } : {}),
         // P0 verification results
         verification: body.action === 'approve' ? {
           submitted_amount: submittedAmount,
