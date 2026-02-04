@@ -181,6 +181,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           description: string | null
+          first_payout_cap_amount: number | null
           id: string
           intake_active: boolean
           is_active: boolean
@@ -201,6 +202,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           description?: string | null
+          first_payout_cap_amount?: number | null
           id?: string
           intake_active?: boolean
           is_active?: boolean
@@ -221,6 +223,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           description?: string | null
+          first_payout_cap_amount?: number | null
           id?: string
           intake_active?: boolean
           is_active?: boolean

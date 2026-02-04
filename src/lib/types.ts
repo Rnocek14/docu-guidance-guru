@@ -64,6 +64,7 @@ export interface Cohort {
   profit_target_percent: number;
   min_trading_days: number;
   max_position_size_percent: number;
+  first_payout_cap_amount: number | null;
   intake_active: boolean;
   created_at: string;
   created_by: string | null;
