@@ -150,12 +150,20 @@ export function AccountReviewActions({
       return response.json();
     },
     onSuccess: (data) => {
-      toast({
-        title: 'Action completed',
-        description: data.new_status 
-          ? `Account status changed to: ${data.new_status}` 
-          : 'Action recorded successfully',
-      });
+      // Dev-only feedback for idempotency hits
+      if (import.meta.env.DEV && data?.duplicate) {
+        toast({
+          title: 'Duplicate ignored (idempotent)',
+          description: `request_id: ${data.request_id}`,
+        });
+      } else {
+        toast({
+          title: 'Action completed',
+          description: data.new_status 
+            ? `Account status changed to: ${data.new_status}` 
+            : 'Action recorded successfully',
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ['review-queue'] });
       queryClient.invalidateQueries({ queryKey: ['account-details', accountId] });
       queryClient.invalidateQueries({ queryKey: ['account-events', accountId] });
