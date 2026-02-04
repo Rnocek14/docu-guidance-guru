@@ -42,6 +42,7 @@ export default function CohortsManagement() {
     max_total_drawdown_percent: 10,
     max_position_size_percent: 100,
     min_trading_days: 5,
+    first_payout_cap_amount: 300,
   });
 
   // Fetch cohorts with account counts
@@ -83,6 +84,7 @@ export default function CohortsManagement() {
         max_total_drawdown_percent: cohort.max_total_drawdown_percent,
         max_position_size_percent: cohort.max_position_size_percent,
         min_trading_days: cohort.min_trading_days,
+        first_payout_cap_amount: cohort.first_payout_cap_amount,
       });
       if (error) throw error;
     },
@@ -98,6 +100,7 @@ export default function CohortsManagement() {
         max_total_drawdown_percent: 10,
         max_position_size_percent: 100,
         min_trading_days: 5,
+        first_payout_cap_amount: 300,
       });
     },
     onError: (error: Error) => {
@@ -186,6 +189,14 @@ export default function CohortsManagement() {
                     <div>
                       <p className="text-muted-foreground">Min Trading Days</p>
                       <p className="font-medium">{cohort.min_trading_days}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">First Payout Cap</p>
+                      <p className="font-medium text-warning">
+                        {cohort.first_payout_cap_amount 
+                          ? `$${cohort.first_payout_cap_amount}` 
+                          : 'No cap'}
+                      </p>
                     </div>
                   </div>
 
@@ -290,6 +301,24 @@ export default function CohortsManagement() {
                     setNewCohort({ ...newCohort, min_trading_days: Number(e.target.value) })
                   }
                 />
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="firstPayoutCap">First Payout Cap ($)</Label>
+                <Input
+                  id="firstPayoutCap"
+                  type="number"
+                  value={newCohort.first_payout_cap_amount ?? ''}
+                  onChange={(e) =>
+                    setNewCohort({ 
+                      ...newCohort, 
+                      first_payout_cap_amount: e.target.value ? Number(e.target.value) : null 
+                    })
+                  }
+                  placeholder="Leave empty for no cap"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Limits the first payout per cycle to reduce fraud risk. $300 recommended.
+                </p>
               </div>
             </div>
           </div>
