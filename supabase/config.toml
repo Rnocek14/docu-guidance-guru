@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.evidence-pack]
 verify_jwt = false
+
+[functions.reconcile-trades]
+verify_jwt = false

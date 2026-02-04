@@ -95,45 +95,95 @@ async function verifyWebhookSignature(
   }
 }
 
-// Check if we need a daily reset (based on configured trading day boundary)
+// DST-safe timezone offset calculation for America/New_York
+// Returns the offset in hours (negative for behind UTC)
+function getETOffset(date: Date): number {
+  // Create a date string in the target timezone and parse it
+  // This leverages the runtime's timezone database
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
+  
+  const parts = formatter.formatToParts(date)
+  const getPart = (type: string) => parts.find(p => p.type === type)?.value || '0'
+  
+  // Build a date in the local timezone representation
+  const etYear = parseInt(getPart('year'))
+  const etMonth = parseInt(getPart('month')) - 1
+  const etDay = parseInt(getPart('day'))
+  const etHour = parseInt(getPart('hour'))
+  const etMinute = parseInt(getPart('minute'))
+  const etSecond = parseInt(getPart('second'))
+  
+  // Create a UTC date with the ET components
+  const etAsUtc = Date.UTC(etYear, etMonth, etDay, etHour, etMinute, etSecond)
+  
+  // The offset is the difference between UTC time and what we displayed
+  const offsetMs = date.getTime() - etAsUtc
+  return offsetMs / (1000 * 60 * 60)
+}
+
+// Get the trading day boundary (5 PM ET) for a given date
+function getTradingDayBoundary(date: Date, resetHour: number = 17): Date {
+  // Get the ET offset for this specific date (handles DST correctly)
+  const etOffset = getETOffset(date)
+  
+  // Convert reset hour from ET to UTC
+  const resetHourUTC = (resetHour + etOffset + 24) % 24
+  
+  // Create the boundary date
+  const boundary = new Date(date)
+  boundary.setUTCHours(resetHourUTC, 0, 0, 0)
+  
+  // If we're past the boundary, the next boundary is tomorrow
+  // If we're before it, the boundary is today
+  return boundary
+}
+
+// Check if we need a daily reset (DST-safe using America/New_York)
 function needsDailyReset(
   lastResetAt: string | null,
   resetHour: number,
-  timezone: string
+  _timezone: string // Kept for API compatibility, always uses America/New_York
 ): boolean {
   if (!lastResetAt) return true
   
   const now = new Date()
   const lastReset = new Date(lastResetAt)
   
-  // Get current trading day boundary in the configured timezone
-  // For simplicity, we use UTC offset calculation
-  // Trading day resets at resetHour in the specified timezone
-  const nowUTC = now.getTime()
-  const lastResetUTC = lastReset.getTime()
+  // Get the trading day boundaries for both dates
+  const nowBoundary = getTradingDayBoundary(now, resetHour)
+  const lastResetBoundary = getTradingDayBoundary(lastReset, resetHour)
   
-  // Calculate hours since last reset
-  const hoursSinceReset = (nowUTC - lastResetUTC) / (1000 * 60 * 60)
-  
-  // If more than 24 hours, definitely needs reset
-  if (hoursSinceReset >= 24) return true
-  
-  // Check if we've crossed the reset hour boundary
-  // This is a simplified check - production should use proper timezone library
-  const nowHourUTC = now.getUTCHours()
-  const lastResetHourUTC = lastReset.getUTCHours()
-  
-  // Approximate ET offset (simplified: -5 for EST, should handle DST properly)
-  const etOffset = timezone === 'America/New_York' ? -5 : 0
-  const resetHourUTC = (resetHour - etOffset + 24) % 24
-  
-  // Check if we've crossed the reset boundary
-  if (now.getUTCDate() !== lastReset.getUTCDate()) {
-    // Different day - check if we've passed reset hour
-    return nowHourUTC >= resetHourUTC
+  // If current time has crossed a boundary that's after the last reset's boundary,
+  // we need a reset
+  if (now >= nowBoundary && lastReset < nowBoundary) {
+    return true
   }
   
+  // Also reset if more than 24 hours have passed (safety net)
+  const hoursSinceReset = (now.getTime() - lastReset.getTime()) / (1000 * 60 * 60)
+  if (hoursSinceReset >= 24) return true
+  
   return false
+}
+
+// Get the current trading day's breach_day value (date in ET)
+function getBreachDay(date: Date): string {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  })
+  return formatter.format(date) // Returns YYYY-MM-DD format
 }
 
 // Check for rule breaches using frozen rule_snapshot

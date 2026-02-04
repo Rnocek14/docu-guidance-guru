@@ -692,6 +692,7 @@ export type Database = {
         | "intake_resumed"
         | "rule_breach_detected"
         | "evidence_pack_exported"
+        | "trade_reconciliation_run"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -871,6 +872,7 @@ export const Constants = {
         "intake_resumed",
         "rule_breach_detected",
         "evidence_pack_exported",
+        "trade_reconciliation_run",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
