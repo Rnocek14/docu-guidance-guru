@@ -653,11 +653,13 @@ Deno.serve(async (req) => {
 
     // Handle breach detection
     if (breachResult.breached) {
-      // Calculate breach_day in ET (America/New_York) for consistent deduplication
+      // Calculate breach_day from TRADE TIMESTAMP (filled_at), not webhook receipt time
+      // This prevents disputes when webhooks delay around 5pm ET boundary
       // Uses trading day key with 5pm ET rollover for DST-safe behavior
+      const tradeTimestamp = new Date(payload.filled_at)
       const detectedAt = new Date()
       const detectedAtISO = detectedAt.toISOString()
-      const breachDay = getBreachDay(detectedAt)
+      const breachDay = getBreachDay(tradeTimestamp) // Trade time, not receipt time
 
       // Insert violation with trade linkage for dispute defense
       // Uses upsert with onConflict to handle idempotency via unique index
