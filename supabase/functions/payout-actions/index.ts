@@ -463,64 +463,70 @@ Deno.serve(async (req) => {
     // EXECUTE PAYOUT STATE CHANGE
     // =============================================
 
-    // Update payout
-    const updateData: Record<string, unknown> = {
-      status: newStatus,
-      reviewed_by: userId,
-      reviewed_at: new Date().toISOString(),
-    }
-
-    if (body.reason) {
-      updateData.review_notes = body.reason
-    }
-
+    // For mark_paid, use the atomic RPC that handles payout + cycle reset in one transaction
     if (body.action === 'mark_paid') {
-      updateData.paid_at = new Date().toISOString()
-      updateData.payment_reference = body.payment_reference
-    }
-
-    // Store server-calculated amount for audit trail
-    if (calculatedEligibleAmount !== null) {
-      updateData.calculated_eligible_amount = calculatedEligibleAmount
-      updateData.submitted_amount = submittedAmount
-    }
-
-    if (fraudReviewId) {
-      updateData.fraud_review_id = fraudReviewId
-    }
-
-    const { error: updateError } = await supabaseAdmin
-      .from('payouts')
-      .update(updateData)
-      .eq('id', body.payout_id)
-
-    if (updateError) {
-      throw new Error(`Failed to update payout: ${updateError.message}`)
-    }
-
-    // Update account status based on payout action
-    let accountNewStatus: string | null = null
-    if (body.action === 'approve') {
-      accountNewStatus = 'payout_approved'
-    } else if (body.action === 'request_more_info') {
-      accountNewStatus = 'payout_under_review'
-    }
-
-    if (accountNewStatus) {
-      await supabaseAdmin
-        .from('accounts')
-        .update({ status: accountNewStatus })
-        .eq('id', payout.account_id)
-    }
-
-    // If payout is marked as paid, reset payout cycle for next period
-    if (body.action === 'mark_paid') {
-      // Use RPC to atomically reset payout cycle (baseline + timestamp + high watermark)
-      const { error: cycleErr } = await supabaseAdmin.rpc('reset_payout_cycle', { 
-        _account_id: payout.account_id 
+      const { data: markPaidResult, error: markPaidError } = await supabaseAdmin.rpc('mark_payout_paid', {
+        _payout_id: body.payout_id,
+        _payment_reference: body.payment_reference,
+        _reviewed_by: userId
       })
-      if (cycleErr) {
-        throw new Error(`Failed to reset payout cycle: ${cycleErr.message}`)
+      
+      if (markPaidError) {
+        throw new Error(`Failed to mark payout paid: ${markPaidError.message}`)
+      }
+      
+      // deno-lint-ignore no-explicit-any
+      const result = markPaidResult as any
+      if (!result?.success) {
+        return new Response(
+          JSON.stringify({ error: result?.error || 'Failed to mark payout paid' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    } else {
+      // For non-mark_paid actions, use regular update flow
+      const updateData: Record<string, unknown> = {
+        status: newStatus,
+        reviewed_by: userId,
+        reviewed_at: new Date().toISOString(),
+      }
+
+      if (body.reason) {
+        updateData.review_notes = body.reason
+      }
+
+      // Store server-calculated amount for audit trail
+      if (calculatedEligibleAmount !== null) {
+        updateData.calculated_eligible_amount = calculatedEligibleAmount
+        updateData.submitted_amount = submittedAmount
+      }
+
+      if (fraudReviewId) {
+        updateData.fraud_review_id = fraudReviewId
+      }
+
+      const { error: updateError } = await supabaseAdmin
+        .from('payouts')
+        .update(updateData)
+        .eq('id', body.payout_id)
+
+      if (updateError) {
+        throw new Error(`Failed to update payout: ${updateError.message}`)
+      }
+
+      // Update account status based on payout action
+      let accountNewStatus: string | null = null
+      if (body.action === 'approve') {
+        accountNewStatus = 'payout_approved'
+      } else if (body.action === 'request_more_info') {
+        accountNewStatus = 'payout_under_review'
+      }
+
+      if (accountNewStatus) {
+        await supabaseAdmin
+          .from('accounts')
+          .update({ status: accountNewStatus })
+          .eq('id', payout.account_id)
       }
     }
 
