@@ -76,7 +76,23 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
     it('unlimited cap has zero binding rate', () => {
       const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS); // no lifetime cap
       
+      // Binding rate must be 0 when cap is null (not just completed count)
+      // This verifies accountsHitLifetimeCap only increments for cap hits, not other exits
       expect(result.payoutDiagnostics.lifetimeCapBindingRate).toBe(0);
+      expect(result.payoutDiagnostics.capPressure).toBeNull();
+    });
+
+    it('cap pressure reflects saturation level', () => {
+      const cap5x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap5x);
+      
+      // Cap pressure = avgLifetimePaid / cap
+      // Should be between 0 and 1 (can exceed 1 if most accounts hit cap)
+      expect(cap5x.payoutDiagnostics.capPressure).not.toBeNull();
+      expect(cap5x.payoutDiagnostics.capPressure!).toBeGreaterThan(0);
+      
+      // Verify calculation is correct
+      const expectedPressure = cap5x.payoutDiagnostics.avgLifetimePaidPerAccount / (149 * 5);
+      expect(cap5x.payoutDiagnostics.capPressure).toBeCloseTo(expectedPressure, 6);
     });
   });
 

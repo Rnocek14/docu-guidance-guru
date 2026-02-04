@@ -121,6 +121,10 @@ export interface MonteCarloResult {
     lifetimePaidP95: number;
     payoutsClippedByLifetimeCap: number;
     avgClippedAmount: number;
+    
+    // Cap pressure: avgLifetimePaid / cap (only meaningful if cap set)
+    // Gives immediate "how close to saturation" signal
+    capPressure: number | null;
   };
   
   // Cohort/steady-state diagnostics
@@ -188,13 +192,14 @@ export interface AccountState {
   resetCount: number;          // how many times this account has reset
   isCompleted: boolean;        // true when lifetime cap reached or zombie completed
   isActive: boolean;           // false if failed/churned
+  completedByCapHit: boolean;  // TRUE only if completed due to hitting lifetime cap
 }
 
 // Iteration-level account stats for aggregation
 interface IterationAccountStats {
   totalEverCreated: number;           // all accounts ever created
   totalEverCompleted: number;         // accounts terminated (cap hit or zombie)
-  accountsHitLifetimeCap: number;     // specifically due to cap
+  accountsHitLifetimeCap: number;     // specifically due to cap (NOT zombies or other exits)
   totalLifetimePaid: number;
   totalHeadroomAtEnd: number;
   lifetimePaidValues: number[];       // for distribution
@@ -412,6 +417,7 @@ function simulateMonth(
       resetCount: 0,
       isCompleted: false,
       isActive: true,
+      completedByCapHit: false,  // Only true if completed due to cap hit
     });
     ctx.totalEverCreated++;
   }
@@ -554,9 +560,15 @@ function simulateMonth(
         if (account.lifetimePaidTotal + traderPayout >= lifetimeCap) {
           account.isCompleted = true;
           account.isActive = false;
+          account.completedByCapHit = true;  // Mark specifically as cap-hit completion
           accountsCompletedThisMonth++;
           ctx.totalEverCompleted++;
         }
+      }
+      
+      // HARD GUARD: Lifetime cap violation check (catches bugs instantly)
+      if (lifetimeCap !== null && account.lifetimePaidTotal + traderPayout > lifetimeCap + 1e-6) {
+        throw new Error(`[Monte Carlo] Lifetime cap violated: account ${account.id} would have ${account.lifetimePaidTotal + traderPayout} but cap is ${lifetimeCap}`);
       }
       
       // Ensure minimum payout threshold ($50)
@@ -724,7 +736,7 @@ export function runMonteCarlo(
     // AGGREGATE ACCOUNT STATS FROM REAL ITERATION DATA (no biased re-run!)
     // =========================================================================
     const lifetimeCap = effectiveAssumptions.knobs.lifetimeCapPerUser;
-    let accountsHitCap = 0;
+    let accountsHitCap = 0;  // ONLY counts accounts completed by hitting cap, not zombies
     let totalLifetimePaid = 0;
     let totalHeadroom = 0;
     const lifetimePaidValues: number[] = [];
@@ -733,7 +745,8 @@ export function runMonteCarlo(
       lifetimePaidValues.push(state.lifetimePaidTotal);
       totalLifetimePaid += state.lifetimePaidTotal;
       
-      if (state.isCompleted) {
+      // CRITICAL: Only count cap-hit completions, not zombies or other exits
+      if (state.completedByCapHit) {
         accountsHitCap++;
       }
       
@@ -933,6 +946,11 @@ export function runMonteCarlo(
       lifetimePaidP95,
       payoutsClippedByLifetimeCap,
       avgClippedAmount,
+      
+      // Cap pressure: avgLifetimePaid / cap (only meaningful if cap set)
+      capPressure: effectiveAssumptions.knobs.lifetimeCapPerUser !== null 
+        ? avgLifetimePaidPerAccount / effectiveAssumptions.knobs.lifetimeCapPerUser 
+        : null,
     },
     cohortDiagnostics: {
       avgActiveCohortSize,
