@@ -46,6 +46,11 @@ export interface LifetimeCapResult {
     avgLifetimePaid: number;         // avg payout total per account
     avgHeadroomAtEnd: number;        // avg remaining cap headroom
     payoutsRejected: number;         // count of payouts blocked by cap
+    payoutsClipped: number;          // count of payouts reduced by cap
+    avgClippedAmount: number;        // avg amount clipped
+    paidP50: number;                 // lifetime paid median
+    paidP90: number;                 // lifetime paid 90th percentile
+    paidP95: number;                 // lifetime paid 95th percentile
   };
   
   // First payout cap diagnostics
@@ -167,6 +172,11 @@ export function analyzeLifetimeCaps(
         avgLifetimePaid: r.avgLifetimePaidPerAccount,
         avgHeadroomAtEnd: r.avgHeadroomAtEnd,
         payoutsRejected: r.payoutsRejected,
+        payoutsClipped: r.payoutsClipped,
+        avgClippedAmount: r.avgClippedAmount,
+        paidP50: r.lifetimePaidP50,
+        paidP90: r.lifetimePaidP90,
+        paidP95: r.lifetimePaidP95,
       },
       
       firstPayoutCap: {
@@ -292,21 +302,21 @@ function findOptimalCap(
 
 export function formatLifetimeCapReport(summary: LifetimeCapSummary): string {
   const lines: string[] = [
-    '═══════════════════════════════════════════════════════════════════════════════════════════',
+    '═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════',
     '                    LIFETIME PAYOUT CAP SENSITIVITY ANALYSIS (with real binding)',
-    '═══════════════════════════════════════════════════════════════════════════════════════════',
+    '═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════',
     '',
     'LOCKED-IN PRICING:',
     `  Entry Fee: $${summary.pricing.entryFee}`,
     `  Reset Fee: $${summary.pricing.resetFee}`,
-    `  First Payout Cap: $${summary.pricing.firstPayoutCap}`,
+    `  First Payout Cap: $${summary.pricing.firstPayoutCap} (trader receives)`,
     `  Payout Split: ${summary.pricing.payoutSplitPercent}%`,
     '',
     `Config: ${summary.config.iterations} iterations × ${summary.config.monthsPerIteration} months`,
     '',
-    '┌────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┐',
-    '│ Lifetime Cap   │ Cap ($)  │ Binding% │ Margin   │ Profit   │ Avg Paid │ Headroom │ Rejected │',
-    '├────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼──────────┼──────────┤',
+    '┌────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┐',
+    '│ Lifetime Cap   │ Cap ($)  │ Binding% │ Margin   │ Profit   │ Avg Paid │ Paid P90 │ Paid P95 │ Headroom │ Clipped  │',
+    '├────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼──────────┼──────────┼──────────┼──────────┤',
   ];
   
   for (const r of summary.results) {
@@ -316,16 +326,18 @@ export function formatLifetimeCapReport(summary: LifetimeCapSummary): string {
     const margin = `${(r.profit.margin * 100).toFixed(1)}%`.padStart(8);
     const profit = `$${r.profit.mean.toFixed(0)}`.padStart(8);
     const avgPaid = `$${r.binding.avgLifetimePaid.toFixed(0)}`.padStart(8);
+    const paidP90 = `$${(r.binding.paidP90 || 0).toFixed(0)}`.padStart(8);
+    const paidP95 = `$${(r.binding.paidP95 || 0).toFixed(0)}`.padStart(8);
     const headroom = r.binding.avgHeadroomAtEnd === Infinity 
       ? 'N/A'.padStart(8) 
       : `$${r.binding.avgHeadroomAtEnd.toFixed(0)}`.padStart(8);
-    const rejected = r.binding.payoutsRejected.toString().padStart(8);
+    const clipped = r.binding.payoutsClipped.toString().padStart(8);
     
     const marker = r.capMultiple === summary.recommendation.optimalMultiple ? ' ←' : '';
-    lines.push(`│ ${label} │ ${cap} │ ${binding} │ ${margin} │ ${profit} │ ${avgPaid} │ ${headroom} │ ${rejected} │${marker}`);
+    lines.push(`│ ${label} │ ${cap} │ ${binding} │ ${margin} │ ${profit} │ ${avgPaid} │ ${paidP90} │ ${paidP95} │ ${headroom} │ ${clipped} │${marker}`);
   }
   
-  lines.push('└────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴──────────┴──────────┘');
+  lines.push('└────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴──────────┴──────────┴──────────┴──────────┘');
   lines.push('');
   
   // Warnings
