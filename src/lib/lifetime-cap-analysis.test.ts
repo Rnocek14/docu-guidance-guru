@@ -48,9 +48,12 @@ describe('Lifetime Cap Enforcement in Monte Carlo', () => {
     });
     console.log('Cohort diagnostics:', {
       avgActiveCohortSize: result.cohortDiagnostics.avgActiveCohortSize.toFixed(0),
+      avgEligibleCohortSize: result.cohortDiagnostics.avgEligibleCohortSize.toFixed(0),
       resetRevenue: result.cohortDiagnostics.resetRevenue.toFixed(0),
       resets: result.cohortDiagnostics.resetsThisRun,
       zombies: result.cohortDiagnostics.zombieAccountsCompleted,
+      fraudScaling: result.cohortDiagnostics.fraudScaling,
+      chargebackScaling: result.cohortDiagnostics.chargebackScaling,
     });
   });
 
@@ -61,13 +64,18 @@ describe('Lifetime Cap Enforcement in Monte Carlo', () => {
       DEFAULT_ASSUMPTIONS
     );
     
-    // The cohort size should grow over months as accounts become eligible
-    const sizes = result.cohortDiagnostics.activeCohortSizeByMonth;
-    console.log('Cohort sizes by month (with eligibility lag):', sizes);
+    // The ELIGIBLE cohort size should grow over months as accounts become eligible
+    // Active cohort includes accounts waiting for eligibility, eligible is a subset
+    const activeSizes = result.cohortDiagnostics.activeCohortSizeByMonth;
+    const eligibleSizes = result.cohortDiagnostics.eligibleCohortSizeByMonth;
+    console.log('Active cohort sizes by month:', activeSizes);
+    console.log('Eligible cohort sizes by month:', eligibleSizes);
     
-    // With eligibility lag, month 0 should have fewer eligible accounts than later months
-    // (because accounts created in month 0 aren't eligible until month 1)
-    expect(sizes.length).toBe(3);
+    // Eligible should be <= active, and month 0 eligible should be 0 or very low
+    expect(activeSizes.length).toBe(3);
+    expect(eligibleSizes.length).toBe(3);
+    // Month 0: new accounts not yet eligible
+    expect(eligibleSizes[0]).toBeLessThanOrEqual(activeSizes[0]);
   });
 
   it('should generate reset revenue when accounts reset', () => {
@@ -122,8 +130,9 @@ describe('Lifetime Cap Enforcement in Monte Carlo', () => {
     console.log('  $500 cap - Lifetime binding rate:', (withCap.payoutDiagnostics.lifetimeCapBindingRate * 100).toFixed(1) + '%');
     console.log('  No cap - Mean profit:', noCap.profit.mean.toFixed(0));
     console.log('  $500 cap - Mean profit:', withCap.profit.mean.toFixed(0));
-    console.log('  No cap - Cohort size:', noCap.cohortDiagnostics.avgActiveCohortSize.toFixed(0));
-    console.log('  $500 cap - Cohort size:', withCap.cohortDiagnostics.avgActiveCohortSize.toFixed(0));
+    console.log('  No cap - Active cohort:', noCap.cohortDiagnostics.avgActiveCohortSize.toFixed(0));
+    console.log('  No cap - Eligible cohort:', noCap.cohortDiagnostics.avgEligibleCohortSize.toFixed(0));
+    console.log('  $500 cap - Eligible cohort:', withCap.cohortDiagnostics.avgEligibleCohortSize.toFixed(0));
     
     // Key assertion: aggressive cap should show different behavior
     if (noCap.payoutDiagnostics.avgLifetimePaidPerAccount > 500) {
