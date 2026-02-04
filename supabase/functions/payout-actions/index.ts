@@ -241,8 +241,24 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Use client-provided idempotency key or generate one
-    const requestId = body.idempotency_key || crypto.randomUUID()
+    // Use client-provided idempotency key or generate deterministic one for mark_paid
+    // For mark_paid without idempotency_key, use deterministic ID to prevent log spam on retries
+    let requestId: string
+    if (body.idempotency_key) {
+      requestId = body.idempotency_key
+    } else if (body.action === 'mark_paid') {
+      // Deterministic: payout_id + action + payment_reference hash
+      const deterministicInput = `${body.payout_id}:mark_paid:${body.payment_reference || ''}`
+      const encoder = new TextEncoder()
+      const data = encoder.encode(deterministicInput)
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+      const hashArray = Array.from(new Uint8Array(hashBuffer))
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+      // Format as UUID-like string for consistency
+      requestId = `${hashHex.slice(0, 8)}-${hashHex.slice(8, 12)}-${hashHex.slice(12, 16)}-${hashHex.slice(16, 20)}-${hashHex.slice(20, 32)}`
+    } else {
+      requestId = crypto.randomUUID()
+    }
     const previousStatus = payout.status
     const newStatus = transition.to
 
@@ -591,11 +607,13 @@ Deno.serve(async (req) => {
 
     // Create trader-visible event (use effective values)
     const formattedAmount = effectiveAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    // Handle null payment reference cleanly in message
+    const refText = effectivePaymentReference ? ` Reference: ${effectivePaymentReference}` : ''
     const eventExplanations: Record<PayoutAction, string> = {
       approve: `Your payout request for $${formattedAmount} has been approved.`,
       reject: `Your payout request has been declined. Reason: ${body.reason}`,
       request_more_info: `Additional information has been requested for your payout. Reason: ${body.reason}`,
-      mark_paid: `Your payout of $${formattedAmount} has been sent. Reference: ${effectivePaymentReference}`,
+      mark_paid: `Your payout of $${formattedAmount} has been sent.${refText}`,
     }
 
     const eventResult = await insertAccountEvent(supabaseAdmin, {
