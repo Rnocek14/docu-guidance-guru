@@ -15,6 +15,9 @@ import Dashboard from "./pages/Dashboard";
 
 // Role-specific dashboards
 import TraderDashboard from "./pages/trader/TraderDashboard";
+import TraderAccounts from "./pages/trader/TraderAccounts";
+import TraderTrades from "./pages/trader/TraderTrades";
+import TraderPayouts from "./pages/trader/TraderPayouts";
 import RiskDashboard from "./pages/risk/RiskDashboard";
 import ReviewQueue from "./pages/risk/ReviewQueue";
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -56,6 +59,14 @@ const App = () => (
               }
             />
             <Route
+              path="/trader/accounts"
+              element={
+                <ProtectedRoute allowedRoles={['trader', 'admin']}>
+                  <TraderAccounts />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/trader/accounts/:id"
               element={
                 <ProtectedRoute allowedRoles={['trader', 'admin']}>
@@ -64,10 +75,18 @@ const App = () => (
               }
             />
             <Route
-              path="/trader/*"
+              path="/trader/trades"
               element={
                 <ProtectedRoute allowedRoles={['trader', 'admin']}>
-                  <TraderDashboard />
+                  <TraderTrades />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/trader/payouts"
+              element={
+                <ProtectedRoute allowedRoles={['trader', 'admin']}>
+                  <TraderPayouts />
                 </ProtectedRoute>
               }
             />
