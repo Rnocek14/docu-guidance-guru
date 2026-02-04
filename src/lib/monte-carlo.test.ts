@@ -127,12 +127,13 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       
       const { capHitsByMonth, zombiesByMonth, resetsByMonth, activeCohortSizeByMonth, eligibleCohortSizeByMonth, newPassedByMonth } = result.cohortDiagnostics;
       
-      // All series should be finite, non-negative numbers (catches NaN propagation)
-      expect(capHitsByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
-      expect(zombiesByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
-      expect(resetsByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
-      expect(activeCohortSizeByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
-      expect(eligibleCohortSizeByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
+      // All count series must be finite, non-negative integers
+      // Integer check catches leaking expectation values, accidental averaging, or mixing aggregates
+      expect(capHitsByMonth.every(n => Number.isInteger(n) && n >= 0)).toBe(true);
+      expect(zombiesByMonth.every(n => Number.isInteger(n) && n >= 0)).toBe(true);
+      expect(resetsByMonth.every(n => Number.isInteger(n) && n >= 0)).toBe(true);
+      expect(activeCohortSizeByMonth.every(n => Number.isInteger(n) && n >= 0)).toBe(true);
+      expect(eligibleCohortSizeByMonth.every(n => Number.isInteger(n) && n >= 0)).toBe(true);
       
       // newPassedByMonth: finite, non-negative integers, bounded by accountsPerMonth + 1
       // Integer check catches accidental removal of Math.round()
