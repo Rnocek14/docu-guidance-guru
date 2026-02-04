@@ -118,12 +118,14 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       expect(result.cohortDiagnostics.zombiesByMonth.length).toBe(expectedLength);
       expect(result.cohortDiagnostics.resetsByMonth.length).toBe(expectedLength);
       expect(result.cohortDiagnostics.activeCohortSizeByMonth.length).toBe(expectedLength);
+      expect(result.cohortDiagnostics.newPassedByMonth.length).toBe(expectedLength);
     });
 
     it('per-month event series are never negative and never NaN', () => {
       const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+      const assumptions = SCENARIO_PRESETS.withLifetimeCap7x;
       
-      const { capHitsByMonth, zombiesByMonth, resetsByMonth, activeCohortSizeByMonth, eligibleCohortSizeByMonth } = result.cohortDiagnostics;
+      const { capHitsByMonth, zombiesByMonth, resetsByMonth, activeCohortSizeByMonth, eligibleCohortSizeByMonth, newPassedByMonth } = result.cohortDiagnostics;
       
       // All series should be finite, non-negative numbers (catches NaN propagation)
       expect(capHitsByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
@@ -131,6 +133,10 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       expect(resetsByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
       expect(activeCohortSizeByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
       expect(eligibleCohortSizeByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
+      
+      // newPassedByMonth: finite, non-negative, and bounded by accountsPerMonth (catches double-counting)
+      const maxNew = assumptions.accountsPerMonth;
+      expect(newPassedByMonth.every(n => Number.isFinite(n) && n >= 0 && n <= maxNew)).toBe(true);
     });
 
     it('per-month series sums are internally consistent (conservation check)', () => {
