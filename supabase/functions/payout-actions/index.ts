@@ -247,8 +247,10 @@ Deno.serve(async (req) => {
     if (body.idempotency_key) {
       requestId = body.idempotency_key
     } else if (body.action === 'mark_paid') {
-      // Deterministic: payout_id + action + payment_reference hash
-      const deterministicInput = `${body.payout_id}:mark_paid:${body.payment_reference || ''}`
+      // Deterministic: payout_id + action + normalized payment_reference hash
+      // Normalize: trim whitespace and handle null/undefined consistently
+      const normalizedRef = (body.payment_reference ?? '').trim().toLowerCase()
+      const deterministicInput = `${body.payout_id}:mark_paid:${normalizedRef}`
       const encoder = new TextEncoder()
       const data = encoder.encode(deterministicInput)
       const hashBuffer = await crypto.subtle.digest('SHA-256', data)
