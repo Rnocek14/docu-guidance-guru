@@ -1009,6 +1009,15 @@ export type Database = {
             }
             Returns: Json
           }
+        | {
+            Args: {
+              _account_id: string
+              _lookback_days?: number
+              _min_match_count?: number
+              _time_window_seconds?: number
+            }
+            Returns: Json
+          }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
