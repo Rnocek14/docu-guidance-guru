@@ -95,96 +95,79 @@ async function verifyWebhookSignature(
   }
 }
 
-// DST-safe timezone offset calculation for America/New_York
-// Returns the offset in hours (negative for behind UTC)
-function getETOffset(date: Date): number {
-  // Create a date string in the target timezone and parse it
-  // This leverages the runtime's timezone database
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  })
-  
-  const parts = formatter.formatToParts(date)
-  const getPart = (type: string) => parts.find(p => p.type === type)?.value || '0'
-  
-  // Build a date in the local timezone representation
-  const etYear = parseInt(getPart('year'))
-  const etMonth = parseInt(getPart('month')) - 1
-  const etDay = parseInt(getPart('day'))
-  const etHour = parseInt(getPart('hour'))
-  const etMinute = parseInt(getPart('minute'))
-  const etSecond = parseInt(getPart('second'))
-  
-  // Create a UTC date with the ET components
-  const etAsUtc = Date.UTC(etYear, etMonth, etDay, etHour, etMinute, etSecond)
-  
-  // The offset is the difference between UTC time and what we displayed
-  const offsetMs = date.getTime() - etAsUtc
-  return offsetMs / (1000 * 60 * 60)
-}
+// ========== DST-SAFE TIMEZONE HANDLING ==========
+const ET_TZ = "America/New_York"
 
-// Get the trading day boundary (5 PM ET) for a given date
-function getTradingDayBoundary(date: Date, resetHour: number = 17): Date {
-  // Get the ET offset for this specific date (handles DST correctly)
-  const etOffset = getETOffset(date)
-  
-  // Convert reset hour from ET to UTC
-  const resetHourUTC = (resetHour + etOffset + 24) % 24
-  
-  // Create the boundary date
-  const boundary = new Date(date)
-  boundary.setUTCHours(resetHourUTC, 0, 0, 0)
-  
-  // If we're past the boundary, the next boundary is tomorrow
-  // If we're before it, the boundary is today
-  return boundary
-}
+// Returns ET time parts for any Date (DST-safe via Intl API)
+function getETParts(d: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: ET_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(d)
 
-// Check if we need a daily reset (DST-safe using America/New_York)
-function needsDailyReset(
-  lastResetAt: string | null,
-  resetHour: number,
-  _timezone: string // Kept for API compatibility, always uses America/New_York
-): boolean {
-  if (!lastResetAt) return true
-  
-  const now = new Date()
-  const lastReset = new Date(lastResetAt)
-  
-  // Get the trading day boundaries for both dates
-  const nowBoundary = getTradingDayBoundary(now, resetHour)
-  const lastResetBoundary = getTradingDayBoundary(lastReset, resetHour)
-  
-  // If current time has crossed a boundary that's after the last reset's boundary,
-  // we need a reset
-  if (now >= nowBoundary && lastReset < nowBoundary) {
-    return true
+  const get = (t: string) => parts.find(p => p.type === t)?.value ?? "00"
+
+  return {
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+    second: Number(get("second")),
   }
-  
-  // Also reset if more than 24 hours have passed (safety net)
-  const hoursSinceReset = (now.getTime() - lastReset.getTime()) / (1000 * 60 * 60)
-  if (hoursSinceReset >= 24) return true
-  
-  return false
 }
 
-// Get the current trading day's breach_day value (date in ET)
-function getBreachDay(date: Date): string {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  })
-  return formatter.format(date) // Returns YYYY-MM-DD format
+/**
+ * Trading day key with a 5pm ET rollover:
+ * - If ET time is >= resetHourET => trading day is today's ET date
+ * - If ET time is <  resetHourET => trading day is yesterday's ET date
+ * 
+ * Returns YYYY-MM-DD string representing the trading day
+ */
+function getTradingDayKeyET(d: Date, resetHourET = 17): string {
+  const p = getETParts(d)
+
+  // Build an ET calendar-date Date object in *UTC* just for safe arithmetic
+  const etMidnightUTC = new Date(Date.UTC(p.year, p.month - 1, p.day, 0, 0, 0))
+
+  // If before rollover, trading day belongs to previous ET date
+  if (p.hour < resetHourET) {
+    etMidnightUTC.setUTCDate(etMidnightUTC.getUTCDate() - 1)
+  }
+
+  // Format that shifted calendar date as YYYY-MM-DD
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(etMidnightUTC)
 }
+
+// Check if we need a daily reset (DST-safe)
+// Returns true if trading day has changed since last reset
+function needsDailyReset(lastResetAt: string | null, resetHourET = 17): boolean {
+  if (!lastResetAt) return true
+
+  const now = new Date()
+  const last = new Date(lastResetAt)
+
+  // If trading day key changed since last reset, we must reset
+  return getTradingDayKeyET(now, resetHourET) !== getTradingDayKeyET(last, resetHourET)
+}
+
+// For violations.breach_day (DATE), use the trading day key
+function getBreachDay(d: Date): string {
+  return getTradingDayKeyET(d, 17)
+}
+
+// ========== BREACH DETECTION ==========
 
 // Check for rule breaches using frozen rule_snapshot
 // PnL Source-of-Truth: Option A - We trust platform-provided PnL
@@ -595,10 +578,9 @@ Deno.serve(async (req) => {
 
     // --- METRICS UPDATE (only after successful trade insert) ---
 
-    // Check for daily reset
-    const resetHour = 17 // 5 PM ET (could fetch from system_settings)
-    const timezone = 'America/New_York'
-    const shouldResetDaily = needsDailyReset(account.daily_reset_at, resetHour, timezone)
+    // Check for daily reset (DST-safe)
+    const resetHour = 17 // 5 PM ET (CME close)
+    const shouldResetDaily = needsDailyReset(account.daily_reset_at, resetHour)
 
     let dailyPnl = account.daily_pnl
     let dailyPnlStartBalance = account.daily_pnl_start_balance
@@ -672,10 +654,10 @@ Deno.serve(async (req) => {
     // Handle breach detection
     if (breachResult.breached) {
       // Calculate breach_day in ET (America/New_York) for consistent deduplication
+      // Uses trading day key with 5pm ET rollover for DST-safe behavior
       const detectedAt = new Date()
       const detectedAtISO = detectedAt.toISOString()
-      // Use UTC date as breach_day (consistent, deterministic)
-      const breachDay = detectedAtISO.split('T')[0]
+      const breachDay = getBreachDay(detectedAt)
 
       // Insert violation with trade linkage for dispute defense
       // Uses upsert with onConflict to handle idempotency via unique index

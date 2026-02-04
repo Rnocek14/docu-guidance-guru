@@ -144,7 +144,7 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Verify account exists
+    // Verify account exists and platform mapping is correct
     const { data: account, error: accountError } = await supabase
       .from('accounts')
       .select('id, account_number')
@@ -158,11 +158,45 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Fetch internal trades for the time range
+    // Verify platform_account_id mapping exists for this account
+    const { data: platformMapping, error: mappingError } = await supabase
+      .from('platform_accounts')
+      .select('id')
+      .eq('account_id', body.account_id)
+      .eq('platform_account_id', body.platform_account_id)
+      .single()
+
+    if (mappingError || !platformMapping) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Platform account mapping not found for this account', 
+          account_id: body.account_id,
+          platform_account_id: body.platform_account_id,
+          request_id: requestId 
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Validate external trades - reject any without platform_trade_id
+    const invalidExternal: string[] = []
+    const validExternalTrades: ExternalTrade[] = []
+    
+    for (let i = 0; i < body.trades.length; i++) {
+      const t = body.trades[i]
+      if (!t.platform_trade_id || t.platform_trade_id.trim() === '') {
+        invalidExternal.push(`index_${i}`)
+      } else {
+        validExternalTrades.push(t)
+      }
+    }
+
+    // Fetch internal trades for the time range, filtered by platform_account_id
     const { data: internalTrades, error: tradesError } = await supabase
       .from('trades')
       .select('platform_trade_id, symbol, side, quantity, entry_price, pnl, opened_at')
       .eq('account_id', body.account_id)
+      .eq('platform_account_id', body.platform_account_id)
       .gte('opened_at', body.from_ts)
       .lte('opened_at', body.to_ts)
       .order('opened_at', { ascending: true })
@@ -177,7 +211,7 @@ Deno.serve(async (req) => {
 
     // Build lookup maps
     const externalMap = new Map<string, ExternalTrade>()
-    for (const t of body.trades) {
+    for (const t of validExternalTrades) {
       externalMap.set(t.platform_trade_id, t)
     }
 
@@ -193,14 +227,16 @@ Deno.serve(async (req) => {
     const extraInDb: string[] = []
     const mismatched: MismatchDetail[] = []
 
-    // Check external trades against internal
+    // Check external trades against internal (with field normalization)
     for (const [platformId, extTrade] of externalMap) {
       const intTrade = internalMap.get(platformId)
       if (!intTrade) {
         missingInDb.push(platformId)
       } else {
-        // Compare key fields
-        if (extTrade.symbol !== intTrade.symbol) {
+        // Normalize and compare key fields
+        const extSymbol = (extTrade.symbol || '').trim().toUpperCase()
+        const intSymbol = (intTrade.symbol || '').trim().toUpperCase()
+        if (extSymbol !== intSymbol) {
           mismatched.push({
             platform_trade_id: platformId,
             field: 'symbol',
@@ -208,7 +244,10 @@ Deno.serve(async (req) => {
             internal_value: intTrade.symbol
           })
         }
-        if (extTrade.side !== intTrade.side) {
+
+        const extSide = (extTrade.side || '').trim().toLowerCase()
+        const intSide = (intTrade.side || '').trim().toLowerCase()
+        if (extSide !== intSide) {
           mismatched.push({
             platform_trade_id: platformId,
             field: 'side',
@@ -216,7 +255,8 @@ Deno.serve(async (req) => {
             internal_value: intTrade.side
           })
         }
-        // Compare PnL with tolerance
+
+        // Compare PnL with tolerance (handles rounding differences)
         if (extTrade.pnl !== null && intTrade.pnl !== null) {
           const pnlDiff = Math.abs(Number(extTrade.pnl) - Number(intTrade.pnl))
           if (pnlDiff > 0.01) {
@@ -227,6 +267,17 @@ Deno.serve(async (req) => {
               internal_value: intTrade.pnl
             })
           }
+        }
+
+        // Compare quantity with tolerance
+        const qtyDiff = Math.abs(Number(extTrade.quantity) - Number(intTrade.quantity))
+        if (qtyDiff > 0.0001) {
+          mismatched.push({
+            platform_trade_id: platformId,
+            field: 'quantity',
+            external_value: extTrade.quantity,
+            internal_value: intTrade.quantity
+          })
         }
       }
     }
@@ -247,13 +298,16 @@ Deno.serve(async (req) => {
       platform_account_id: body.platform_account_id,
       time_range: { from: body.from_ts, to: body.to_ts },
       summary: {
-        external_count: externalMap.size,
+        external_count: body.trades.length,
+        valid_external_count: validExternalTrades.length,
+        invalid_external_count: invalidExternal.length,
         internal_count: internalMap.size,
         matched_count: matchedCount,
         missing_in_db_count: missingInDb.length,
         extra_in_db_count: extraInDb.length,
         mismatched_count: mismatched.length
       },
+      invalid_external: invalidExternal,
       missing_in_db: missingInDb.sort(),
       extra_in_db: extraInDb.sort(),
       mismatched: mismatched.sort((a, b) => a.platform_trade_id.localeCompare(b.platform_trade_id))
