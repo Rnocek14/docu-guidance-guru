@@ -81,7 +81,7 @@ export default function AccountDetails() {
   });
 
   // Check if current user is staff (risk_officer, support, or admin) using RPC for RLS safety
-  const { data: isStaff } = useQuery({
+  const { data: isStaff, isLoading: isStaffLoading } = useQuery({
     queryKey: ['user-is-staff', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_user_roles', { _user_id: user?.id });
@@ -185,8 +185,8 @@ export default function AccountDetails() {
         {/* Account Timeline */}
         <AccountTimeline accountId={account.id} maxHeight="500px" />
 
-        {/* Reconciliation History (staff only) */}
-        {isStaff && <ReconciliationHistory accountId={account.id} />}
+        {/* Reconciliation History (staff only, no pop-in) */}
+        {!isStaffLoading && isStaff && <ReconciliationHistory accountId={account.id} />}
       </div>
     </DashboardLayout>
   );
