@@ -81,6 +81,19 @@ interface EvidencePack {
   }
 }
 
+// Deep stable stringify for deterministic hashing (handles nested objects + arrays)
+function stableSort(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableSort)
+  if (value && typeof value === 'object' && value !== null) {
+    const obj = value as Record<string, unknown>
+    return Object.keys(obj).sort().reduce((acc, k) => {
+      acc[k] = stableSort(obj[k])
+      return acc
+    }, {} as Record<string, unknown>)
+  }
+  return value
+}
+
 // Compute SHA-256 hash of JSON string
 async function computeHash(data: string): Promise<string> {
   const encoder = new TextEncoder()
@@ -94,8 +107,8 @@ async function computeHash(data: string): Promise<string> {
 async function hashPayload(payload: unknown): Promise<string | null> {
   if (!payload) return null
   try {
-    const sorted = JSON.stringify(payload, Object.keys(payload as object).sort())
-    return await computeHash(sorted)
+    const canonical = JSON.stringify(stableSort(payload))
+    return await computeHash(canonical)
   } catch {
     return null
   }
@@ -308,9 +321,9 @@ Deno.serve(async (req) => {
       audit_logs: processedLogs
     }
 
-    // Compute integrity hash over sorted, deterministic JSON
-    const sortedJson = JSON.stringify(packData, Object.keys(packData).sort())
-    const integrityHash = await computeHash(sortedJson)
+    // Compute integrity hash over deep-stable-sorted, deterministic JSON
+    const canonical = JSON.stringify(stableSort(packData))
+    const integrityHash = await computeHash(canonical)
 
     // Build final evidence pack
     const evidencePack: EvidencePack = {
@@ -327,19 +340,22 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Log this export for audit trail
-    await supabase.from('audit_logs').insert({
+    // Generate request_id for idempotent audit logging
+    const requestId = crypto.randomUUID()
+
+    // Log this export for audit trail (idempotent via request_id)
+    await supabase.from('audit_logs').upsert({
       account_id: body.account_id,
       user_id: user.id,
-      action: 'status_changed', // Using closest available action
+      action: 'evidence_pack_exported',
+      request_id: requestId,
       details: {
-        type: 'evidence_pack_exported',
         integrity_hash: integrityHash,
         record_counts: evidencePack.integrity.record_counts,
         exported_by: user.email
       },
       reason: 'Evidence pack generated for dispute/audit purposes'
-    })
+    }, { onConflict: 'account_id,request_id', ignoreDuplicates: true })
 
     return new Response(
       JSON.stringify(evidencePack),
