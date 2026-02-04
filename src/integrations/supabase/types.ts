@@ -389,6 +389,65 @@ export type Database = {
         }
         Relationships: []
       }
+      reconciliation_runs: {
+        Row: {
+          account_id: string
+          created_at: string
+          created_by: string | null
+          extra_in_db: Json
+          from_ts: string
+          id: string
+          integrity_hash: string
+          invalid_external: Json
+          mismatched: Json
+          missing_in_db: Json
+          platform_account_id: string
+          request_id: string
+          summary: Json
+          to_ts: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          created_by?: string | null
+          extra_in_db?: Json
+          from_ts: string
+          id?: string
+          integrity_hash: string
+          invalid_external?: Json
+          mismatched?: Json
+          missing_in_db?: Json
+          platform_account_id: string
+          request_id: string
+          summary: Json
+          to_ts: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          created_by?: string | null
+          extra_in_db?: Json
+          from_ts?: string
+          id?: string
+          integrity_hash?: string
+          invalid_external?: Json
+          mismatched?: Json
+          missing_in_db?: Json
+          platform_account_id?: string
+          request_id?: string
+          summary?: Json
+          to_ts?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_runs_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       risk_scores: {
         Row: {
           abuse_factors: Json | null

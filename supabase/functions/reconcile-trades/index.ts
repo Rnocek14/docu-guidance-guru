@@ -31,6 +31,13 @@ interface MismatchDetail {
   internal_value: unknown
 }
 
+interface TimestampDelta {
+  platform_trade_id: string
+  external_opened_at: string
+  internal_opened_at: string
+  delta_ms: number
+}
+
 interface ReconcileResult {
   request_id: string
   account_id: string
@@ -38,17 +45,62 @@ interface ReconcileResult {
   time_range: { from: string; to: string }
   summary: {
     external_count: number
+    valid_external_count: number
+    invalid_external_count: number
     internal_count: number
     matched_count: number
     missing_in_db_count: number
     extra_in_db_count: number
     mismatched_count: number
+    timestamp_warnings_count: number
   }
+  invalid_external: string[]
   missing_in_db: string[]
   extra_in_db: string[]
   mismatched: MismatchDetail[]
+  timestamp_deltas: TimestampDelta[]
   integrity_hash: string
   reconciled_at: string
+}
+
+// ============ SYMBOL NORMALIZATION ============
+// Known futures contract patterns to normalize
+const FUTURES_ALIASES: Record<string, string[]> = {
+  'ES': ['ESZ', 'ESH', 'ESM', 'ESU'], // E-mini S&P 500
+  'NQ': ['NQZ', 'NQH', 'NQM', 'NQU'], // E-mini Nasdaq
+  'MES': ['MESZ', 'MESH', 'MESM', 'MESU'], // Micro E-mini S&P
+  'MNQ': ['MNQZ', 'MNQH', 'MNQM', 'MNQU'], // Micro E-mini Nasdaq
+  'YM': ['YMZ', 'YMH', 'YMM', 'YMU'], // E-mini Dow
+  'RTY': ['RTYZ', 'RTYH', 'RTYM', 'RTYU'], // E-mini Russell
+  'CL': ['CLZ', 'CLF', 'CLG', 'CLH', 'CLJ', 'CLK', 'CLM', 'CLN', 'CLQ', 'CLU', 'CLV', 'CLX'], // Crude Oil
+  'GC': ['GCZ', 'GCG', 'GCJ', 'GCM', 'GCQ', 'GCV'], // Gold
+}
+
+/**
+ * Normalize a trading symbol for comparison
+ * - Uppercase and trim
+ * - Strip contract month/year suffixes (e.g., NQZ5 -> NQ, ESM24 -> ES)
+ * - Handle known aliases
+ */
+function normalizeSymbol(symbol: string): string {
+  if (!symbol) return ''
+  
+  let normalized = symbol.trim().toUpperCase()
+  
+  // Remove trailing digits (contract year like '24', '5', '25')
+  normalized = normalized.replace(/\d+$/, '')
+  
+  // Check if this matches any alias pattern and map to base symbol
+  for (const [base, aliases] of Object.entries(FUTURES_ALIASES)) {
+    if (aliases.some(alias => normalized === alias || normalized.startsWith(alias))) {
+      return base
+    }
+    if (normalized === base) {
+      return base
+    }
+  }
+  
+  return normalized
 }
 
 // Deep stable stringify for deterministic hashing
@@ -71,6 +123,9 @@ async function computeHash(data: string): Promise<string> {
     .map(b => b.toString(16).padStart(2, '0'))
     .join('')
 }
+
+// Timestamp tolerance for flagging (5 seconds)
+const TIMESTAMP_TOLERANCE_MS = 5000
 
 Deno.serve(async (req) => {
   const requestId = crypto.randomUUID()
@@ -226,6 +281,7 @@ Deno.serve(async (req) => {
     const missingInDb: string[] = []
     const extraInDb: string[] = []
     const mismatched: MismatchDetail[] = []
+    const timestampDeltas: TimestampDelta[] = []
 
     // Check external trades against internal (with field normalization)
     for (const [platformId, extTrade] of externalMap) {
@@ -233,10 +289,10 @@ Deno.serve(async (req) => {
       if (!intTrade) {
         missingInDb.push(platformId)
       } else {
-        // Normalize and compare key fields
-        const extSymbol = (extTrade.symbol || '').trim().toUpperCase()
-        const intSymbol = (intTrade.symbol || '').trim().toUpperCase()
-        if (extSymbol !== intSymbol) {
+        // Normalize and compare symbols (handles contract aliases)
+        const extSymbolNorm = normalizeSymbol(extTrade.symbol)
+        const intSymbolNorm = normalizeSymbol(intTrade.symbol)
+        if (extSymbolNorm !== intSymbolNorm) {
           mismatched.push({
             platform_trade_id: platformId,
             field: 'symbol',
@@ -245,6 +301,7 @@ Deno.serve(async (req) => {
           })
         }
 
+        // Normalize and compare side
         const extSide = (extTrade.side || '').trim().toLowerCase()
         const intSide = (intTrade.side || '').trim().toLowerCase()
         if (extSide !== intSide) {
@@ -279,6 +336,22 @@ Deno.serve(async (req) => {
             internal_value: intTrade.quantity
           })
         }
+
+        // Check timestamp delta (for audit reporting, not blocking)
+        if (extTrade.opened_at && intTrade.opened_at) {
+          const extTime = new Date(extTrade.opened_at).getTime()
+          const intTime = new Date(intTrade.opened_at).getTime()
+          const deltaMs = Math.abs(extTime - intTime)
+          
+          if (deltaMs > TIMESTAMP_TOLERANCE_MS) {
+            timestampDeltas.push({
+              platform_trade_id: platformId,
+              external_opened_at: extTrade.opened_at,
+              internal_opened_at: intTrade.opened_at,
+              delta_ms: deltaMs
+            })
+          }
+        }
       }
     }
 
@@ -293,6 +366,7 @@ Deno.serve(async (req) => {
     const matchedCount = externalMap.size - missingInDb.length
 
     // Build result data (without integrity hash first)
+    // IMPORTANT: invalid_external must be included in hash input
     const resultData = {
       account_id: body.account_id,
       platform_account_id: body.platform_account_id,
@@ -305,15 +379,17 @@ Deno.serve(async (req) => {
         matched_count: matchedCount,
         missing_in_db_count: missingInDb.length,
         extra_in_db_count: extraInDb.length,
-        mismatched_count: mismatched.length
+        mismatched_count: mismatched.length,
+        timestamp_warnings_count: timestampDeltas.length
       },
-      invalid_external: invalidExternal,
+      invalid_external: invalidExternal.sort(),
       missing_in_db: missingInDb.sort(),
       extra_in_db: extraInDb.sort(),
-      mismatched: mismatched.sort((a, b) => a.platform_trade_id.localeCompare(b.platform_trade_id))
+      mismatched: mismatched.sort((a, b) => a.platform_trade_id.localeCompare(b.platform_trade_id)),
+      timestamp_deltas: timestampDeltas.sort((a, b) => a.platform_trade_id.localeCompare(b.platform_trade_id))
     }
 
-    // Compute integrity hash
+    // Compute integrity hash (includes ALL result data for tamper detection)
     const canonical = JSON.stringify(stableSort(resultData))
     const integrityHash = await computeHash(canonical)
 
@@ -325,7 +401,28 @@ Deno.serve(async (req) => {
       reconciled_at: new Date().toISOString()
     }
 
-    // Log reconciliation run (idempotent via request_id)
+    // Persist to reconciliation_runs table (idempotent via request_id)
+    const { error: insertError } = await supabase.from('reconciliation_runs').upsert({
+      account_id: body.account_id,
+      platform_account_id: body.platform_account_id,
+      from_ts: body.from_ts,
+      to_ts: body.to_ts,
+      summary: resultData.summary,
+      missing_in_db: resultData.missing_in_db,
+      extra_in_db: resultData.extra_in_db,
+      mismatched: resultData.mismatched,
+      invalid_external: resultData.invalid_external,
+      integrity_hash: integrityHash,
+      request_id: requestId,
+      created_by: user.id
+    }, { onConflict: 'account_id,request_id', ignoreDuplicates: true })
+
+    if (insertError) {
+      console.error('Reconciliation run insert error:', insertError)
+      // Non-fatal: continue to return result even if persistence fails
+    }
+
+    // Log reconciliation run to audit_logs as well (belt-and-suspenders)
     await supabase.from('audit_logs').upsert({
       account_id: body.account_id,
       user_id: user.id,
@@ -336,7 +433,8 @@ Deno.serve(async (req) => {
         time_range: resultData.time_range,
         summary: resultData.summary,
         integrity_hash: integrityHash,
-        reconciled_by: user.email
+        reconciled_by: user.email,
+        persisted_to_reconciliation_runs: !insertError
       },
       reason: 'Trade reconciliation performed for dispute/audit purposes'
     }, { onConflict: 'account_id,request_id', ignoreDuplicates: true })
