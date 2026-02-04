@@ -64,6 +64,7 @@ export type Database = {
           last_trade_at: string | null
           passed_at: string | null
           payout_cycle_start_balance: number | null
+          payout_cycle_started_at: string | null
           rule_snapshot: Json | null
           starting_balance: number
           status: Database["public"]["Enums"]["account_status"]
@@ -86,6 +87,7 @@ export type Database = {
           last_trade_at?: string | null
           passed_at?: string | null
           payout_cycle_start_balance?: number | null
+          payout_cycle_started_at?: string | null
           rule_snapshot?: Json | null
           starting_balance?: number
           status?: Database["public"]["Enums"]["account_status"]
@@ -108,6 +110,7 @@ export type Database = {
           last_trade_at?: string | null
           passed_at?: string | null
           payout_cycle_start_balance?: number | null
+          payout_cycle_started_at?: string | null
           rule_snapshot?: Json | null
           starting_balance?: number
           status?: Database["public"]["Enums"]["account_status"]
