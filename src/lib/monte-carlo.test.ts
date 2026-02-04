@@ -137,6 +137,7 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       // This test guards against accidentally switching series to cumulative values
       // Note: series are from LAST iteration only, so we compare to last iteration totals
       const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+      const assumptions = SCENARIO_PRESETS.withLifetimeCap7x;
 
       const capSum = result.cohortDiagnostics.capHitsByMonth.reduce((a, b) => a + b, 0);
       const zombieSum = result.cohortDiagnostics.zombiesByMonth.reduce((a, b) => a + b, 0);
@@ -150,12 +151,23 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       // Reset sum should be non-trivial if reset rate > 0
       expect(resetSum).toBeGreaterThan(0);
 
-      // Sum of events per month should be monotonically sensible
-      // (not cumulative - each value should be less than cohort size that month)
+      // Month-by-month bounds: events cannot exceed active cohort + monthly inflow buffer
+      // Buffer = new passed accounts that month (accountsPerMonth * passRate midpoint)
+      const passRateMid = typeof assumptions.passRate === 'number' 
+        ? assumptions.passRate 
+        : (assumptions.passRate.min + assumptions.passRate.max) / 2;
+      const monthlyInflowBuffer = assumptions.accountsPerMonth * passRateMid;
+      
       for (let i = 0; i < result.cohortDiagnostics.capHitsByMonth.length; i++) {
-        expect(result.cohortDiagnostics.capHitsByMonth[i]).toBeLessThanOrEqual(
-          result.cohortDiagnostics.activeCohortSizeByMonth[i] + 100 // buffer for new accounts
-        );
+        const activeCohort = result.cohortDiagnostics.activeCohortSizeByMonth[i];
+        const monthBound = activeCohort + monthlyInflowBuffer;
+        
+        // Cap hits + zombies this month cannot exceed cohort + inflow
+        expect(result.cohortDiagnostics.capHitsByMonth[i] + result.cohortDiagnostics.zombiesByMonth[i])
+          .toBeLessThanOrEqual(monthBound);
+        
+        // Resets this month cannot exceed cohort + inflow  
+        expect(result.cohortDiagnostics.resetsByMonth[i]).toBeLessThanOrEqual(monthBound);
       }
     });
   });
