@@ -82,17 +82,42 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       expect(result.payoutDiagnostics.capPressure).toBeNull();
     });
 
-    it('cap pressure reflects saturation level', () => {
+    it('cap pressure reflects saturation level and never exceeds 1', () => {
       const cap5x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap5x);
       
       // Cap pressure = avgLifetimePaid / cap
-      // Should be between 0 and 1 (can exceed 1 if most accounts hit cap)
+      // Must be between 0 and 1 (with tiny epsilon for floating point)
+      // If guard is correct, pressure CANNOT exceed 1
       expect(cap5x.payoutDiagnostics.capPressure).not.toBeNull();
       expect(cap5x.payoutDiagnostics.capPressure!).toBeGreaterThan(0);
+      expect(cap5x.payoutDiagnostics.capPressure!).toBeLessThanOrEqual(1.000001); // Hard invariant
       
       // Verify calculation is correct
       const expectedPressure = cap5x.payoutDiagnostics.avgLifetimePaidPerAccount / (149 * 5);
       expect(cap5x.payoutDiagnostics.capPressure).toBeCloseTo(expectedPressure, 6);
+    });
+
+    it('cap-hit share of completions is meaningful diagnostic', () => {
+      const cap5x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap5x);
+      
+      // Cap-hit share should be between 0 and 1
+      expect(cap5x.cohortDiagnostics.capHitShareOfCompletions).toBeGreaterThanOrEqual(0);
+      expect(cap5x.cohortDiagnostics.capHitShareOfCompletions).toBeLessThanOrEqual(1);
+      
+      // With a tight cap (5x), cap-hit share should be significant
+      // (i.e., most completions are due to cap, not zombies)
+      expect(cap5x.cohortDiagnostics.capHitShareOfCompletions).toBeGreaterThan(0.3);
+    });
+
+    it('per-month event series have consistent lengths', () => {
+      const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+      
+      // All month series should have same length (monthsPerIteration)
+      const expectedLength = FULL_CONFIG.monthsPerIteration;
+      expect(result.cohortDiagnostics.capHitsByMonth.length).toBe(expectedLength);
+      expect(result.cohortDiagnostics.zombiesByMonth.length).toBe(expectedLength);
+      expect(result.cohortDiagnostics.resetsByMonth.length).toBe(expectedLength);
+      expect(result.cohortDiagnostics.activeCohortSizeByMonth.length).toBe(expectedLength);
     });
   });
 

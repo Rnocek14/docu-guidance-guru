@@ -142,6 +142,14 @@ export interface MonteCarloResult {
     resetScope: 'allActive';               // documents that resets apply to all active accounts
     fraudScaling: 'perEligibleAccount';    // clarifies fraud scales with eligible cohort
     chargebackScaling: 'perNewSalesRevenue'; // clarifies chargebacks scale with new sales
+    
+    // Per-month event series for steady-state analysis
+    capHitsByMonth: number[];              // accounts hitting cap each month
+    zombiesByMonth: number[];              // zombie completions each month
+    resetsByMonth: number[];               // resets each month
+    
+    // Completion breakdown diagnostic
+    capHitShareOfCompletions: number;      // cap-hit completions / total completions
   };
 
   rawSamples?: number[][]; // optional: all monthly profits per iteration
@@ -171,12 +179,32 @@ export interface MonthResult {
     firstPayoutCapHits: number;
     lifetimeCapHits: number;
     lifetimeCapRejections: number;
-    accountsCompletedByCap: number;
-    zombieAccountsCompleted: number;
+    accountsCompletedByCap: number;  // cap-hit completions this month
+    zombieAccountsCompleted: number; // zombie completions this month
     payoutSizes: number[];
     firstPayoutSizes: number[];
     lifetimeCapClippedAmounts: number[];
   };
+}
+
+// Completion reason enum for type safety
+type CompletionReason = 'cap' | 'zombie' | 'other';
+
+/**
+ * Helper function to complete an account with proper tracking.
+ * Centralizes completion logic to prevent "forgot to set completedByCapHit" regressions.
+ */
+function completeAccount(
+  state: AccountState, 
+  reason: CompletionReason, 
+  ctx: SimulateMonthContext
+): void {
+  if (state.isCompleted) return; // Already completed, no double-counting
+  
+  state.isCompleted = true;
+  state.isActive = false;
+  state.completedByCapHit = reason === 'cap';
+  ctx.totalEverCompleted++;
 }
 
 // Per-account state tracking for lifetime caps
@@ -450,10 +478,8 @@ function simulateMonth(
     if (lifetimeCap !== null) {
       const headroom = lifetimeCap - state.lifetimePaidTotal;
       if (headroom > 0 && headroom < 50) {
-        state.isCompleted = true;
-        state.isActive = false;  // Mark inactive for clean exit
+        completeAccount(state, 'zombie', ctx);
         zombieAccountsCompleted++;
-        ctx.totalEverCompleted++;
         return; // Skip further processing for this account
       }
     }
@@ -518,9 +544,7 @@ function simulateMonth(
       // If no headroom, reject immediately
       if (headroom <= 0) {
         lifetimeCapRejections++;
-        account.isCompleted = true;
-        account.isActive = false;
-        ctx.totalEverCompleted++;
+        completeAccount(account, 'cap', ctx);
         continue;
       }
       
@@ -558,22 +582,22 @@ function simulateMonth(
         
         // Check if this completes the account
         if (account.lifetimePaidTotal + traderPayout >= lifetimeCap) {
-          account.isCompleted = true;
-          account.isActive = false;
-          account.completedByCapHit = true;  // Mark specifically as cap-hit completion
+          completeAccount(account, 'cap', ctx);
           accountsCompletedThisMonth++;
-          ctx.totalEverCompleted++;
         }
-      }
-      
-      // HARD GUARD: Lifetime cap violation check (catches bugs instantly)
-      if (lifetimeCap !== null && account.lifetimePaidTotal + traderPayout > lifetimeCap + 1e-6) {
-        throw new Error(`[Monte Carlo] Lifetime cap violated: account ${account.id} would have ${account.lifetimePaidTotal + traderPayout} but cap is ${lifetimeCap}`);
       }
       
       // Ensure minimum payout threshold ($50)
       if (traderPayout < 50) {
         continue; // Skip payouts below minimum
+      }
+      
+      // =====================================================================
+      // HARD GUARD AT COMMIT POINT: Lifetime cap violation check
+      // This guard fires right before state updates, catching any path bugs
+      // =====================================================================
+      if (lifetimeCap !== null && account.lifetimePaidTotal + traderPayout > lifetimeCap + 1e-6) {
+        throw new Error(`[Monte Carlo] Lifetime cap violated: account ${account.id} would have ${account.lifetimePaidTotal + traderPayout} but cap is ${lifetimeCap}`);
       }
       
       totalPayouts += traderPayout;
@@ -966,6 +990,16 @@ export function runMonteCarlo(
       resetScope: 'allActive' as const,
       fraudScaling: 'perEligibleAccount' as const,
       chargebackScaling: 'perNewSalesRevenue' as const,
+      
+      // Per-month event series for steady-state analysis (from last iteration)
+      capHitsByMonth: lastIterResults.map(r => r.payoutDetails.accountsCompletedByCap),
+      zombiesByMonth: lastIterResults.map(r => r.payoutDetails.zombieAccountsCompleted),
+      resetsByMonth: lastIterResults.map(r => r.resetsThisMonth),
+      
+      // Completion breakdown: cap-hit share of all completions
+      capHitShareOfCompletions: (totalAccountsCompletedByCap + totalZombieAccountsCompleted) > 0
+        ? totalAccountsCompletedByCap / (totalAccountsCompletedByCap + totalZombieAccountsCompleted)
+        : 0,
     },
     rawSamples: allMonthlyProfits,
   };
