@@ -185,8 +185,10 @@ export default function AccountDetails() {
         {/* Account Timeline */}
         <AccountTimeline accountId={account.id} maxHeight="500px" />
 
-        {/* Reconciliation History (staff only, no pop-in) */}
-        {!isStaffLoading && isStaff && <ReconciliationHistory accountId={account.id} />}
+        {/* Reconciliation History (staff only) */}
+        {!isStaffLoading && !!isStaff && id ? (
+          <ReconciliationHistory accountId={id} />
+        ) : null}
       </div>
     </DashboardLayout>
   );
