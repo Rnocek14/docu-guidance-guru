@@ -208,11 +208,9 @@ export const adminNavItems: NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: <LayoutDashboard className="h-5 w-5" /> },
   { label: 'System Overview', href: '/admin/system', icon: <Shield className="h-5 w-5" /> },
   { label: 'Risk Dashboard', href: '/risk', icon: <AlertTriangle className="h-5 w-5" /> },
-  { label: 'Risk Queue', href: '/risk/queue', icon: <Flag className="h-5 w-5" /> },
+  { label: 'Review Queue', href: '/risk/queue', icon: <Flag className="h-5 w-5" /> },
   { label: 'Users', href: '/admin/users', icon: <Users className="h-5 w-5" /> },
   { label: 'Cohorts', href: '/admin/cohorts', icon: <Settings className="h-5 w-5" /> },
-  { label: 'Payouts', href: '/admin/payouts', icon: <CreditCard className="h-5 w-5" /> },
-  { label: 'Flags', href: '/admin/flags', icon: <Flag className="h-5 w-5" /> },
   { label: 'Audit Logs', href: '/admin/audit', icon: <FileText className="h-5 w-5" /> },
 ];
 

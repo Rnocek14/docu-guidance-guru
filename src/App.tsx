@@ -22,6 +22,9 @@ import RiskDashboard from "./pages/risk/RiskDashboard";
 import ReviewQueue from "./pages/risk/ReviewQueue";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import SystemOverview from "./pages/admin/SystemOverview";
+import UsersManagement from "./pages/admin/UsersManagement";
+import CohortsManagement from "./pages/admin/CohortsManagement";
+import AuditLogs from "./pages/admin/AuditLogs";
 import SupportDashboard from "./pages/support/SupportDashboard";
 import AccountDetails from "./pages/trader/AccountDetails";
 
@@ -132,6 +135,30 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <SystemOverview />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <UsersManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/cohorts"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <CohortsManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/audit"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AuditLogs />
                 </ProtectedRoute>
               }
             />
