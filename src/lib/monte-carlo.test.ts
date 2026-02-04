@@ -139,9 +139,8 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       expect(resetsByMonth.every(n => isCount(n))).toBe(true);
       expect(activeCohortSizeByMonth.every(n => isCount(n))).toBe(true);
       expect(eligibleCohortSizeByMonth.every(n => isCount(n))).toBe(true);
-      expect(newPassedByMonth.every(n => isCount(n))).toBe(true);
       
-      // newPassedByMonth has additional bound: cannot exceed accountsPerMonth + 1 (rounding tolerance)
+      // newPassedByMonth: isCount + bounded by accountsPerMonth (with rounding tolerance)
       expect(newPassedByMonth.every(n => isCount(n, assumptions.accountsPerMonth + 1))).toBe(true);
     });
 
