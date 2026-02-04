@@ -1,11 +1,15 @@
-import { DashboardLayout, riskNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout, riskNavItems, adminNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { Users, Flag, AlertTriangle, Activity } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function RiskDashboard() {
+  const { roles } = useAuth();
+  const isAdmin = roles.includes('admin');
+  const navItems = isAdmin ? adminNavItems : riskNavItems;
   // Fetch summary stats
   const { data: stats } = useQuery({
     queryKey: ['risk-stats'],
@@ -51,7 +55,7 @@ export default function RiskDashboard() {
   };
 
   return (
-    <DashboardLayout title="Risk Console" navItems={riskNavItems}>
+    <DashboardLayout title="Risk Console" navItems={navItems}>
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Risk Overview</h2>

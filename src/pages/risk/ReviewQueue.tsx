@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { DashboardLayout, riskNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout, riskNavItems, adminNavItems } from '@/components/layout/DashboardLayout';
+import { useAuth } from '@/contexts/AuthContext';
 import { ReviewQueueCard } from '@/components/risk/ReviewQueueCard';
 import { ReviewBrief } from '@/components/risk/ReviewBrief';
 import { AccountReviewActions } from '@/components/risk/AccountReviewActions';
@@ -68,6 +69,9 @@ const statusFilters = [
 ];
 
 export default function ReviewQueue() {
+  const { roles } = useAuth();
+  const isAdmin = roles.includes('admin');
+  const navItems = isAdmin ? adminNavItems : riskNavItems;
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
@@ -263,7 +267,7 @@ export default function ReviewQueue() {
   };
 
   return (
-    <DashboardLayout title="Review Queue" navItems={riskNavItems}>
+    <DashboardLayout title="Review Queue" navItems={navItems}>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
