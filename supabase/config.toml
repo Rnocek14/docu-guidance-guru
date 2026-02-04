@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.payout-actions]
 verify_jwt = false
+
+[functions.evidence-pack]
+verify_jwt = false

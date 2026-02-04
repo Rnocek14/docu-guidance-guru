@@ -38,6 +38,19 @@ interface BreachResult {
   threshold?: number
 }
 
+interface PassEligibilityResult {
+  eligible: boolean
+  reason: string
+  metrics: {
+    profit_pct: number
+    profit_target_pct: number
+    trading_days: number
+    min_trading_days: number
+    unconfirmed_violations: number
+    pending_flags: number
+  }
+}
+
 // Generate UUID for request correlation
 function generateRequestId(): string {
   return crypto.randomUUID()
@@ -173,6 +186,169 @@ function detectBreaches(
   }
 
   return { breached: false }
+}
+
+// Check if account is eligible to be marked as 'passed' (deterministic server-side)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function checkPassEligibility(
+  supabase: any,
+  accountId: string,
+  account: {
+    status: string
+    starting_balance: number
+    current_balance: number
+    trading_days_count: number
+    rule_snapshot: RuleSnapshot
+  },
+  newBalance: number
+): Promise<PassEligibilityResult> {
+  const rules = account.rule_snapshot
+  const startBalance = account.starting_balance
+  
+  // Calculate profit percentage
+  const profitPct = ((newBalance - startBalance) / startBalance) * 100
+  
+  // Check basic criteria
+  const profitTargetMet = profitPct >= rules.profit_target_percent
+  const tradingDaysMet = account.trading_days_count >= rules.min_trading_days
+  
+  // Only consider pass if account is currently active
+  if (account.status !== 'active') {
+    return {
+      eligible: false,
+      reason: `Account status is '${account.status}', not 'active'`,
+      metrics: {
+        profit_pct: profitPct,
+        profit_target_pct: rules.profit_target_percent,
+        trading_days: account.trading_days_count,
+        min_trading_days: rules.min_trading_days,
+        unconfirmed_violations: -1,
+        pending_flags: -1
+      }
+    }
+  }
+  
+  if (!profitTargetMet) {
+    return {
+      eligible: false,
+      reason: `Profit target not met: ${profitPct.toFixed(2)}% < ${rules.profit_target_percent}%`,
+      metrics: {
+        profit_pct: profitPct,
+        profit_target_pct: rules.profit_target_percent,
+        trading_days: account.trading_days_count,
+        min_trading_days: rules.min_trading_days,
+        unconfirmed_violations: -1,
+        pending_flags: -1
+      }
+    }
+  }
+  
+  if (!tradingDaysMet) {
+    return {
+      eligible: false,
+      reason: `Trading days not met: ${account.trading_days_count} < ${rules.min_trading_days}`,
+      metrics: {
+        profit_pct: profitPct,
+        profit_target_pct: rules.profit_target_percent,
+        trading_days: account.trading_days_count,
+        min_trading_days: rules.min_trading_days,
+        unconfirmed_violations: -1,
+        pending_flags: -1
+      }
+    }
+  }
+  
+  // Check for unconfirmed violations (must be zero)
+  const { count: violationCount, error: violationError } = await supabase
+    .from('violations')
+    .select('*', { count: 'exact', head: true })
+    .eq('account_id', accountId)
+    .is('confirmed_at', null)
+  
+  if (violationError) {
+    console.error('Error checking violations:', violationError)
+    return {
+      eligible: false,
+      reason: 'Failed to check violations',
+      metrics: {
+        profit_pct: profitPct,
+        profit_target_pct: rules.profit_target_percent,
+        trading_days: account.trading_days_count,
+        min_trading_days: rules.min_trading_days,
+        unconfirmed_violations: -1,
+        pending_flags: -1
+      }
+    }
+  }
+  
+  const unconfirmedViolations = violationCount ?? 0
+  if (unconfirmedViolations > 0) {
+    return {
+      eligible: false,
+      reason: `Has ${unconfirmedViolations} unconfirmed violation(s)`,
+      metrics: {
+        profit_pct: profitPct,
+        profit_target_pct: rules.profit_target_percent,
+        trading_days: account.trading_days_count,
+        min_trading_days: rules.min_trading_days,
+        unconfirmed_violations: unconfirmedViolations,
+        pending_flags: -1
+      }
+    }
+  }
+  
+  // Check for pending flags (must be zero)
+  const { count: flagCount, error: flagError } = await supabase
+    .from('flags')
+    .select('*', { count: 'exact', head: true })
+    .eq('account_id', accountId)
+    .eq('status', 'pending')
+  
+  if (flagError) {
+    console.error('Error checking flags:', flagError)
+    return {
+      eligible: false,
+      reason: 'Failed to check flags',
+      metrics: {
+        profit_pct: profitPct,
+        profit_target_pct: rules.profit_target_percent,
+        trading_days: account.trading_days_count,
+        min_trading_days: rules.min_trading_days,
+        unconfirmed_violations: 0,
+        pending_flags: -1
+      }
+    }
+  }
+  
+  const pendingFlags = flagCount ?? 0
+  if (pendingFlags > 0) {
+    return {
+      eligible: false,
+      reason: `Has ${pendingFlags} pending flag(s)`,
+      metrics: {
+        profit_pct: profitPct,
+        profit_target_pct: rules.profit_target_percent,
+        trading_days: account.trading_days_count,
+        min_trading_days: rules.min_trading_days,
+        unconfirmed_violations: 0,
+        pending_flags: pendingFlags
+      }
+    }
+  }
+  
+  // All criteria met!
+  return {
+    eligible: true,
+    reason: 'All pass criteria met',
+    metrics: {
+      profit_pct: profitPct,
+      profit_target_pct: rules.profit_target_percent,
+      trading_days: account.trading_days_count,
+      min_trading_days: rules.min_trading_days,
+      unconfirmed_violations: 0,
+      pending_flags: 0
+    }
+  }
 }
 
 Deno.serve(async (req) => {
@@ -514,6 +690,89 @@ Deno.serve(async (req) => {
       })
     }
 
+    // --- AUTO-PASS DETECTION (P0-3) ---
+    // Only check if no breach was detected and account is still active
+    let passEligibility: PassEligibilityResult | null = null
+    let accountPassed = false
+    
+    if (!breachResult.breached && account.status === 'active') {
+      passEligibility = await checkPassEligibility(
+        supabase,
+        accountId,
+        {
+          status: account.status,
+          starting_balance: account.starting_balance,
+          current_balance: account.current_balance,
+          trading_days_count: account.trading_days_count,
+          rule_snapshot: account.rule_snapshot as RuleSnapshot
+        },
+        newBalance
+      )
+      
+      if (passEligibility.eligible) {
+        // Update account to 'passed' status
+        const { error: passError } = await supabase
+          .from('accounts')
+          .update({
+            status: 'passed',
+            passed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', accountId)
+          .eq('status', 'active') // Defensive: only if still active
+        
+        if (!passError) {
+          accountPassed = true
+          
+          // Write trader-visible event (idempotent via request_id)
+          await supabase.from('account_events').upsert(
+            {
+              account_id: accountId,
+              event_type: 'passed',
+              request_id: requestId,
+              event_data: {
+                profit_pct: passEligibility.metrics.profit_pct.toFixed(2),
+                profit_target_pct: passEligibility.metrics.profit_target_pct,
+                trading_days: passEligibility.metrics.trading_days,
+                min_trading_days: passEligibility.metrics.min_trading_days,
+                final_balance: newBalance,
+                explanation: `Congratulations! You've successfully completed your evaluation. ` +
+                  `Profit: ${passEligibility.metrics.profit_pct.toFixed(2)}% (target: ${passEligibility.metrics.profit_target_pct}%). ` +
+                  `Trading days: ${passEligibility.metrics.trading_days} (minimum: ${passEligibility.metrics.min_trading_days}).`,
+                next_step: 'You can now request a payout'
+              }
+            },
+            {
+              onConflict: 'account_id,request_id',
+              ignoreDuplicates: true
+            }
+          )
+          
+          // Write internal audit log (idempotent)
+          await supabase.from('audit_logs').upsert(
+            {
+              account_id: accountId,
+              action: 'status_changed',
+              request_id: requestId,
+              details: {
+                type: 'auto_pass',
+                previous_status: 'active',
+                new_status: 'passed',
+                eligibility: passEligibility.metrics
+              },
+              reason: 'Account automatically passed evaluation criteria'
+            },
+            {
+              onConflict: 'account_id,request_id',
+              ignoreDuplicates: true
+            }
+          )
+        } else {
+          console.error('Failed to update account to passed:', passError)
+        }
+      }
+    }
+
     // Return success with request_id for correlation
     return new Response(
       JSON.stringify({
@@ -531,6 +790,12 @@ Deno.serve(async (req) => {
           actual_pct: breachResult.actual_value,
           limit_pct: breachResult.threshold,
           description: breachResult.description
+        } : undefined,
+        account_passed: accountPassed,
+        pass_eligibility: passEligibility ? {
+          eligible: passEligibility.eligible,
+          reason: passEligibility.reason,
+          metrics: passEligibility.metrics
         } : undefined
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
