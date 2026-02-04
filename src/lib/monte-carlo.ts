@@ -874,8 +874,14 @@ export function runMonteCarlo(
   // =========================================================================
   const totalAccountsEverCreated = allIterationStats.reduce((s, i) => s + i.totalEverCreated, 0);
   const totalAccountsHitCap = allIterationStats.reduce((s, i) => s + i.accountsHitLifetimeCap, 0);
+  const totalEverCompletedAcrossIterations = allIterationStats.reduce((s, i) => s + i.totalEverCompleted, 0);
   const totalLifetimePaidSum = allIterationStats.reduce((s, i) => s + i.totalLifetimePaid, 0);
   const totalHeadroomSum = allIterationStats.reduce((s, i) => s + i.totalHeadroomAtEnd, 0);
+  
+  // Cap-hit share of all completions (future-proof for any completion reason)
+  const capHitShareOfCompletions = totalEverCompletedAcrossIterations > 0
+    ? totalAccountsCompletedByCap / totalEverCompletedAcrossIterations
+    : 0;
   
   // Collect all lifetime paid values for distribution
   const allLifetimePaidValues = allIterationStats.flatMap(i => i.lifetimePaidValues);
@@ -997,11 +1003,7 @@ export function runMonteCarlo(
       resetsByMonth: lastIterResults.map(r => r.resetsThisMonth),
       
       // Completion breakdown: cap-hit share of ALL completions (not just cap+zombie)
-      // Uses totalEverCompleted from iteration stats for correct denominator
-      capHitShareOfCompletions: (() => {
-        const totalEverCompleted = allIterationStats.reduce((s, i) => s + i.totalEverCompleted, 0);
-        return totalEverCompleted > 0 ? totalAccountsCompletedByCap / totalEverCompleted : 0;
-      })(),
+      capHitShareOfCompletions,
     },
     rawSamples: allMonthlyProfits,
   };

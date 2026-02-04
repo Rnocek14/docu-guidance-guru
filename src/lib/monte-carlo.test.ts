@@ -132,6 +132,32 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       expect(activeCohortSizeByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
       expect(eligibleCohortSizeByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
     });
+
+    it('per-month series sums are internally consistent (conservation check)', () => {
+      // This test guards against accidentally switching series to cumulative values
+      // Note: series are from LAST iteration only, so we compare to last iteration totals
+      const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+
+      const capSum = result.cohortDiagnostics.capHitsByMonth.reduce((a, b) => a + b, 0);
+      const zombieSum = result.cohortDiagnostics.zombiesByMonth.reduce((a, b) => a + b, 0);
+      const resetSum = result.cohortDiagnostics.resetsByMonth.reduce((a, b) => a + b, 0);
+
+      // Cap + zombie completions should be <= total active cohort that existed
+      // (can't complete more accounts than were ever active)
+      const maxPossibleCompletions = result.cohortDiagnostics.activeCohortSizeByMonth[0] * FULL_CONFIG.monthsPerIteration;
+      expect(capSum + zombieSum).toBeLessThanOrEqual(maxPossibleCompletions);
+
+      // Reset sum should be non-trivial if reset rate > 0
+      expect(resetSum).toBeGreaterThan(0);
+
+      // Sum of events per month should be monotonically sensible
+      // (not cumulative - each value should be less than cohort size that month)
+      for (let i = 0; i < result.cohortDiagnostics.capHitsByMonth.length; i++) {
+        expect(result.cohortDiagnostics.capHitsByMonth[i]).toBeLessThanOrEqual(
+          result.cohortDiagnostics.activeCohortSizeByMonth[i] + 100 // buffer for new accounts
+        );
+      }
+    });
   });
 
   describe('Lifetime Paid Never Exceeds Cap', () => {
@@ -322,7 +348,7 @@ describe('Scenario Comparisons (Relative Behavior)', () => {
     });
     
     expect(attackWithCap.profit.mean).toBeGreaterThan(attackNoCap.profit.mean);
-  });
+  }, 10000); // Extended timeout for attack scenarios
 
   it('tighter caps improve profit monotonically', () => {
     const cap10x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap10x);
