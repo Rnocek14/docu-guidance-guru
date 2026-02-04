@@ -132,7 +132,10 @@ export interface MonteCarloResult {
     payoutToRevenueRatioByMonth: number[]; // payout/revenue ratio over time
     resetRevenue: number;                  // total revenue from resets
     resetsThisRun: number;                 // count of resets
+    expectedResetsThisRun: number;         // expected resets based on hazard rate
+    resetRateErrorRatio: number;           // observed/expected for sanity check
     zombieAccountsCompleted: number;       // accounts completed due to headroom < minimum
+    resetScope: 'allActive';               // documents that resets apply to all active accounts
     fraudScaling: 'perEligibleAccount';    // clarifies fraud scales with eligible cohort
     chargebackScaling: 'perNewSalesRevenue'; // clarifies chargebacks scale with new sales
   };
@@ -142,7 +145,7 @@ export interface MonteCarloResult {
 
 export interface MonthResult {
   revenue: number;
-  resetRevenue: number;         // NEW: revenue from resets
+  resetRevenue: number;
   payouts: number;
   fraudLoss: number;
   chargebacks: number;
@@ -154,6 +157,7 @@ export interface MonthResult {
   activeCohortSize: number;     // active (not completed) accounts at end of month
   eligibleCohortSize: number;   // accounts eligible for payout (active + past eligibility gate)
   resetsThisMonth: number;      // count of resets
+  expectedResetsThisMonth: number; // expected resets based on hazard rate (for sanity checks)
   
   // Detailed payout tracking
   payoutDetails: {
@@ -164,10 +168,10 @@ export interface MonthResult {
     lifetimeCapHits: number;
     lifetimeCapRejections: number;
     accountsCompletedByCap: number;
-    zombieAccountsCompleted: number;  // NEW: completed due to headroom < $50
+    zombieAccountsCompleted: number;
     payoutSizes: number[];
-    firstPayoutSizes: number[];  // before/after cap pairs
-    lifetimeCapClippedAmounts: number[]; // amount clipped by lifetime cap
+    firstPayoutSizes: number[];
+    lifetimeCapClippedAmounts: number[];
   };
 }
 
@@ -414,7 +418,8 @@ function simulateMonth(
   
   // =========================================================================
   // LIFECYCLE EVENTS (resets, zombies) - BEFORE payout processing
-  // CRITICAL: Resets are independent of payout requests!
+  // CRITICAL: Resets apply to ALL active accounts (resetScope: 'allActive')
+  // This means accounts can reset even before reaching eligibility
   // =========================================================================
   let resetsThisMonth = 0;
   let resetRevenue = 0;
@@ -424,6 +429,12 @@ function simulateMonth(
   
   // Proper hazard rate conversion: p_month = 1 - (1 - p_annual)^(1/12)
   const monthlyResetProb = 1 - Math.pow(1 - assumptions.resetRate, 1/12);
+  
+  // Count active accounts at START of lifecycle processing (for expected resets calc)
+  let activeCountBeforeLifecycle = 0;
+  ctx.accountStates.forEach(state => {
+    if (state.isActive && !state.isCompleted) activeCountBeforeLifecycle++;
+  });
   
   // Process lifecycle events for ALL active accounts (not just eligible ones)
   ctx.accountStates.forEach(state => {
@@ -593,6 +604,9 @@ function simulateMonth(
   const variableCosts = assumptions.accountsPerMonth * assumptions.variableCostPerAccount;
   const fixedCosts = assumptions.fixedMonthlyCosts;
   
+  // Expected resets = activeCount * monthlyResetProb (for sanity checking)
+  const expectedResetsThisMonth = activeCountBeforeLifecycle * monthlyResetProb;
+  
   // Net profit - now includes reset revenue
   const netProfit = revenue + resetRevenue - totalPayouts - fraudLoss - chargebacks - variableCosts - fixedCosts;
   
@@ -608,6 +622,7 @@ function simulateMonth(
     activeCohortSize,
     eligibleCohortSize,
     resetsThisMonth,
+    expectedResetsThisMonth,
     payoutDetails: {
       requestCount: payoutRequestCount,
       approvedCount: payoutApprovedCount,
@@ -792,6 +807,7 @@ export function runMonteCarlo(
   const totalResets = allResults.reduce((s, r) => s + r.resetsThisMonth, 0);
   const totalResetRevenue = allResults.reduce((s, r) => s + r.resetRevenue, 0);
   const totalZombieAccountsCompleted = allResults.reduce((s, r) => s + r.payoutDetails.zombieAccountsCompleted, 0);
+  const totalExpectedResets = allResults.reduce((s, r) => s + r.expectedResetsThisMonth, 0);
   const avgActiveCohortSize = allResults.reduce((s, r) => s + r.activeCohortSize, 0) / allResults.length;
   const avgEligibleCohortSize = allResults.reduce((s, r) => s + r.eligibleCohortSize, 0) / allResults.length;
   
@@ -926,7 +942,10 @@ export function runMonteCarlo(
       payoutToRevenueRatioByMonth,
       resetRevenue: totalResetRevenue,
       resetsThisRun: totalResets,
+      expectedResetsThisRun: totalExpectedResets,
+      resetRateErrorRatio: totalExpectedResets > 0 ? totalResets / totalExpectedResets : 1,
       zombieAccountsCompleted: totalZombieAccountsCompleted,
+      resetScope: 'allActive' as const,
       fraudScaling: 'perEligibleAccount' as const,
       chargebackScaling: 'perNewSalesRevenue' as const,
     },
