@@ -95,6 +95,10 @@ export default function AccountDetails() {
   const ruleSnapshot = account?.rule_snapshot as RuleSnapshot | null;
   const status = statusLabels[account?.status || 'active'] || statusLabels.active;
   const showPayoutButton = account?.status === 'passed';
+  
+  // Staff visibility guards (bulletproof: handles undefined, disabled query, falsy id)
+  const staff = !!isStaff;
+  const canShowRecon = !isStaffLoading && staff && !!id;
 
   if (accountLoading) {
     return (
@@ -185,10 +189,8 @@ export default function AccountDetails() {
         {/* Account Timeline */}
         <AccountTimeline accountId={account.id} maxHeight="500px" />
 
-        {/* Reconciliation History (staff only) */}
-        {!isStaffLoading && !!isStaff && id ? (
-          <ReconciliationHistory accountId={id} />
-        ) : null}
+        {/* Reconciliation History (staff only, no pop-in) */}
+        {canShowRecon ? <ReconciliationHistory accountId={id!} /> : null}
       </div>
     </DashboardLayout>
   );
