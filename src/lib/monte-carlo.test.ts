@@ -134,10 +134,11 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       expect(activeCohortSizeByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
       expect(eligibleCohortSizeByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
       
-      // newPassedByMonth: finite, non-negative, and bounded by accountsPerMonth + 1 (catches double-counting)
-      // +1 tolerance for rounding edge cases if passRate or accountsPerMonth derivation changes
+      // newPassedByMonth: finite, non-negative integers, bounded by accountsPerMonth + 1
+      // Integer check catches accidental removal of Math.round()
+      // +1 tolerance for rounding edge cases if derivation changes
       const maxNew = assumptions.accountsPerMonth + 1;
-      expect(newPassedByMonth.every(n => Number.isFinite(n) && n >= 0 && n <= maxNew)).toBe(true);
+      expect(newPassedByMonth.every(n => Number.isInteger(n) && n >= 0 && n <= maxNew)).toBe(true);
     });
 
     it('per-month series sums are internally consistent (conservation check)', () => {
