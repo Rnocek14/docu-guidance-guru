@@ -14,9 +14,23 @@ const KNOWN_BASE_SYMBOLS = new Set([
 
 function normalizeSymbol(symbol: string): string {
   if (!symbol) return '';
-  
-  const cleaned = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  
+
+  const upper = symbol.trim().toUpperCase();
+
+  // Step 1: Handle prefix exchange codes (CME:NQZ5 -> NQZ5)
+  const prefixSplit = upper.split(':');
+  const preToken = prefixSplit.length > 1 ? prefixSplit[prefixSplit.length - 1] : upper;
+
+  // Step 2: Remove obvious trailing punctuation like "!" "."
+  const trimmed = preToken.replace(/[!]+$/g, '').replace(/[.]+$/g, '');
+
+  // Step 3: Split on vendor separators and take the first token
+  const token = trimmed.split(/[-._]/)[0];
+
+  // Step 4: Remove any remaining non-alphanumerics inside token
+  const cleaned = token.replace(/[^A-Z0-9]/g, '');
+
+  // Step 5: Futures contract extraction (only strip if base is known)
   const futuresMatch = cleaned.match(/^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,4})?$/);
   
   if (futuresMatch) {
@@ -25,12 +39,13 @@ function normalizeSymbol(symbol: string): string {
       return base;
     }
   }
-  
+
+  // Step 6: Fallback - strip trailing digits if result is known
   const strippedDigits = cleaned.replace(/\d+$/, '');
   if (KNOWN_BASE_SYMBOLS.has(strippedDigits)) {
     return strippedDigits;
   }
-  
+
   return cleaned;
 }
 
@@ -56,16 +71,20 @@ Deno.test("normalizeSymbol - numeric-leading currencies", () => {
 });
 
 Deno.test("normalizeSymbol - vendor suffix cleanup", () => {
-  // Suffixes after the contract code get cleaned but may leave junk
-  // The main goal is to handle punctuation like trailing ! or leading spaces
+  // Trailing punctuation
   assertEquals(normalizeSymbol("MNQU5!"), "MNQ"); // trailing !
   assertEquals(normalizeSymbol(" NQZ5 "), "NQ");  // whitespace
   assertEquals(normalizeSymbol("CLZ5."), "CL");   // trailing .
   
-  // Note: NQZ5-CME becomes NQZ5CME which doesn't match pattern (CME suffix)
-  // This is a known limitation - vendor exchange suffixes need special handling
-  // For now, these return cleaned but not normalized
-  assertEquals(normalizeSymbol("NQZ5-CME"), "NQZ5CME"); // known limitation
+  // Exchange suffixes now normalize correctly (split on separator, take first token)
+  assertEquals(normalizeSymbol("NQZ5-CME"), "NQ");
+  assertEquals(normalizeSymbol("ESM24-CBOT"), "ES");
+  assertEquals(normalizeSymbol("CL_Z5"), "CL");
+  assertEquals(normalizeSymbol("GC.G25"), "GC");
+  
+  // Prefix exchange codes
+  assertEquals(normalizeSymbol("CME:NQZ5"), "NQ");
+  assertEquals(normalizeSymbol("GLOBEX:ESM24"), "ES");
 });
 
 Deno.test("normalizeSymbol - equities should NOT be stripped", () => {
