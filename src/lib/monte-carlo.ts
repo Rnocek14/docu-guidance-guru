@@ -3,6 +3,12 @@
  * 
  * Seeded by default for reproducible results (CI/regression-safe).
  * Pure functions, no side effects, no UI dependencies.
+ * 
+ * CRITICAL FIXES (v2):
+ * 1. Account IDs persist across months (true lifetime tracking)
+ * 2. Payout split applied BEFORE caps (so $300 cap = trader receives $300)
+ * 3. Binding stats aggregated from real iteration data, not biased re-run
+ * 4. Cohort model: existing accounts can request payouts in future months
  */
 
 // ============================================================================
@@ -38,7 +44,7 @@ export interface MonteCarloAssumptions {
 }
 
 export interface SimulationKnobs {
-  firstPayoutCap: number | null;        // e.g., 300 = first payout max $300
+  firstPayoutCap: number | null;        // e.g., 300 = first payout max $300 (trader receives)
   payoutSplitPercent: number;           // e.g., 0.80 = 80% to trader
   maxPayoutPercent: number;             // e.g., 0.80 = max 80% of profits
   resetPrice: number;                   // price for reset accounts
@@ -88,7 +94,7 @@ export interface MonteCarloResult {
     effectiveMargin: number;
   };
 
-  // NEW: Payout diagnostics for cap analysis
+  // Payout diagnostics for cap analysis
   payoutDiagnostics: {
     totalPayoutsPaidMean: number;
     totalPayoutsPaidP95: number;
@@ -102,12 +108,19 @@ export interface MonteCarloResult {
     avgFirstPayoutBeforeCap: number;
     avgFirstPayoutAfterCap: number;
     
-    // Lifetime cap metrics
+    // Lifetime cap metrics (aggregated from real iteration data)
     lifetimeCapBindingRate: number;     // % of accounts that hit lifetime cap
     avgLifetimePaidPerAccount: number;
     avgLifetimeHeadroomAtEnd: number;
     payoutsRejectedDueToLifetimeCap: number;
     accountsCompletedByCap: number;
+    
+    // NEW: Distribution data for confidence
+    lifetimePaidP50: number;
+    lifetimePaidP90: number;
+    lifetimePaidP95: number;
+    payoutsClippedByLifetimeCap: number;
+    avgClippedAmount: number;
   };
 
   rawSamples?: number[][]; // optional: all monthly profits per iteration
@@ -122,7 +135,7 @@ export interface MonthResult {
   fixedCosts: number;
   netProfit: number;
   
-  // NEW: Detailed payout tracking
+  // Detailed payout tracking
   payoutDetails: {
     requestCount: number;
     approvedCount: number;
@@ -132,15 +145,28 @@ export interface MonthResult {
     lifetimeCapRejections: number;
     accountsCompletedByCap: number;
     payoutSizes: number[];
-    firstPayoutSizes: number[];  // before/after cap
+    firstPayoutSizes: number[];  // before/after cap pairs
+    lifetimeCapClippedAmounts: number[]; // amount clipped by lifetime cap
   };
 }
 
 // Per-account state tracking for lifetime caps
-interface AccountState {
+export interface AccountState {
+  id: number;
+  createdMonth: number;
   lifetimePaid: number;
   payoutCount: number;
   isCompleted: boolean; // true when lifetime cap reached
+  isActive: boolean;    // false if failed/churned
+}
+
+// Iteration-level account stats for aggregation
+interface IterationAccountStats {
+  totalAccounts: number;
+  accountsHitLifetimeCap: number;
+  totalLifetimePaid: number;
+  totalHeadroomAtEnd: number;
+  lifetimePaidValues: number[]; // for distribution
 }
 
 // ============================================================================
@@ -270,18 +296,23 @@ function applyAttackIntensity(
 }
 
 // ============================================================================
-// SINGLE MONTH SIMULATION (with lifetime cap tracking)
+// SINGLE MONTH SIMULATION (with persistent account IDs + cohort logic)
 // ============================================================================
+
+interface SimulateMonthContext {
+  accountStates: Map<number, AccountState>;
+  nextAccountId: number; // mutable counter for unique IDs
+}
 
 function simulateMonth(
   assumptions: MonteCarloAssumptions,
   random: () => number,
-  accountStates: Map<number, AccountState>, // persistent across months
+  ctx: SimulateMonthContext,
   monthIndex: number
 ): MonthResult {
   const { knobs } = assumptions;
   
-  // Revenue
+  // Revenue from NEW accounts this month
   const revenue = assumptions.accountsPerMonth * assumptions.pricePerAccount;
   
   // Sample rates from distributions
@@ -327,38 +358,56 @@ function simulateMonth(
     assumptions.payoutsPerPaidAccountPerMonth.max
   );
   
-  // Calculate passed accounts
-  const passedAccounts = Math.round(assumptions.accountsPerMonth * passRate);
+  // =========================================================================
+  // NEW ACCOUNTS THIS MONTH
+  // =========================================================================
+  const newPassedAccounts = Math.round(assumptions.accountsPerMonth * passRate);
   
-  // Accounts requesting payout
-  const accountsRequestingPayout = Math.round(passedAccounts * payoutRequestRate);
+  // Create new accounts with persistent IDs
+  for (let i = 0; i < newPassedAccounts; i++) {
+    const accountId = ctx.nextAccountId++;
+    ctx.accountStates.set(accountId, {
+      id: accountId,
+      createdMonth: monthIndex,
+      lifetimePaid: 0,
+      payoutCount: 0,
+      isCompleted: false,
+      isActive: true,
+    });
+  }
   
-  // Payout tracking
+  // =========================================================================
+  // PAYOUT REQUESTS FROM ALL ELIGIBLE ACCOUNTS (new + existing cohorts)
+  // =========================================================================
   let totalPayouts = 0;
   let firstPayoutCapHits = 0;
   let lifetimeCapHits = 0;
   let lifetimeCapRejections = 0;
   let accountsCompletedThisMonth = 0;
   const payoutSizes: number[] = [];
-  const firstPayoutSizes: number[] = []; // [beforeCap, afterCap] pairs
+  const firstPayoutSizes: number[] = [];
+  const lifetimeCapClippedAmounts: number[] = [];
   let payoutRequestCount = 0;
   let payoutApprovedCount = 0;
   
-  // Assign unique IDs to new accounts this month
-  const baseAccountId = monthIndex * 10000;
+  // All active, non-completed accounts can request payouts
+  const eligibleAccounts: AccountState[] = [];
+  ctx.accountStates.forEach(state => {
+    if (state.isActive && !state.isCompleted) {
+      eligibleAccounts.push(state);
+    }
+  });
   
-  for (let i = 0; i < accountsRequestingPayout; i++) {
-    const accountId = baseAccountId + i;
-    
-    // Get or create account state
-    let state = accountStates.get(accountId);
-    if (!state) {
-      state = { lifetimePaid: 0, payoutCount: 0, isCompleted: false };
-      accountStates.set(accountId, state);
+  // Each eligible account has payoutRequestRate chance of requesting this month
+  for (const account of eligibleAccounts) {
+    // Probability of requesting payout this month
+    if (random() > payoutRequestRate) {
+      continue; // Didn't request this month
     }
     
-    // Skip if account already completed by lifetime cap
-    if (state.isCompleted) {
+    // Churn: some accounts become inactive (reset/fail)
+    if (random() < assumptions.resetRate / 12) { // Monthly churn rate
+      account.isActive = false;
       continue;
     }
     
@@ -370,68 +419,72 @@ function simulateMonth(
       // Check lifetime cap headroom BEFORE calculating payout
       const lifetimeCap = knobs.lifetimeCapPerUser;
       const headroom = lifetimeCap !== null 
-        ? lifetimeCap - state.lifetimePaid 
+        ? lifetimeCap - account.lifetimePaid 
         : Infinity;
       
       // If no headroom, reject immediately
       if (headroom <= 0) {
         lifetimeCapRejections++;
-        state.isCompleted = true;
+        account.isCompleted = true;
         continue;
       }
       
-      // Calculate raw payout amount
-      let rawPayoutAmount = logNormal(
+      // Calculate raw payout amount (gross profit share)
+      const rawPayoutAmount = logNormal(
         random,
         assumptions.avgPayoutAmount.mean,
         assumptions.avgPayoutAmount.stdDev
       );
       
-      const isFirstPayout = state.payoutCount === 0;
-      let payoutAmount = rawPayoutAmount;
+      // =====================================================================
+      // CORRECT ORDER: Split FIRST, then apply caps
+      // This means $300 cap = trader RECEIVES $300
+      // =====================================================================
+      let traderPayout = rawPayoutAmount * knobs.payoutSplitPercent;
+      
+      const isFirstPayout = account.payoutCount === 0;
       
       // Apply first payout cap (only on first payout of each account)
       if (isFirstPayout && knobs.firstPayoutCap !== null) {
-        firstPayoutSizes.push(rawPayoutAmount); // track before cap
-        if (rawPayoutAmount > knobs.firstPayoutCap) {
-          payoutAmount = knobs.firstPayoutCap;
+        firstPayoutSizes.push(traderPayout); // track before cap
+        if (traderPayout > knobs.firstPayoutCap) {
+          traderPayout = knobs.firstPayoutCap;
           firstPayoutCapHits++;
         }
-        firstPayoutSizes.push(payoutAmount); // track after cap
+        firstPayoutSizes.push(traderPayout); // track after cap
       }
       
-      // Apply payout split
-      payoutAmount = payoutAmount * knobs.payoutSplitPercent;
-      
       // Apply lifetime cap (this is the critical enforcement)
-      if (lifetimeCap !== null && payoutAmount > headroom) {
+      if (lifetimeCap !== null && traderPayout > headroom) {
+        const clippedAmount = traderPayout - headroom;
+        lifetimeCapClippedAmounts.push(clippedAmount);
         lifetimeCapHits++;
-        payoutAmount = headroom; // cap to remaining headroom
+        traderPayout = headroom; // cap to remaining headroom
         
         // Check if this completes the account
-        if (state.lifetimePaid + payoutAmount >= lifetimeCap) {
-          state.isCompleted = true;
+        if (account.lifetimePaid + traderPayout >= lifetimeCap) {
+          account.isCompleted = true;
           accountsCompletedThisMonth++;
         }
       }
       
       // Ensure minimum payout threshold ($50)
-      if (payoutAmount < 50) {
+      if (traderPayout < 50) {
         continue; // Skip payouts below minimum
       }
       
-      totalPayouts += payoutAmount;
-      payoutSizes.push(payoutAmount);
+      totalPayouts += traderPayout;
+      payoutSizes.push(traderPayout);
       payoutApprovedCount++;
       
       // Update account state
-      state.lifetimePaid += payoutAmount;
-      state.payoutCount++;
+      account.lifetimePaid += traderPayout;
+      account.payoutCount++;
     }
   }
   
   // Fraud loss (successful fraud attempts)
-  const fraudAttempts = accountsRequestingPayout * fraudAttemptRate;
+  const fraudAttempts = eligibleAccounts.length * fraudAttemptRate;
   const successfulFrauds = fraudAttempts * fraudSuccessRate;
   const avgFraudPayout = logNormal(
     random,
@@ -468,6 +521,7 @@ function simulateMonth(
       accountsCompletedByCap: accountsCompletedThisMonth,
       payoutSizes,
       firstPayoutSizes,
+      lifetimeCapClippedAmounts,
     },
   };
 }
@@ -505,6 +559,10 @@ export function runMonteCarlo(
   let allPayoutSizes: number[] = [];
   let allFirstPayoutsBefore: number[] = [];
   let allFirstPayoutsAfter: number[] = [];
+  let allLifetimeClippedAmounts: number[] = [];
+  
+  // NEW: Aggregate account stats from REAL iteration data
+  const allIterationStats: IterationAccountStats[] = [];
   
   for (let iter = 0; iter < iterations; iter++) {
     const random = createRng(iter);
@@ -512,10 +570,14 @@ export function runMonteCarlo(
     const monthResults: MonthResult[] = [];
     
     // Fresh account state map for each iteration
-    const accountStates = new Map<number, AccountState>();
+    // CRITICAL: Account IDs now persist ACROSS months within this iteration
+    const ctx: SimulateMonthContext = {
+      accountStates: new Map<number, AccountState>(),
+      nextAccountId: 1, // Global counter for this iteration
+    };
     
     for (let month = 0; month < monthsPerIteration; month++) {
-      const result = simulateMonth(effectiveAssumptions, random, accountStates, month);
+      const result = simulateMonth(effectiveAssumptions, random, ctx, month);
       monthProfits.push(result.netProfit);
       monthResults.push(result);
       
@@ -528,6 +590,7 @@ export function runMonteCarlo(
       totalPayoutsRequested += pd.requestCount;
       totalPayoutsApproved += pd.approvedCount;
       allPayoutSizes.push(...pd.payoutSizes);
+      allLifetimeClippedAmounts.push(...pd.lifetimeCapClippedAmounts);
       
       // Track first payout sizes (pairs of before/after)
       for (let i = 0; i < pd.firstPayoutSizes.length; i += 2) {
@@ -541,6 +604,36 @@ export function runMonteCarlo(
     
     allMonthlyProfits.push(monthProfits);
     allMonthResults.push(monthResults);
+    
+    // =========================================================================
+    // AGGREGATE ACCOUNT STATS FROM REAL ITERATION DATA (no biased re-run!)
+    // =========================================================================
+    const lifetimeCap = effectiveAssumptions.knobs.lifetimeCapPerUser;
+    let accountsHitCap = 0;
+    let totalLifetimePaid = 0;
+    let totalHeadroom = 0;
+    const lifetimePaidValues: number[] = [];
+    
+    ctx.accountStates.forEach(state => {
+      lifetimePaidValues.push(state.lifetimePaid);
+      totalLifetimePaid += state.lifetimePaid;
+      
+      if (state.isCompleted) {
+        accountsHitCap++;
+      }
+      
+      if (lifetimeCap !== null) {
+        totalHeadroom += Math.max(0, lifetimeCap - state.lifetimePaid);
+      }
+    });
+    
+    allIterationStats.push({
+      totalAccounts: ctx.accountStates.size,
+      accountsHitLifetimeCap: accountsHitCap,
+      totalLifetimePaid,
+      totalHeadroomAtEnd: totalHeadroom,
+      lifetimePaidValues,
+    });
   }
   
   // Flatten all months for aggregate stats
@@ -598,7 +691,6 @@ export function runMonteCarlo(
   const avgPayoutSize = allPayoutSizes.length > 0 
     ? allPayoutSizes.reduce((a, b) => a + b, 0) / allPayoutSizes.length 
     : 0;
-  const avgPayoutsPerAccount = totalPayoutsApproved / (iterations * config.monthsPerIteration * assumptions.accountsPerMonth * 0.12 * 0.65); // rough estimate
   
   const avgFirstPayoutBefore = allFirstPayoutsBefore.length > 0
     ? allFirstPayoutsBefore.reduce((a, b) => a + b, 0) / allFirstPayoutsBefore.length
@@ -607,40 +699,48 @@ export function runMonteCarlo(
     ? allFirstPayoutsAfter.reduce((a, b) => a + b, 0) / allFirstPayoutsAfter.length
     : 0;
   
-  // Calculate lifetime cap binding rate across all accounts
-  // Need to look at final state of all accounts across all iterations
-  let totalAccountsSimulated = 0;
-  let accountsHitLifetimeCap = 0;
-  let totalLifetimePaidAcrossAccounts = 0;
-  let totalHeadroomAtEnd = 0;
+  // =========================================================================
+  // AGGREGATE LIFETIME CAP STATS FROM REAL ITERATION DATA
+  // =========================================================================
+  const totalAccountsAcrossIterations = allIterationStats.reduce((s, i) => s + i.totalAccounts, 0);
+  const totalAccountsHitCap = allIterationStats.reduce((s, i) => s + i.accountsHitLifetimeCap, 0);
+  const totalLifetimePaidSum = allIterationStats.reduce((s, i) => s + i.totalLifetimePaid, 0);
+  const totalHeadroomSum = allIterationStats.reduce((s, i) => s + i.totalHeadroomAtEnd, 0);
   
-  // Re-run a single iteration to get account-level stats (more accurate)
-  const statsRng = mulberry32(seed);
-  const statsAccountStates = new Map<number, AccountState>();
-  for (let month = 0; month < monthsPerIteration; month++) {
-    simulateMonth(effectiveAssumptions, statsRng, statsAccountStates, month);
-  }
+  // Collect all lifetime paid values for distribution
+  const allLifetimePaidValues = allIterationStats.flatMap(i => i.lifetimePaidValues);
+  const sortedLifetimePaid = [...allLifetimePaidValues].sort((a, b) => a - b);
   
-  const lifetimeCap = assumptions.knobs.lifetimeCapPerUser;
-  statsAccountStates.forEach((state) => {
-    totalAccountsSimulated++;
-    totalLifetimePaidAcrossAccounts += state.lifetimePaid;
-    if (state.isCompleted) {
-      accountsHitLifetimeCap++;
-    }
-    if (lifetimeCap !== null) {
-      totalHeadroomAtEnd += Math.max(0, lifetimeCap - state.lifetimePaid);
-    }
-  });
-  
-  const lifetimeCapBindingRate = totalAccountsSimulated > 0 
-    ? accountsHitLifetimeCap / totalAccountsSimulated 
+  const lifetimeCapBindingRate = totalAccountsAcrossIterations > 0 
+    ? totalAccountsHitCap / totalAccountsAcrossIterations 
     : 0;
-  const avgLifetimePaidPerAccount = totalAccountsSimulated > 0
-    ? totalLifetimePaidAcrossAccounts / totalAccountsSimulated
+  const avgLifetimePaidPerAccount = totalAccountsAcrossIterations > 0
+    ? totalLifetimePaidSum / totalAccountsAcrossIterations
     : 0;
-  const avgLifetimeHeadroomAtEnd = totalAccountsSimulated > 0
-    ? totalHeadroomAtEnd / totalAccountsSimulated
+  const avgLifetimeHeadroomAtEnd = totalAccountsAcrossIterations > 0
+    ? totalHeadroomSum / totalAccountsAcrossIterations
+    : (effectiveAssumptions.knobs.lifetimeCapPerUser === null ? Infinity : 0);
+  
+  // Lifetime paid distribution
+  const lifetimePaidP50 = sortedLifetimePaid.length > 0 
+    ? sortedLifetimePaid[Math.floor(sortedLifetimePaid.length * 0.50)] 
+    : 0;
+  const lifetimePaidP90 = sortedLifetimePaid.length > 0 
+    ? sortedLifetimePaid[Math.floor(sortedLifetimePaid.length * 0.90)] 
+    : 0;
+  const lifetimePaidP95 = sortedLifetimePaid.length > 0 
+    ? sortedLifetimePaid[Math.floor(sortedLifetimePaid.length * 0.95)] 
+    : 0;
+  
+  // Clipped amounts
+  const payoutsClippedByLifetimeCap = allLifetimeClippedAmounts.length;
+  const avgClippedAmount = allLifetimeClippedAmounts.length > 0
+    ? allLifetimeClippedAmounts.reduce((a, b) => a + b, 0) / allLifetimeClippedAmounts.length
+    : 0;
+  
+  // Average payouts per account
+  const avgPayoutsPerAccount = totalAccountsAcrossIterations > 0
+    ? totalPayoutsApproved / totalAccountsAcrossIterations
     : 0;
   
   return {
@@ -691,6 +791,12 @@ export function runMonteCarlo(
       avgLifetimeHeadroomAtEnd,
       payoutsRejectedDueToLifetimeCap: totalLifetimeCapRejections,
       accountsCompletedByCap: totalAccountsCompletedByCap,
+      
+      lifetimePaidP50,
+      lifetimePaidP90,
+      lifetimePaidP95,
+      payoutsClippedByLifetimeCap,
+      avgClippedAmount,
     },
     rawSamples: allMonthlyProfits,
   };
@@ -726,7 +832,7 @@ export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
 
   // Default knobs (with $300 first payout cap)
   knobs: {
-    firstPayoutCap: 300,            // $300 first payout cap
+    firstPayoutCap: 300,            // $300 first payout cap (trader receives)
     payoutSplitPercent: 0.80,       // 80% to trader
     maxPayoutPercent: 0.80,         // max 80% of profits
     resetPrice: 99,                 // $99 reset
@@ -786,7 +892,7 @@ export const SCENARIO_PRESETS = {
     },
   },
   
-  // NEW: Lifetime cap scenarios for testing
+  // Lifetime cap scenarios for testing
   withLifetimeCap3x: {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
@@ -923,6 +1029,13 @@ export interface LifetimeCapSweepResult {
   payoutsRejected: number;
   marginDelta: number; // vs unlimited baseline
   profitDelta: number; // vs unlimited baseline
+  
+  // NEW: Distribution data
+  lifetimePaidP50: number;
+  lifetimePaidP90: number;
+  lifetimePaidP95: number;
+  payoutsClipped: number;
+  avgClippedAmount: number;
 }
 
 export function runLifetimeCapSweep(
@@ -960,6 +1073,12 @@ export function runLifetimeCapSweep(
       payoutsRejected: pd.payoutsRejectedDueToLifetimeCap,
       marginDelta: result.diagnostics.effectiveMargin - baselineMargin,
       profitDelta: result.profit.mean - baselineProfit,
+      
+      lifetimePaidP50: pd.lifetimePaidP50,
+      lifetimePaidP90: pd.lifetimePaidP90,
+      lifetimePaidP95: pd.lifetimePaidP95,
+      payoutsClipped: pd.payoutsClippedByLifetimeCap,
+      avgClippedAmount: pd.avgClippedAmount,
     });
   }
   
