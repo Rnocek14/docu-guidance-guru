@@ -106,6 +106,9 @@ export interface Trade {
 export interface Violation {
   id: string;
   account_id: string;
+  trade_id: string | null;
+  platform_trade_id: string | null;
+  breach_day: string | null;
   rule_type: string;
   rule_threshold: number | null;
   actual_value: number | null;

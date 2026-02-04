@@ -547,38 +547,47 @@ export type Database = {
         Row: {
           account_id: string
           actual_value: number | null
+          breach_day: string | null
           confirmation_notes: string | null
           confirmed_at: string | null
           confirmed_by: string | null
           description: string
           detected_at: string
           id: string
+          platform_trade_id: string | null
           rule_threshold: number | null
           rule_type: string
+          trade_id: string | null
         }
         Insert: {
           account_id: string
           actual_value?: number | null
+          breach_day?: string | null
           confirmation_notes?: string | null
           confirmed_at?: string | null
           confirmed_by?: string | null
           description: string
           detected_at?: string
           id?: string
+          platform_trade_id?: string | null
           rule_threshold?: number | null
           rule_type: string
+          trade_id?: string | null
         }
         Update: {
           account_id?: string
           actual_value?: number | null
+          breach_day?: string | null
           confirmation_notes?: string | null
           confirmed_at?: string | null
           confirmed_by?: string | null
           description?: string
           detected_at?: string
           id?: string
+          platform_trade_id?: string | null
           rule_threshold?: number | null
           rule_type?: string
+          trade_id?: string | null
         }
         Relationships: [
           {
@@ -586,6 +595,13 @@ export type Database = {
             columns: ["account_id"]
             isOneToOne: false
             referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "violations_trade_id_fkey"
+            columns: ["trade_id"]
+            isOneToOne: false
+            referencedRelation: "trades"
             referencedColumns: ["id"]
           },
         ]
