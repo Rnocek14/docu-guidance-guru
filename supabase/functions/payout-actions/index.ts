@@ -115,9 +115,10 @@ interface CorrelationResult {
     other_account_id: string
     other_account_number: string
     match_count: number
-    correlation_type: string
+    correlation_type: 'opposite_side' | 'same_side'
     sample_trades: unknown[]
   }>
+  error?: string
 }
 
 Deno.serve(async (req) => {
@@ -303,11 +304,12 @@ Deno.serve(async (req) => {
       }
       
       // 3. CHECK CROSS-ACCOUNT CORRELATIONS (MVP fraud detection)
+      // Detects both opposite-side (hedging) and same-side (copy trading) patterns
       const { data: correlationData, error: correlationError } = await supabaseAdmin
         .rpc('detect_trade_correlations', { 
           _account_id: payout.account_id,
           _time_window_seconds: 60,
-          _min_correlation_score: 0.7
+          _min_match_count: 3  // FIX: renamed parameter
         })
       
       if (correlationError) {
@@ -351,32 +353,40 @@ Deno.serve(async (req) => {
       }
       
       // 4. CHECK FOR DEVICE FINGERPRINT MATCHES (if available)
-      const { data: fingerprintMatches } = await supabaseAdmin
+      // FIX: Two-step query - Supabase JS doesn't support subqueries
+      const { data: userFingerprints } = await supabaseAdmin
         .from('device_fingerprints')
-        .select('fingerprint_hash, user_id, cluster_id')
-        .eq('fingerprint_hash', 
-          // Get fingerprints for this user, then check if same hash exists for other users
-          supabaseAdmin.from('device_fingerprints').select('fingerprint_hash').eq('user_id', account.user_id)
-        )
-        .neq('user_id', account.user_id)
-        .limit(5)
+        .select('fingerprint_hash')
+        .eq('user_id', account.user_id)
       
-      // If fingerprint matches found for other users, flag for review (but don't auto-block)
-      if (fingerprintMatches && fingerprintMatches.length > 0 && !body.skip_fraud_check) {
-        fraudReviewId = await createFraudReview(supabaseAdmin, {
-          entity_type: 'payout',
-          entity_id: body.payout_id,
-          review_type: 'device_match',
-          severity: 'medium',
-          auto_block: false,
-          details: {
-            matching_users: fingerprintMatches.length,
-            submitted_amount: submittedAmount,
-            account_id: payout.account_id
-          },
-          request_id: requestId
-        })
-        // Don't block, just flag
+      const userHashes = (userFingerprints ?? []).map(fp => fp.fingerprint_hash)
+      
+      if (userHashes.length > 0) {
+        const { data: fingerprintMatches } = await supabaseAdmin
+          .from('device_fingerprints')
+          .select('fingerprint_hash, user_id, cluster_id')
+          .in('fingerprint_hash', userHashes)
+          .neq('user_id', account.user_id)
+          .limit(10)
+        
+        // If fingerprint matches found for other users, flag for review (but don't auto-block)
+        if (fingerprintMatches && fingerprintMatches.length > 0 && !body.skip_fraud_check) {
+          fraudReviewId = await createFraudReview(supabaseAdmin, {
+            entity_type: 'payout',
+            entity_id: body.payout_id,
+            review_type: 'device_match',
+            severity: 'medium',
+            auto_block: false,
+            details: {
+              matching_users: fingerprintMatches.length,
+              matching_hashes: fingerprintMatches.map(m => m.fingerprint_hash),
+              submitted_amount: submittedAmount,
+              account_id: payout.account_id
+            },
+            request_id: requestId
+          })
+          // Don't block, just flag
+        }
       }
       
       // 5. CHECK FOR PAYOUT METHOD REUSE (if method linked)

@@ -983,18 +983,32 @@ export type Database = {
     }
     Functions: {
       bootstrap_first_admin: { Args: { _user_id: string }; Returns: boolean }
+      bump_fingerprint_seen: { Args: { _id: string }; Returns: undefined }
       calculate_payout_eligibility: {
         Args: { _account_id: string }
         Returns: Json
       }
-      detect_trade_correlations: {
-        Args: {
-          _account_id: string
-          _min_correlation_score?: number
-          _time_window_seconds?: number
-        }
+      check_payout_method_duplicate: {
+        Args: { _method_hash: string; _user_id: string }
         Returns: Json
       }
+      detect_trade_correlations:
+        | {
+            Args: {
+              _account_id: string
+              _min_correlation_score?: number
+              _time_window_seconds?: number
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              _account_id: string
+              _min_match_count?: number
+              _time_window_seconds?: number
+            }
+            Returns: Json
+          }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
@@ -1012,6 +1026,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      validate_payout_request: {
+        Args: { _account_id: string; _requested_amount: number }
+        Returns: Json
       }
     }
     Enums: {
