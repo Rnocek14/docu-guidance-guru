@@ -21,6 +21,7 @@ import TraderPayouts from "./pages/trader/TraderPayouts";
 import RiskDashboard from "./pages/risk/RiskDashboard";
 import ReviewQueue from "./pages/risk/ReviewQueue";
 import AdminDashboard from "./pages/admin/AdminDashboard";
+import SystemOverview from "./pages/admin/SystemOverview";
 import SupportDashboard from "./pages/support/SupportDashboard";
 import AccountDetails from "./pages/trader/AccountDetails";
 
@@ -123,6 +124,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <AdminDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/system"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <SystemOverview />
                 </ProtectedRoute>
               }
             />
