@@ -513,16 +513,10 @@ Deno.serve(async (req) => {
         .eq('id', payout.account_id)
     }
 
-    // If payout is marked as paid, reset the high watermark for next payout cycle
+    // If payout is marked as paid, reset payout cycle for next period
     if (body.action === 'mark_paid') {
-      const currentBalance = Number(account.current_balance)
-      await supabaseAdmin
-        .from('accounts')
-        .update({ 
-          highest_balance: currentBalance,
-          // Note: We don't reset starting_balance - that's frozen at account creation
-        })
-        .eq('id', payout.account_id)
+      // Use RPC to atomically reset payout cycle baseline + high watermark
+      await supabaseAdmin.rpc('reset_payout_cycle', { _account_id: payout.account_id })
     }
 
     // Determine audit action and event type
