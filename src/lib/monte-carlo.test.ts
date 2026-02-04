@@ -121,7 +121,7 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       expect(result.cohortDiagnostics.newPassedByMonth.length).toBe(expectedLength);
     });
 
-    it('per-month event series are never negative and never NaN', () => {
+    it('per-month count series are valid integers (finite, non-negative)', () => {
       const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
       const assumptions = SCENARIO_PRESETS.withLifetimeCap7x;
       
@@ -140,8 +140,9 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       expect(newPassedByMonth.every(isCount)).toBe(true);
       
       // newPassedByMonth has additional bound: cannot exceed accountsPerMonth + 1 (rounding tolerance)
+      // Self-contained check so it can be safely copy-pasted
       const maxNew = assumptions.accountsPerMonth + 1;
-      expect(newPassedByMonth.every(n => n <= maxNew)).toBe(true);
+      expect(newPassedByMonth.every(n => isCount(n) && n <= maxNew)).toBe(true);
     });
 
     it('per-month series sums are internally consistent (conservation check)', () => {
