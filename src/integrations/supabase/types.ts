@@ -181,10 +181,12 @@ export type Database = {
           created_at: string
           created_by: string | null
           description: string | null
+          entry_fee: number | null
           first_payout_cap_amount: number | null
           id: string
           intake_active: boolean
           is_active: boolean
+          lifetime_cap_multiple: number | null
           max_daily_loss_percent: number
           max_payout_absolute: number | null
           max_payout_percent: number
@@ -202,10 +204,12 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           description?: string | null
+          entry_fee?: number | null
           first_payout_cap_amount?: number | null
           id?: string
           intake_active?: boolean
           is_active?: boolean
+          lifetime_cap_multiple?: number | null
           max_daily_loss_percent?: number
           max_payout_absolute?: number | null
           max_payout_percent?: number
@@ -223,10 +227,12 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           description?: string | null
+          entry_fee?: number | null
           first_payout_cap_amount?: number | null
           id?: string
           intake_active?: boolean
           is_active?: boolean
+          lifetime_cap_multiple?: number | null
           max_daily_loss_percent?: number
           max_payout_absolute?: number | null
           max_payout_percent?: number
@@ -606,6 +612,7 @@ export type Database = {
           id: string
           kyc_status: string | null
           kyc_verified_at: string | null
+          lifetime_paid_total: number
           updated_at: string
           user_id: string
         }
@@ -617,6 +624,7 @@ export type Database = {
           id?: string
           kyc_status?: string | null
           kyc_verified_at?: string | null
+          lifetime_paid_total?: number
           updated_at?: string
           user_id: string
         }
@@ -628,6 +636,7 @@ export type Database = {
           id?: string
           kyc_status?: string | null
           kyc_verified_at?: string | null
+          lifetime_paid_total?: number
           updated_at?: string
           user_id?: string
         }
