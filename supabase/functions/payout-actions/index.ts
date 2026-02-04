@@ -515,8 +515,13 @@ Deno.serve(async (req) => {
 
     // If payout is marked as paid, reset payout cycle for next period
     if (body.action === 'mark_paid') {
-      // Use RPC to atomically reset payout cycle baseline + high watermark
-      await supabaseAdmin.rpc('reset_payout_cycle', { _account_id: payout.account_id })
+      // Use RPC to atomically reset payout cycle (baseline + timestamp + high watermark)
+      const { error: cycleErr } = await supabaseAdmin.rpc('reset_payout_cycle', { 
+        _account_id: payout.account_id 
+      })
+      if (cycleErr) {
+        throw new Error(`Failed to reset payout cycle: ${cycleErr.message}`)
+      }
     }
 
     // Determine audit action and event type
