@@ -87,39 +87,42 @@ const KNOWN_BASE_SYMBOLS = new Set([
  * Normalize a trading symbol for comparison
  * Uses regex to extract base symbol from futures contract format: BASE + MONTH_CODE + YEAR
  * Examples: NQZ5 -> NQ, ESM24 -> ES, 6EH6 -> 6E, MNQU5 -> MNQ
+ * 
+ * IMPORTANT: Only strips contract suffix if base is a KNOWN futures symbol.
+ * This prevents accidentally normalizing equities like AAPL -> AAP.
  */
 function normalizeSymbol(symbol: string): string {
   if (!symbol) return ''
   
-  const normalized = symbol.trim().toUpperCase()
+  // Step 1: Clean vendor suffixes (e.g., NQZ5-CME -> NQZ5, MNQU5! -> MNQU5)
+  const cleaned = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
   
-  // Regex: capture base symbol, then optional month code + year digits
+  // Step 2: Try to extract base symbol from futures contract format
+  // Regex: capture base symbol, then month code + optional year digits
   // Pattern: ^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,4})?$
-  const futuresMatch = normalized.match(/^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,4})?$/)
+  const futuresMatch = cleaned.match(/^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,4})?$/)
   
   if (futuresMatch) {
     const [, base, monthCode] = futuresMatch
-    // Validate the month code is actually a month code (not part of the base)
-    if (MONTH_CODES.includes(monthCode)) {
-      // Check if base is a known symbol, or if base + monthCode would be known
-      if (KNOWN_BASE_SYMBOLS.has(base)) {
-        return base
-      }
-      // For unknown bases, still strip the contract suffix
+    // Only strip if:
+    // 1. The month code is valid, AND
+    // 2. The base is a KNOWN futures symbol
+    if (MONTH_CODES.includes(monthCode) && KNOWN_BASE_SYMBOLS.has(base)) {
       return base
     }
+    // If base isn't known, do NOT strip - could be an equity or unknown instrument
+    // Return cleaned version unchanged
   }
   
-  // Fallback: just strip trailing digits (handles cases like ES24 without month code)
-  const strippedDigits = normalized.replace(/\d+$/, '')
-  
-  // Check if the result is a known base
+  // Fallback: check if stripping trailing digits yields a known base
+  // (handles formats like ES24 without month code)
+  const strippedDigits = cleaned.replace(/\d+$/, '')
   if (KNOWN_BASE_SYMBOLS.has(strippedDigits)) {
     return strippedDigits
   }
   
-  // Return as-is if no normalization applied
-  return normalized
+  // Return cleaned but otherwise unchanged (preserves equities like AAPL)
+  return cleaned
 }
 
 // Deep stable stringify for deterministic hashing
