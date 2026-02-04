@@ -7,12 +7,18 @@ interface UseKeyboardNavigationProps<T> {
   searchInputRef?: RefObject<HTMLInputElement>;
   onSearchClear?: () => void;
   hasSearchText?: boolean;
+  // External state control for ID-based stability
+  externalSelectedIndex?: number;
+  onSelectedIndexChange?: (index: number) => void;
 }
 
 /**
  * Hook for keyboard navigation in lists
  * J/K or Arrow keys to navigate, Enter to select
  * "/" to focus search, Esc to clear search or selection
+ * 
+ * Supports external state control via externalSelectedIndex + onSelectedIndexChange
+ * for ID-based selection stability across data refetches.
  */
 export function useKeyboardNavigation<T>({
   items,
@@ -21,8 +27,15 @@ export function useKeyboardNavigation<T>({
   searchInputRef,
   onSearchClear,
   hasSearchText = false,
+  externalSelectedIndex,
+  onSelectedIndexChange,
 }: UseKeyboardNavigationProps<T>) {
-  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
+  // Use external state if provided, otherwise internal
+  const isExternallyControlled = externalSelectedIndex !== undefined && onSelectedIndexChange !== undefined;
+  const [internalIndex, setInternalIndex] = useState<number>(-1);
+  
+  const selectedIndex = isExternallyControlled ? externalSelectedIndex : internalIndex;
+  const setSelectedIndex = isExternallyControlled ? onSelectedIndexChange : setInternalIndex;
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (!enabled) return;
@@ -63,18 +76,18 @@ export function useKeyboardNavigation<T>({
       case 'j':
       case 'arrowdown':
         event.preventDefault();
-        setSelectedIndex(prev => {
-          const next = prev < items.length - 1 ? prev + 1 : prev;
-          return next;
-        });
+        {
+          const next = selectedIndex < items.length - 1 ? selectedIndex + 1 : selectedIndex;
+          setSelectedIndex(next < 0 ? 0 : next);
+        }
         break;
       case 'k':
       case 'arrowup':
         event.preventDefault();
-        setSelectedIndex(prev => {
-          const next = prev > 0 ? prev - 1 : 0;
-          return next;
-        });
+        {
+          const next = selectedIndex > 0 ? selectedIndex - 1 : 0;
+          setSelectedIndex(next);
+        }
         break;
       case 'enter':
         if (selectedIndex >= 0 && selectedIndex < items.length) {
@@ -83,23 +96,25 @@ export function useKeyboardNavigation<T>({
         }
         break;
     }
-  }, [enabled, items, selectedIndex, onSelect, searchInputRef, onSearchClear, hasSearchText]);
+  }, [enabled, items, selectedIndex, setSelectedIndex, onSelect, searchInputRef, onSearchClear, hasSearchText]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  // Reset selection when items change
+  // Reset selection when items change (only for internal state)
   useEffect(() => {
-    setSelectedIndex(prev => {
-      // Try to keep selection valid
-      if (prev >= items.length) {
-        return items.length - 1;
-      }
-      return prev;
-    });
-  }, [items]);
+    if (!isExternallyControlled) {
+      setInternalIndex(prev => {
+        // Try to keep selection valid
+        if (prev >= items.length) {
+          return items.length - 1;
+        }
+        return prev;
+      });
+    }
+  }, [items, isExternallyControlled]);
 
   return {
     selectedIndex,
