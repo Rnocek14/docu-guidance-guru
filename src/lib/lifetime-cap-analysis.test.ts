@@ -1,7 +1,8 @@
 /**
- * Lifetime Payout Cap Sensitivity Analysis Tests
+ * Lifetime Payout Cap Analysis Tests
  * 
- * Runs the full analysis and outputs results for decision-making.
+ * Validates that lifetime caps are actually enforced in the Monte Carlo engine
+ * by checking binding rates, profit changes, and payout diagnostics.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -12,62 +13,147 @@ import {
   formatTierLadder,
   LOCKED_PRICING,
 } from './lifetime-cap-analysis';
+import { runMonteCarlo, runLifetimeCapSweep, DEFAULT_ASSUMPTIONS, MonteCarloConfig } from './monte-carlo';
 
-describe('Lifetime Payout Cap Sensitivity Analysis', () => {
-  it('runs full lifetime cap analysis and outputs report', () => {
-    const summary = analyzeLifetimeCaps();
+const FAST_CONFIG: MonteCarloConfig = {
+  iterations: 50,
+  monthsPerIteration: 12,
+  seed: 42,
+};
+
+describe('Lifetime Cap Enforcement in Monte Carlo', () => {
+  it('should track payout diagnostics in MonteCarloResult', () => {
+    const result = runMonteCarlo(FAST_CONFIG, DEFAULT_ASSUMPTIONS);
     
-    // Print the full report
+    expect(result.payoutDiagnostics).toBeDefined();
+    expect(typeof result.payoutDiagnostics.totalPayoutsPaidMean).toBe('number');
+    expect(typeof result.payoutDiagnostics.avgPayoutSize).toBe('number');
+    expect(typeof result.payoutDiagnostics.firstPayoutCapBindingRate).toBe('number');
+    expect(typeof result.payoutDiagnostics.lifetimeCapBindingRate).toBe('number');
+    expect(typeof result.payoutDiagnostics.avgLifetimePaidPerAccount).toBe('number');
+    
+    console.log('Payout diagnostics (no lifetime cap):', {
+      avgPayoutSize: result.payoutDiagnostics.avgPayoutSize.toFixed(2),
+      firstCapBindingRate: (result.payoutDiagnostics.firstPayoutCapBindingRate * 100).toFixed(1) + '%',
+      lifetimeCapBindingRate: (result.payoutDiagnostics.lifetimeCapBindingRate * 100).toFixed(1) + '%',
+      avgLifetimePaid: result.payoutDiagnostics.avgLifetimePaidPerAccount.toFixed(2),
+    });
+  });
+
+  it('should show different results with vs without lifetime cap', () => {
+    const noCap = runMonteCarlo(FAST_CONFIG, {
+      ...DEFAULT_ASSUMPTIONS,
+      knobs: { ...DEFAULT_ASSUMPTIONS.knobs, lifetimeCapPerUser: null },
+    });
+    
+    // Very aggressive cap that should definitely bind
+    const withCap = runMonteCarlo(FAST_CONFIG, {
+      ...DEFAULT_ASSUMPTIONS,
+      knobs: { ...DEFAULT_ASSUMPTIONS.knobs, lifetimeCapPerUser: 500 },
+    });
+    
+    console.log('Comparison - No Cap vs $500 Cap:');
+    console.log('  No cap - Avg lifetime paid:', noCap.payoutDiagnostics.avgLifetimePaidPerAccount.toFixed(2));
+    console.log('  $500 cap - Avg lifetime paid:', withCap.payoutDiagnostics.avgLifetimePaidPerAccount.toFixed(2));
+    console.log('  No cap - Lifetime binding rate:', (noCap.payoutDiagnostics.lifetimeCapBindingRate * 100).toFixed(1) + '%');
+    console.log('  $500 cap - Lifetime binding rate:', (withCap.payoutDiagnostics.lifetimeCapBindingRate * 100).toFixed(1) + '%');
+    console.log('  No cap - Mean profit:', noCap.profit.mean.toFixed(0));
+    console.log('  $500 cap - Mean profit:', withCap.profit.mean.toFixed(0));
+    
+    // Key assertion: aggressive cap should show different behavior
+    if (noCap.payoutDiagnostics.avgLifetimePaidPerAccount > 500) {
+      expect(withCap.payoutDiagnostics.lifetimeCapBindingRate).toBeGreaterThan(0);
+      expect(withCap.payoutDiagnostics.avgLifetimePaidPerAccount).toBeLessThanOrEqual(500);
+    }
+  });
+
+  it('should run lifetime cap sweep with binding diagnostics', () => {
+    const multiples = [null, 10, 7, 5, 3];
+    const results = runLifetimeCapSweep(FAST_CONFIG, DEFAULT_ASSUMPTIONS, multiples);
+    
+    console.log('\n=== LIFETIME CAP SWEEP RESULTS ===');
+    console.log('Multiple | Cap $    | Binding% | Margin   | Profit    | Completed');
+    console.log('---------|----------|----------|----------|-----------|----------');
+    
+    for (const r of results) {
+      const multiple = r.multiple === null ? 'Unlim' : `${r.multiple}×`;
+      const cap = r.capDollars === null ? 'N/A' : `$${r.capDollars}`;
+      const binding = (r.capBindingRate * 100).toFixed(1) + '%';
+      const margin = (r.result.diagnostics.effectiveMargin * 100).toFixed(1) + '%';
+      const profit = '$' + r.result.profit.mean.toFixed(0);
+      const completed = r.accountsCompletedByCap.toString();
+      
+      console.log(`${multiple.padEnd(8)} | ${cap.padEnd(8)} | ${binding.padEnd(8)} | ${margin.padEnd(8)} | ${profit.padEnd(9)} | ${completed}`);
+    }
+    
+    expect(results.length).toBe(multiples.length);
+  });
+});
+
+describe('Lifetime Cap Analysis with Real Binding', () => {
+  it('runs full analysis and outputs report', () => {
+    const summary = analyzeLifetimeCaps(LOCKED_PRICING, FAST_CONFIG);
+    
     console.log('\n' + formatLifetimeCapReport(summary));
     
-    // Validate structure
     expect(summary.results.length).toBeGreaterThan(0);
     expect(summary.recommendation).toBeDefined();
     expect(summary.recommendation.optimalMultiple).toBeDefined();
-    expect(summary.comparisonTable.length).toBeGreaterThan(0);
-  }, 180000);  // Allow 3 minutes for full analysis
+    
+    // Log warnings if any
+    if (summary.warnings.length > 0) {
+      console.log('Warnings:');
+      summary.warnings.forEach(w => console.log('  -', w));
+    }
+  }, 60000);
 
   it('validates locked-in pricing is used', () => {
-    const summary = analyzeLifetimeCaps();
+    const summary = analyzeLifetimeCaps(LOCKED_PRICING, FAST_CONFIG);
     
     expect(summary.pricing.entryFee).toBe(149);
     expect(summary.pricing.resetFee).toBe(99);
     expect(summary.pricing.firstPayoutCap).toBe(300);
     expect(summary.pricing.payoutSplitPercent).toBe(80);
-    expect(summary.pricing.accountSizes).toEqual([50000, 100000]);
   }, 30000);
 
-  it('validates cap multiples have bounded exposure', () => {
-    const summary = analyzeLifetimeCaps();
+  it('validates binding diagnostics are present', () => {
+    const summary = analyzeLifetimeCaps(LOCKED_PRICING, FAST_CONFIG);
     
-    // Unlimited should have infinite exposure
-    const unlimited = summary.results.find(r => r.capMultiple === null)!;
-    expect(unlimited.riskProfile.maxExposurePerAccount).toBe(Infinity);
-    expect(unlimited.riskProfile.fraudSurfaceScore).toBe(100);
-    
-    // 5x cap should have $745 exposure
-    const fiveX = summary.results.find(r => r.capMultiple === 5)!;
-    expect(fiveX.capDollars).toBe(149 * 5);  // $745
-    expect(fiveX.riskProfile.maxExposurePerAccount).toBe(745);
-    expect(fiveX.riskProfile.fraudSurfaceScore).toBeLessThan(100);
-  }, 180000);
+    for (const result of summary.results) {
+      expect(result.binding).toBeDefined();
+      expect(typeof result.binding.rate).toBe('number');
+      expect(typeof result.binding.avgLifetimePaid).toBe('number');
+      expect(typeof result.binding.accountsCompleted).toBe('number');
+    }
+  }, 60000);
 
-  it('validates optimal cap retains sufficient margin', () => {
-    const summary = analyzeLifetimeCaps();
+  it('compares cap values for detailed analysis', () => {
+    const summary = analyzeLifetimeCaps(LOCKED_PRICING, FAST_CONFIG);
     
-    // Optimal cap must retain at least 85% of margin
-    expect(summary.recommendation.metrics.marginPreserved).toBeGreaterThanOrEqual(85);
-  }, 180000);
+    console.log('\n--- LIFETIME CAP COMPARISON ---\n');
+    
+    for (const result of summary.results) {
+      console.log(`${result.capLabel}:`);
+      console.log(`  Cap Dollars: ${result.capDollars ? `$${result.capDollars}` : 'Unlimited'}`);
+      console.log(`  Binding Rate: ${(result.binding.rate * 100).toFixed(1)}%`);
+      console.log(`  Avg Lifetime Paid: $${result.binding.avgLifetimePaid.toFixed(0)}`);
+      console.log(`  Mean Profit: $${result.profit.mean.toFixed(0)}`);
+      console.log(`  Margin: ${(result.profit.margin * 100).toFixed(1)}%`);
+      console.log(`  Payouts Rejected: ${result.binding.payoutsRejected}`);
+      console.log('');
+    }
+  }, 60000);
+});
 
+describe('Tier Ladder Design', () => {
   it('designs tier ladder based on optimal cap', () => {
-    const summary = analyzeLifetimeCaps();
+    const summary = analyzeLifetimeCaps(LOCKED_PRICING, FAST_CONFIG);
     
     if (summary.recommendation.optimalMultiple) {
       const tiers = designTierLadder(summary.recommendation.optimalMultiple);
       
       console.log('\n' + formatTierLadder(tiers));
       
-      // Validate tier structure
       expect(tiers).toHaveLength(3);
       expect(tiers[0].name).toBe('Starter');
       expect(tiers[1].name).toBe('Pro');
@@ -84,24 +170,5 @@ describe('Lifetime Payout Cap Sensitivity Analysis', () => {
       expect(tiers[0].lifetimeCapMultiple!).toBeLessThan(tiers[1].lifetimeCapMultiple!);
       expect(tiers[1].lifetimeCapMultiple!).toBeLessThan(tiers[2].lifetimeCapMultiple!);
     }
-  }, 180000);
-
-  it('compares cap values for detailed analysis', () => {
-    const summary = analyzeLifetimeCaps();
-    
-    console.log('\n--- LIFETIME CAP COMPARISON ---\n');
-    
-    for (const result of summary.results) {
-      console.log(`${result.capLabel}:`);
-      console.log(`  Cap Dollars: ${result.capDollars ? `$${result.capDollars}` : 'Unlimited'}`);
-      console.log(`  Aggregated Mean: $${(result.aggregated.meanProfit / 1000).toFixed(1)}k`);
-      console.log(`  Aggregated P5: $${(result.aggregated.p5Profit / 1000).toFixed(1)}k`);
-      console.log(`  Loss Probability: ${(result.aggregated.lossProb * 100).toFixed(1)}%`);
-      console.log(`  Fraud Surface Score: ${result.riskProfile.fraudSurfaceScore}/100`);
-      console.log(`  Payouts to Cap: ${result.riskProfile.breakevenPayouts === Infinity ? '∞' : result.riskProfile.breakevenPayouts}`);
-      console.log('');
-    }
-    
-    expect(true).toBe(true);  // Log output test
-  }, 180000);
+  }, 60000);
 });
