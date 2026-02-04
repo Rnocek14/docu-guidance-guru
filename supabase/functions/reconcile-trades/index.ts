@@ -113,7 +113,8 @@ function normalizeSymbol(symbol: string): string {
   //  - "NQZ5-CME" -> "NQZ5"
   //  - "ES.M24"   -> "ES" (first token)
   //  - "CL_Z5"    -> "CL" (first token)
-  const token = trimmed.split(/[-._]/)[0]
+  //  - "CME:NQZ5-CME" -> handled by prefixSplit, but include : for robustness
+  const token = trimmed.split(/[-._:]/)[0]
 
   // Step 4: Remove any remaining non-alphanumerics inside token (rare edge cases)
   const cleaned = token.replace(/[^A-Z0-9]/g, '')
