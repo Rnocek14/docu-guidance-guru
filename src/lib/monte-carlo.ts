@@ -188,11 +188,12 @@ export interface AccountState {
 
 // Iteration-level account stats for aggregation
 interface IterationAccountStats {
-  totalAccounts: number;
-  accountsHitLifetimeCap: number;
+  totalEverCreated: number;           // all accounts ever created
+  totalEverCompleted: number;         // accounts terminated (cap hit or zombie)
+  accountsHitLifetimeCap: number;     // specifically due to cap
   totalLifetimePaid: number;
   totalHeadroomAtEnd: number;
-  lifetimePaidValues: number[]; // for distribution
+  lifetimePaidValues: number[];       // for distribution
 }
 
 // ============================================================================
@@ -327,7 +328,9 @@ function applyAttackIntensity(
 
 interface SimulateMonthContext {
   accountStates: Map<number, AccountState>;
-  nextAccountId: number; // mutable counter for unique IDs
+  nextAccountId: number;          // mutable counter for unique IDs
+  totalEverCreated: number;       // running total of all accounts created
+  totalEverCompleted: number;     // running total of all accounts terminated
 }
 
 function simulateMonth(
@@ -406,33 +409,55 @@ function simulateMonth(
       isCompleted: false,
       isActive: true,
     });
+    ctx.totalEverCreated++;
   }
   
   // =========================================================================
-  // RESET PROCESSING - resets generate revenue but DO NOT wipe lifetime paid
+  // LIFECYCLE EVENTS (resets, zombies) - BEFORE payout processing
+  // CRITICAL: Resets are independent of payout requests!
   // =========================================================================
   let resetsThisMonth = 0;
   let resetRevenue = 0;
   let zombieAccountsCompleted = 0;
   
-  // Check for zombie accounts (headroom < $50) and complete them
-  // Uses lifetimePaidTotal for per-user cap enforcement
   const lifetimeCap = knobs.lifetimeCapPerUser;
+  
+  // Proper hazard rate conversion: p_month = 1 - (1 - p_annual)^(1/12)
+  const monthlyResetProb = 1 - Math.pow(1 - assumptions.resetRate, 1/12);
+  
+  // Process lifecycle events for ALL active accounts (not just eligible ones)
   ctx.accountStates.forEach(state => {
     if (!state.isActive || state.isCompleted) return;
     
+    // 1. Check for zombie accounts (headroom < $50)
     if (lifetimeCap !== null) {
       const headroom = lifetimeCap - state.lifetimePaidTotal;
       if (headroom > 0 && headroom < 50) {
-        // Zombie account: not enough headroom for minimum payout
         state.isCompleted = true;
+        state.isActive = false;  // Mark inactive for clean exit
         zombieAccountsCompleted++;
+        ctx.totalEverCompleted++;
+        return; // Skip further processing for this account
       }
+    }
+    
+    // 2. Reset hazard check - INDEPENDENT of payout request
+    // Resets can happen to any active account, not just those requesting payouts
+    if (random() < monthlyResetProb) {
+      resetsThisMonth++;
+      resetRevenue += knobs.resetPrice;
+      
+      // Reset ONLY current attempt counters - lifetimePaidTotal is PRESERVED
+      state.attemptPaid = 0;
+      state.payoutCount = 0;
+      state.resetCount++;
+      state.eligibleMonth = monthIndex + eligibilityLag; // Must wait again
+      // Account remains active, just restarted
     }
   });
   
   // =========================================================================
-  // PAYOUT REQUESTS FROM ALL ELIGIBLE ACCOUNTS (new + existing cohorts)
+  // PAYOUT REQUESTS FROM ELIGIBLE ACCOUNTS (new + existing cohorts)
   // =========================================================================
   let totalPayouts = 0;
   let firstPayoutCapHits = 0;
@@ -453,9 +478,6 @@ function simulateMonth(
     }
   });
   
-  // Proper hazard rate conversion: p_month = 1 - (1 - p_annual)^(1/12)
-  const monthlyResetProb = 1 - Math.pow(1 - assumptions.resetRate, 1/12);
-  
   // Each eligible account has payoutRequestRate chance of requesting this month
   for (const account of eligibleAccounts) {
     // Probability of requesting payout this month
@@ -463,18 +485,8 @@ function simulateMonth(
       continue; // Didn't request this month
     }
     
-    // Reset/churn logic - resets generate revenue but preserve lifetimePaidTotal
-    if (random() < monthlyResetProb) {
-      resetsThisMonth++;
-      resetRevenue += knobs.resetPrice;
-      
-      // Reset ONLY current attempt counters - lifetimePaidTotal is PRESERVED
-      account.attemptPaid = 0;
-      account.payoutCount = 0;
-      account.resetCount++;
-      account.eligibleMonth = monthIndex + eligibilityLag; // Must wait again
-      continue; // No payout this month since they reset
-    }
+    // NOTE: Reset check already happened above in lifecycle processing
+    // If account just reset, eligibleMonth is now in the future, so they won't be here
     
     const numPayouts = Math.max(1, Math.round(payoutsPerAccount));
     
@@ -490,6 +502,8 @@ function simulateMonth(
       if (headroom <= 0) {
         lifetimeCapRejections++;
         account.isCompleted = true;
+        account.isActive = false;
+        ctx.totalEverCompleted++;
         continue;
       }
       
@@ -528,7 +542,9 @@ function simulateMonth(
         // Check if this completes the account
         if (account.lifetimePaidTotal + traderPayout >= lifetimeCap) {
           account.isCompleted = true;
+          account.isActive = false;
           accountsCompletedThisMonth++;
+          ctx.totalEverCompleted++;
         }
       }
       
@@ -655,7 +671,9 @@ export function runMonteCarlo(
     // CRITICAL: Account IDs now persist ACROSS months within this iteration
     const ctx: SimulateMonthContext = {
       accountStates: new Map<number, AccountState>(),
-      nextAccountId: 1, // Global counter for this iteration
+      nextAccountId: 1,
+      totalEverCreated: 0,
+      totalEverCompleted: 0,
     };
     
     for (let month = 0; month < monthsPerIteration; month++) {
@@ -710,7 +728,8 @@ export function runMonteCarlo(
     });
     
     allIterationStats.push({
-      totalAccounts: ctx.accountStates.size,
+      totalEverCreated: ctx.totalEverCreated,
+      totalEverCompleted: ctx.totalEverCompleted,
       accountsHitLifetimeCap: accountsHitCap,
       totalLifetimePaid,
       totalHeadroomAtEnd: totalHeadroom,
@@ -800,7 +819,7 @@ export function runMonteCarlo(
   // =========================================================================
   // AGGREGATE LIFETIME CAP STATS FROM REAL ITERATION DATA
   // =========================================================================
-  const totalAccountsAcrossIterations = allIterationStats.reduce((s, i) => s + i.totalAccounts, 0);
+  const totalAccountsEverCreated = allIterationStats.reduce((s, i) => s + i.totalEverCreated, 0);
   const totalAccountsHitCap = allIterationStats.reduce((s, i) => s + i.accountsHitLifetimeCap, 0);
   const totalLifetimePaidSum = allIterationStats.reduce((s, i) => s + i.totalLifetimePaid, 0);
   const totalHeadroomSum = allIterationStats.reduce((s, i) => s + i.totalHeadroomAtEnd, 0);
@@ -809,14 +828,14 @@ export function runMonteCarlo(
   const allLifetimePaidValues = allIterationStats.flatMap(i => i.lifetimePaidValues);
   const sortedLifetimePaid = [...allLifetimePaidValues].sort((a, b) => a - b);
   
-  const lifetimeCapBindingRate = totalAccountsAcrossIterations > 0 
-    ? totalAccountsHitCap / totalAccountsAcrossIterations 
+  const lifetimeCapBindingRate = totalAccountsEverCreated > 0 
+    ? totalAccountsHitCap / totalAccountsEverCreated 
     : 0;
-  const avgLifetimePaidPerAccount = totalAccountsAcrossIterations > 0
-    ? totalLifetimePaidSum / totalAccountsAcrossIterations
+  const avgLifetimePaidPerAccount = totalAccountsEverCreated > 0
+    ? totalLifetimePaidSum / totalAccountsEverCreated
     : 0;
-  const avgLifetimeHeadroomAtEnd = totalAccountsAcrossIterations > 0
-    ? totalHeadroomSum / totalAccountsAcrossIterations
+  const avgLifetimeHeadroomAtEnd = totalAccountsEverCreated > 0
+    ? totalHeadroomSum / totalAccountsEverCreated
     : (effectiveAssumptions.knobs.lifetimeCapPerUser === null ? Infinity : 0);
   
   // Lifetime paid distribution
@@ -837,8 +856,8 @@ export function runMonteCarlo(
     : 0;
   
   // Average payouts per account
-  const avgPayoutsPerAccount = totalAccountsAcrossIterations > 0
-    ? totalPayoutsApproved / totalAccountsAcrossIterations
+  const avgPayoutsPerAccount = totalAccountsEverCreated > 0
+    ? totalPayoutsApproved / totalAccountsEverCreated
     : 0;
   
   // Total revenue including resets
