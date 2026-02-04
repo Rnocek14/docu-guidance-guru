@@ -278,6 +278,7 @@ export type Database = {
           id: string
           paid_at: string | null
           payment_reference: string | null
+          request_id: string | null
           requested_at: string
           review_notes: string | null
           reviewed_at: string | null
@@ -290,6 +291,7 @@ export type Database = {
           id?: string
           paid_at?: string | null
           payment_reference?: string | null
+          request_id?: string | null
           requested_at?: string
           review_notes?: string | null
           reviewed_at?: string | null
@@ -302,6 +304,7 @@ export type Database = {
           id?: string
           paid_at?: string | null
           payment_reference?: string | null
+          request_id?: string | null
           requested_at?: string
           review_notes?: string | null
           reviewed_at?: string | null
