@@ -996,10 +996,12 @@ export function runMonteCarlo(
       zombiesByMonth: lastIterResults.map(r => r.payoutDetails.zombieAccountsCompleted),
       resetsByMonth: lastIterResults.map(r => r.resetsThisMonth),
       
-      // Completion breakdown: cap-hit share of all completions
-      capHitShareOfCompletions: (totalAccountsCompletedByCap + totalZombieAccountsCompleted) > 0
-        ? totalAccountsCompletedByCap / (totalAccountsCompletedByCap + totalZombieAccountsCompleted)
-        : 0,
+      // Completion breakdown: cap-hit share of ALL completions (not just cap+zombie)
+      // Uses totalEverCompleted from iteration stats for correct denominator
+      capHitShareOfCompletions: (() => {
+        const totalEverCompleted = allIterationStats.reduce((s, i) => s + i.totalEverCompleted, 0);
+        return totalEverCompleted > 0 ? totalAccountsCompletedByCap / totalEverCompleted : 0;
+      })(),
     },
     rawSamples: allMonthlyProfits,
   };

@@ -119,6 +119,19 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
       expect(result.cohortDiagnostics.resetsByMonth.length).toBe(expectedLength);
       expect(result.cohortDiagnostics.activeCohortSizeByMonth.length).toBe(expectedLength);
     });
+
+    it('per-month event series are never negative and never NaN', () => {
+      const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+      
+      const { capHitsByMonth, zombiesByMonth, resetsByMonth, activeCohortSizeByMonth, eligibleCohortSizeByMonth } = result.cohortDiagnostics;
+      
+      // All series should be finite, non-negative numbers (catches NaN propagation)
+      expect(capHitsByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
+      expect(zombiesByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
+      expect(resetsByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
+      expect(activeCohortSizeByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
+      expect(eligibleCohortSizeByMonth.every(n => Number.isFinite(n) && n >= 0)).toBe(true);
+    });
   });
 
   describe('Lifetime Paid Never Exceeds Cap', () => {
