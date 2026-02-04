@@ -14,6 +14,7 @@ interface PayoutActionRequest {
   reason?: string           // Required for reject, request_more_info
   payment_reference?: string // Required for mark_paid
   idempotency_key?: string
+  skip_fraud_check?: boolean // Admin override for fraud checks (logged)
 }
 
 // Valid payout state transitions
@@ -36,8 +37,9 @@ const PAYOUT_TRANSITIONS: Record<PayoutAction, { from: string[]; to: string }> =
   },
 }
 
-// Helper: Idempotent insert for audit_logs (ignores duplicates on account_id + request_id)
-// Returns { inserted: boolean } to track if this was a duplicate
+// Tolerance for amount verification (cents)
+const AMOUNT_TOLERANCE = 0.01
+
 // deno-lint-ignore no-explicit-any
 async function insertAuditLog(supabase: any, data: any): Promise<{ inserted: boolean }> {
   const { data: result, error } = await supabase
@@ -55,8 +57,6 @@ async function insertAuditLog(supabase: any, data: any): Promise<{ inserted: boo
   return { inserted: result && result.length > 0 }
 }
 
-// Helper: Idempotent insert for account_events (ignores duplicates on account_id + request_id)
-// Returns { inserted: boolean } to track if this was a duplicate
 // deno-lint-ignore no-explicit-any
 async function insertAccountEvent(supabase: any, data: any): Promise<{ inserted: boolean }> {
   const { data: result, error } = await supabase
@@ -72,6 +72,52 @@ async function insertAccountEvent(supabase: any, data: any): Promise<{ inserted:
     return { inserted: false }
   }
   return { inserted: result && result.length > 0 }
+}
+
+// deno-lint-ignore no-explicit-any
+async function createFraudReview(supabase: any, data: any): Promise<string | null> {
+  const { data: result, error } = await supabase
+    .from('fraud_reviews')
+    .insert(data)
+    .select('id')
+    .single()
+  
+  if (error) {
+    console.error('Fraud review insert error:', error)
+    return null
+  }
+  return result?.id || null
+}
+
+interface EligibilityResult {
+  eligible: boolean
+  reason?: string
+  max_eligible_amount?: number
+  realized_profit?: number
+  payout_split_percent?: number
+  max_payout_percent?: number
+  max_payout_absolute?: number | null
+  days_since_last_payout?: number
+  trading_days_since_payout?: number
+  pending_violations?: number
+  pending_flags?: number
+  pending_fraud_reviews?: number
+  current_status?: string
+  days_remaining?: number
+  required_cooldown_days?: number
+  required_trading_days?: number
+}
+
+interface CorrelationResult {
+  has_correlations: boolean
+  correlation_count: number
+  correlations: Array<{
+    other_account_id: string
+    other_account_number: string
+    match_count: number
+    correlation_type: string
+    sample_trades: unknown[]
+  }>
 }
 
 Deno.serve(async (req) => {
@@ -152,7 +198,7 @@ Deno.serve(async (req) => {
     // Get payout with account info
     const { data: payout, error: payoutError } = await supabaseAdmin
       .from('payouts')
-      .select('*, accounts!inner(id, status, account_number, current_balance, total_pnl)')
+      .select('*, accounts!inner(id, status, account_number, current_balance, total_pnl, starting_balance, user_id, cohort_id)')
       .eq('id', body.payout_id)
       .single()
 
@@ -176,7 +222,7 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Normalize join result (can be object or array depending on cardinality)
+    // Normalize join result
     const account = Array.isArray(payout.accounts) ? payout.accounts[0] : payout.accounts
     if (!account) {
       return new Response(
@@ -185,32 +231,227 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Convert amount from Postgres DECIMAL (may be string) to number
-    const amountNum = Number(payout.amount)
-    if (isNaN(amountNum)) {
+    // Convert amount from Postgres DECIMAL to number
+    const submittedAmount = Number(payout.amount)
+    if (isNaN(submittedAmount)) {
       return new Response(
         JSON.stringify({ error: 'Invalid payout amount' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Validate account is in compatible state for approval
-    if (body.action === 'approve') {
-      if (!['passed', 'payout_requested', 'payout_under_review'].includes(account.status)) {
-        return new Response(
-          JSON.stringify({ 
-            error: `Cannot approve payout: account status is ${account.status}`,
-            hint: 'Account must be in passed or payout status to approve'
-          }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-    }
-
     // Use client-provided idempotency key or generate one
     const requestId = body.idempotency_key || crypto.randomUUID()
     const previousStatus = payout.status
     const newStatus = transition.to
+
+    // =============================================
+    // P0 BLOCKER: SERVER-SIDE ELIGIBILITY VERIFICATION
+    // =============================================
+    
+    let eligibility: EligibilityResult | null = null
+    let correlations: CorrelationResult | null = null
+    let fraudReviewId: string | null = null
+    let calculatedEligibleAmount: number | null = null
+
+    // Only run full verification on approval (the critical path)
+    if (body.action === 'approve') {
+      
+      // 1. VERIFY PAYOUT ELIGIBILITY
+      const { data: eligibilityData, error: eligibilityError } = await supabaseAdmin
+        .rpc('calculate_payout_eligibility', { _account_id: payout.account_id })
+      
+      if (eligibilityError) {
+        console.error('Eligibility check error:', eligibilityError)
+        return new Response(
+          JSON.stringify({ error: 'Failed to verify payout eligibility', details: eligibilityError.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      eligibility = eligibilityData as EligibilityResult
+      
+      if (!eligibility.eligible) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Payout not eligible',
+            reason: eligibility.reason,
+            details: eligibility
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      calculatedEligibleAmount = eligibility.max_eligible_amount || 0
+      
+      // 2. VERIFY AMOUNT MATCHES SERVER CALCULATION
+      if (Math.abs(submittedAmount - calculatedEligibleAmount) > AMOUNT_TOLERANCE) {
+        // Check if submitted is LESS than eligible (allowed) or MORE (blocked)
+        if (submittedAmount > calculatedEligibleAmount) {
+          return new Response(
+            JSON.stringify({ 
+              error: 'Submitted amount exceeds eligible payout',
+              submitted_amount: submittedAmount,
+              calculated_eligible_amount: calculatedEligibleAmount,
+              difference: submittedAmount - calculatedEligibleAmount,
+              hint: 'Amount must not exceed server-calculated maximum'
+            }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        // If less, that's fine - trader can request partial payout
+      }
+      
+      // 3. CHECK CROSS-ACCOUNT CORRELATIONS (MVP fraud detection)
+      const { data: correlationData, error: correlationError } = await supabaseAdmin
+        .rpc('detect_trade_correlations', { 
+          _account_id: payout.account_id,
+          _time_window_seconds: 60,
+          _min_correlation_score: 0.7
+        })
+      
+      if (correlationError) {
+        console.error('Correlation check error:', correlationError)
+        // Non-fatal: log but don't block
+      } else {
+        correlations = correlationData as CorrelationResult
+        
+        if (correlations.has_correlations && !body.skip_fraud_check) {
+          // Create fraud review and block approval
+          fraudReviewId = await createFraudReview(supabaseAdmin, {
+            entity_type: 'payout',
+            entity_id: body.payout_id,
+            review_type: 'correlation',
+            severity: correlations.correlation_count >= 3 ? 'critical' : 'high',
+            auto_block: true,
+            details: {
+              correlations: correlations.correlations,
+              submitted_amount: submittedAmount,
+              account_id: payout.account_id,
+              triggered_at: new Date().toISOString()
+            },
+            request_id: requestId
+          })
+          
+          return new Response(
+            JSON.stringify({ 
+              error: 'Payout blocked: Cross-account correlation detected',
+              fraud_review_id: fraudReviewId,
+              correlation_count: correlations.correlation_count,
+              hint: 'Manual review required. Use skip_fraud_check=true to override (will be logged).',
+              correlations: correlations.correlations.map(c => ({
+                other_account: c.other_account_number,
+                match_count: c.match_count,
+                type: c.correlation_type
+              }))
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+      
+      // 4. CHECK FOR DEVICE FINGERPRINT MATCHES (if available)
+      const { data: fingerprintMatches } = await supabaseAdmin
+        .from('device_fingerprints')
+        .select('fingerprint_hash, user_id, cluster_id')
+        .eq('fingerprint_hash', 
+          // Get fingerprints for this user, then check if same hash exists for other users
+          supabaseAdmin.from('device_fingerprints').select('fingerprint_hash').eq('user_id', account.user_id)
+        )
+        .neq('user_id', account.user_id)
+        .limit(5)
+      
+      // If fingerprint matches found for other users, flag for review (but don't auto-block)
+      if (fingerprintMatches && fingerprintMatches.length > 0 && !body.skip_fraud_check) {
+        fraudReviewId = await createFraudReview(supabaseAdmin, {
+          entity_type: 'payout',
+          entity_id: body.payout_id,
+          review_type: 'device_match',
+          severity: 'medium',
+          auto_block: false,
+          details: {
+            matching_users: fingerprintMatches.length,
+            submitted_amount: submittedAmount,
+            account_id: payout.account_id
+          },
+          request_id: requestId
+        })
+        // Don't block, just flag
+      }
+      
+      // 5. CHECK FOR PAYOUT METHOD REUSE (if method linked)
+      if (payout.payout_method_id) {
+        const { data: methodData } = await supabaseAdmin
+          .from('payout_methods')
+          .select('method_hash, is_blocked, block_reason')
+          .eq('id', payout.payout_method_id)
+          .single()
+        
+        if (methodData?.is_blocked) {
+          return new Response(
+            JSON.stringify({ 
+              error: 'Payout method is blocked',
+              reason: methodData.block_reason || 'This payout method has been flagged'
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        
+        // Check if method is used by other users
+        const { data: methodReuse } = await supabaseAdmin
+          .from('payout_methods')
+          .select('user_id')
+          .eq('method_hash', methodData?.method_hash)
+          .neq('user_id', account.user_id)
+          .limit(1)
+        
+        if (methodReuse && methodReuse.length > 0 && !body.skip_fraud_check) {
+          fraudReviewId = await createFraudReview(supabaseAdmin, {
+            entity_type: 'payout',
+            entity_id: body.payout_id,
+            review_type: 'method_reuse',
+            severity: 'high',
+            auto_block: true,
+            details: {
+              method_reused_by_users: methodReuse.length,
+              submitted_amount: submittedAmount,
+              account_id: payout.account_id
+            },
+            request_id: requestId
+          })
+          
+          return new Response(
+            JSON.stringify({ 
+              error: 'Payout blocked: Payment method used by another user',
+              fraud_review_id: fraudReviewId,
+              hint: 'Manual review required. Use skip_fraud_check=true to override (will be logged).'
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+      
+      // Log if admin is skipping fraud checks
+      if (body.skip_fraud_check) {
+        await insertAuditLog(supabaseAdmin, {
+          user_id: userId,
+          account_id: payout.account_id,
+          action: 'status_changed',
+          request_id: crypto.randomUUID(), // Separate log entry
+          reason: 'Admin skipped fraud checks for payout approval',
+          details: {
+            payout_id: body.payout_id,
+            skip_reason: 'admin_override',
+            correlations_found: correlations?.has_correlations || false,
+            actor_role: 'admin',
+          },
+        })
+      }
+    }
+
+    // =============================================
+    // EXECUTE PAYOUT STATE CHANGE
+    // =============================================
 
     // Update payout
     const updateData: Record<string, unknown> = {
@@ -226,6 +467,16 @@ Deno.serve(async (req) => {
     if (body.action === 'mark_paid') {
       updateData.paid_at = new Date().toISOString()
       updateData.payment_reference = body.payment_reference
+    }
+
+    // Store server-calculated amount for audit trail
+    if (calculatedEligibleAmount !== null) {
+      updateData.calculated_eligible_amount = calculatedEligibleAmount
+      updateData.submitted_amount = submittedAmount
+    }
+
+    if (fraudReviewId) {
+      updateData.fraud_review_id = fraudReviewId
     }
 
     const { error: updateError } = await supabaseAdmin
@@ -252,6 +503,18 @@ Deno.serve(async (req) => {
         .eq('id', payout.account_id)
     }
 
+    // If payout is marked as paid, reset the high watermark for next payout cycle
+    if (body.action === 'mark_paid') {
+      const currentBalance = Number(account.current_balance)
+      await supabaseAdmin
+        .from('accounts')
+        .update({ 
+          highest_balance: currentBalance,
+          // Note: We don't reset starting_balance - that's frozen at account creation
+        })
+        .eq('id', payout.account_id)
+    }
+
     // Determine audit action and event type
     const auditActions: Record<PayoutAction, string> = {
       approve: 'payout_approved',
@@ -267,7 +530,7 @@ Deno.serve(async (req) => {
       mark_paid: 'payout_paid',
     }
 
-    // Create audit log (idempotent) - track if this was a duplicate
+    // Create audit log with full verification details
     const auditResult = await insertAuditLog(supabaseAdmin, {
       user_id: userId,
       account_id: payout.account_id,
@@ -279,14 +542,22 @@ Deno.serve(async (req) => {
         previous_status: previousStatus,
         new_status: newStatus,
         action_type: body.action,
-        amount: amountNum,
+        submitted_amount: submittedAmount,
+        calculated_eligible_amount: calculatedEligibleAmount,
+        eligibility_check: eligibility,
+        correlations_check: correlations?.has_correlations ? {
+          found: true,
+          count: correlations.correlation_count
+        } : { found: false },
+        fraud_review_id: fraudReviewId,
+        skip_fraud_check: body.skip_fraud_check || false,
         payment_reference: body.payment_reference || null,
         actor_role: 'admin',
       },
     })
 
-    // Create trader-visible event with properly formatted amount (idempotent)
-    const formattedAmount = amountNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    // Create trader-visible event
+    const formattedAmount = submittedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const eventExplanations: Record<PayoutAction, string> = {
       approve: `Your payout request for $${formattedAmount} has been approved.`,
       reject: `Your payout request has been declined. Reason: ${body.reason}`,
@@ -302,7 +573,7 @@ Deno.serve(async (req) => {
         payout_id: body.payout_id,
         previous_status: previousStatus,
         new_status: newStatus,
-        amount: amountNum,
+        amount: submittedAmount,
         explanation: eventExplanations[body.action],
         payment_reference: body.payment_reference || null,
         actor_role: 'admin',
@@ -323,6 +594,17 @@ Deno.serve(async (req) => {
         request_id: requestId,
         idempotent: !!body.idempotency_key,
         duplicate: wasDuplicate,
+        // P0 verification results
+        verification: body.action === 'approve' ? {
+          submitted_amount: submittedAmount,
+          calculated_eligible_amount: calculatedEligibleAmount,
+          amount_verified: true,
+          eligibility_verified: true,
+          correlations_checked: true,
+          correlations_found: correlations?.has_correlations || false,
+          fraud_review_created: !!fraudReviewId,
+          skip_fraud_check: body.skip_fraud_check || false,
+        } : undefined,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

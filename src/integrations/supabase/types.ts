@@ -179,10 +179,15 @@ export type Database = {
           intake_active: boolean
           is_active: boolean
           max_daily_loss_percent: number
+          max_payout_absolute: number | null
+          max_payout_percent: number
           max_position_size_percent: number
           max_total_drawdown_percent: number
           min_trading_days: number
+          min_trading_days_between_payouts: number
           name: string
+          payout_cooldown_days: number
+          payout_split_percent: number
           profit_target_percent: number
           version: number
         }
@@ -194,10 +199,15 @@ export type Database = {
           intake_active?: boolean
           is_active?: boolean
           max_daily_loss_percent?: number
+          max_payout_absolute?: number | null
+          max_payout_percent?: number
           max_position_size_percent?: number
           max_total_drawdown_percent?: number
           min_trading_days?: number
+          min_trading_days_between_payouts?: number
           name: string
+          payout_cooldown_days?: number
+          payout_split_percent?: number
           profit_target_percent?: number
           version?: number
         }
@@ -209,14 +219,72 @@ export type Database = {
           intake_active?: boolean
           is_active?: boolean
           max_daily_loss_percent?: number
+          max_payout_absolute?: number | null
+          max_payout_percent?: number
           max_position_size_percent?: number
           max_total_drawdown_percent?: number
           min_trading_days?: number
+          min_trading_days_between_payouts?: number
           name?: string
+          payout_cooldown_days?: number
+          payout_split_percent?: number
           profit_target_percent?: number
           version?: number
         }
         Relationships: []
+      }
+      device_fingerprints: {
+        Row: {
+          asn: string | null
+          cluster_id: string | null
+          country_code: string | null
+          fingerprint_components: Json
+          fingerprint_hash: string
+          first_seen_at: string
+          id: string
+          ip_address: unknown
+          is_vpn: boolean | null
+          last_seen_at: string
+          seen_count: number
+          user_id: string
+        }
+        Insert: {
+          asn?: string | null
+          cluster_id?: string | null
+          country_code?: string | null
+          fingerprint_components?: Json
+          fingerprint_hash: string
+          first_seen_at?: string
+          id?: string
+          ip_address?: unknown
+          is_vpn?: boolean | null
+          last_seen_at?: string
+          seen_count?: number
+          user_id: string
+        }
+        Update: {
+          asn?: string | null
+          cluster_id?: string | null
+          country_code?: string | null
+          fingerprint_components?: Json
+          fingerprint_hash?: string
+          first_seen_at?: string
+          id?: string
+          ip_address?: unknown
+          is_vpn?: boolean | null
+          last_seen_at?: string
+          seen_count?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "device_fingerprints_cluster_id_fkey"
+            columns: ["cluster_id"]
+            isOneToOne: false
+            referencedRelation: "identity_clusters"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       flags: {
         Row: {
@@ -271,45 +339,191 @@ export type Database = {
           },
         ]
       }
+      fraud_reviews: {
+        Row: {
+          assigned_to: string | null
+          auto_block: boolean
+          created_at: string
+          details: Json
+          entity_id: string
+          entity_type: string
+          id: string
+          request_id: string | null
+          review_notes: string | null
+          review_type: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          severity: string
+          status: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          auto_block?: boolean
+          created_at?: string
+          details?: Json
+          entity_id: string
+          entity_type: string
+          id?: string
+          request_id?: string | null
+          review_notes?: string | null
+          review_type: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          severity?: string
+          status?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          auto_block?: boolean
+          created_at?: string
+          details?: Json
+          entity_id?: string
+          entity_type?: string
+          id?: string
+          request_id?: string | null
+          review_notes?: string | null
+          review_type?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          severity?: string
+          status?: string
+        }
+        Relationships: []
+      }
+      identity_clusters: {
+        Row: {
+          cluster_name: string | null
+          created_at: string
+          flag_reason: string | null
+          id: string
+          is_flagged: boolean
+          risk_score: number
+          updated_at: string
+        }
+        Insert: {
+          cluster_name?: string | null
+          created_at?: string
+          flag_reason?: string | null
+          id?: string
+          is_flagged?: boolean
+          risk_score?: number
+          updated_at?: string
+        }
+        Update: {
+          cluster_name?: string | null
+          created_at?: string
+          flag_reason?: string | null
+          id?: string
+          is_flagged?: boolean
+          risk_score?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      payout_methods: {
+        Row: {
+          block_reason: string | null
+          cluster_id: string | null
+          created_at: string
+          id: string
+          is_blocked: boolean
+          is_verified: boolean
+          method_details: Json
+          method_hash: string
+          method_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          block_reason?: string | null
+          cluster_id?: string | null
+          created_at?: string
+          id?: string
+          is_blocked?: boolean
+          is_verified?: boolean
+          method_details?: Json
+          method_hash: string
+          method_type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          block_reason?: string | null
+          cluster_id?: string | null
+          created_at?: string
+          id?: string
+          is_blocked?: boolean
+          is_verified?: boolean
+          method_details?: Json
+          method_hash?: string
+          method_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payout_methods_cluster_id_fkey"
+            columns: ["cluster_id"]
+            isOneToOne: false
+            referencedRelation: "identity_clusters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payouts: {
         Row: {
           account_id: string
           amount: number
+          calculated_eligible_amount: number | null
+          device_fingerprint_id: string | null
+          fraud_review_id: string | null
           id: string
           paid_at: string | null
           payment_reference: string | null
+          payout_method_id: string | null
           request_id: string | null
           requested_at: string
           review_notes: string | null
           reviewed_at: string | null
           reviewed_by: string | null
           status: Database["public"]["Enums"]["payout_status"]
+          submitted_amount: number | null
         }
         Insert: {
           account_id: string
           amount: number
+          calculated_eligible_amount?: number | null
+          device_fingerprint_id?: string | null
+          fraud_review_id?: string | null
           id?: string
           paid_at?: string | null
           payment_reference?: string | null
+          payout_method_id?: string | null
           request_id?: string | null
           requested_at?: string
           review_notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
           status?: Database["public"]["Enums"]["payout_status"]
+          submitted_amount?: number | null
         }
         Update: {
           account_id?: string
           amount?: number
+          calculated_eligible_amount?: number | null
+          device_fingerprint_id?: string | null
+          fraud_review_id?: string | null
           id?: string
           paid_at?: string | null
           payment_reference?: string | null
+          payout_method_id?: string | null
           request_id?: string | null
           requested_at?: string
           review_notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
           status?: Database["public"]["Enums"]["payout_status"]
+          submitted_amount?: number | null
         }
         Relationships: [
           {
@@ -317,6 +531,27 @@ export type Database = {
             columns: ["account_id"]
             isOneToOne: false
             referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payouts_device_fingerprint_id_fkey"
+            columns: ["device_fingerprint_id"]
+            isOneToOne: false
+            referencedRelation: "device_fingerprints"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payouts_fraud_review_id_fkey"
+            columns: ["fraud_review_id"]
+            isOneToOne: false
+            referencedRelation: "fraud_reviews"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payouts_payout_method_id_fkey"
+            columns: ["payout_method_id"]
+            isOneToOne: false
+            referencedRelation: "payout_methods"
             referencedColumns: ["id"]
           },
         ]
@@ -522,6 +757,63 @@ export type Database = {
         }
         Relationships: []
       }
+      trade_correlations: {
+        Row: {
+          account_id_a: string
+          account_id_b: string
+          correlation_score: number
+          correlation_type: string
+          detected_at: string
+          id: string
+          review_notes: string | null
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          sample_trades: Json
+        }
+        Insert: {
+          account_id_a: string
+          account_id_b: string
+          correlation_score?: number
+          correlation_type: string
+          detected_at?: string
+          id?: string
+          review_notes?: string | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sample_trades?: Json
+        }
+        Update: {
+          account_id_a?: string
+          account_id_b?: string
+          correlation_score?: number
+          correlation_type?: string
+          detected_at?: string
+          id?: string
+          review_notes?: string | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sample_trades?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_correlations_account_id_a_fkey"
+            columns: ["account_id_a"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_correlations_account_id_b_fkey"
+            columns: ["account_id_b"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trades: {
         Row: {
           account_id: string
@@ -691,6 +983,18 @@ export type Database = {
     }
     Functions: {
       bootstrap_first_admin: { Args: { _user_id: string }; Returns: boolean }
+      calculate_payout_eligibility: {
+        Args: { _account_id: string }
+        Returns: Json
+      }
+      detect_trade_correlations: {
+        Args: {
+          _account_id: string
+          _min_correlation_score?: number
+          _time_window_seconds?: number
+        }
+        Returns: Json
+      }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]

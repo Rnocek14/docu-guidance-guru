@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import type { Profile, AppRole } from '@/lib/types';
+import { submitFingerprint } from '@/lib/fingerprint';
 
 interface AuthContextType {
   user: User | null;
@@ -96,6 +97,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (isMounted) {
               setProfile(userData.profile);
               setRoles(userData.roles);
+            }
+            
+            // Collect device fingerprint on sign-in (non-blocking)
+            if (event === 'SIGNED_IN' && newSession.access_token) {
+              submitFingerprint(
+                SUPABASE_FUNCTIONS_URL.replace('/functions/v1', ''),
+                newSession.access_token
+              ).catch(err => console.warn('Fingerprint collection failed:', err));
             }
           }, 0);
         } else {

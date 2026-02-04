@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.reconcile-trades]
 verify_jwt = false
+
+[functions.collect-fingerprint]
+verify_jwt = false
