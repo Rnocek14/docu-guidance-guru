@@ -688,6 +688,7 @@ export type Database = {
         | "intake_paused"
         | "intake_resumed"
         | "rule_breach_detected"
+        | "evidence_pack_exported"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -866,6 +867,7 @@ export const Constants = {
         "intake_paused",
         "intake_resumed",
         "rule_breach_detected",
+        "evidence_pack_exported",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
