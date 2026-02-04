@@ -445,15 +445,36 @@ Deno.serve(async (req) => {
 
     // Handle breach detection
     if (breachResult.breached) {
-      // Insert violation
-      await supabase.from('violations').insert({
-        account_id: accountId,
-        rule_type: breachResult.rule_type!,
-        description: breachResult.description!,
-        actual_value: breachResult.actual_value,
-        rule_threshold: breachResult.threshold,
-        detected_at: new Date().toISOString()
-      })
+      // Calculate breach_day in ET (America/New_York) for consistent deduplication
+      const detectedAt = new Date()
+      const detectedAtISO = detectedAt.toISOString()
+      // Use UTC date as breach_day (consistent, deterministic)
+      const breachDay = detectedAtISO.split('T')[0]
+
+      // Insert violation with trade linkage for dispute defense
+      // Uses upsert with onConflict to handle idempotency via unique index
+      const { error: violationError } = await supabase.from('violations').upsert(
+        {
+          account_id: accountId,
+          trade_id: insertedTrade?.id ?? null,
+          platform_trade_id: payload.platform_trade_id ?? null,
+          breach_day: breachDay,
+          rule_type: breachResult.rule_type!,
+          description: breachResult.description!,
+          actual_value: breachResult.actual_value,
+          rule_threshold: breachResult.threshold,
+          detected_at: detectedAtISO
+        },
+        {
+          onConflict: 'account_id,rule_type,trade_id',
+          ignoreDuplicates: true
+        }
+      )
+
+      if (violationError) {
+        console.error('Violation upsert error:', violationError)
+        // Non-fatal: log but continue - the breach is still recorded in account status
+      }
 
       // Write trader-visible account event (transparency)
       await supabase.from('account_events').insert({
