@@ -84,7 +84,7 @@ const KNOWN_BASE_SYMBOLS = new Set([
 ])
 
 /**
- * Normalize a trading symbol for comparison
+ * Normalize a trading symbol for comparison (mismatch detection only, not trade identity).
  * Uses regex to extract base symbol from futures contract format: BASE + MONTH_CODE + YEAR
  * Examples: NQZ5 -> NQ, ESM24 -> ES, 6EH6 -> 6E, MNQU5 -> MNQ
  * 
@@ -95,6 +95,12 @@ const KNOWN_BASE_SYMBOLS = new Set([
  * 
  * IMPORTANT: Only strips contract suffix if base is a KNOWN futures symbol.
  * This prevents accidentally normalizing equities like AAPL -> AAP.
+ * 
+ * INTENTIONAL TRADEOFFS (futures-first system):
+ * - BRK.B -> BRK (dot separator splits off .B suffix)
+ * - META.Z5 -> META (dot separator takes first token)
+ * These are acceptable because this normalization is used for mismatch reporting only,
+ * not for trade identity. Trade matching uses platform_trade_id as the primary key.
  */
 function normalizeSymbol(symbol: string): string {
   if (!symbol) return ''
