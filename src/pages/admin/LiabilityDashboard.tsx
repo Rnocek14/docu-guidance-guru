@@ -100,6 +100,10 @@ export default function LiabilityDashboard() {
     refetchInterval: 60000, // Refresh every minute
   });
 
+  // MUST-FIX #3: Proper CSV escaping for values with commas/quotes
+  const csvCell = (v: unknown) =>
+    `"${String(v ?? '').replace(/"/g, '""')}"`;
+
   const handleExportCSV = () => {
     if (!data) return;
     
@@ -116,7 +120,7 @@ export default function LiabilityDashboard() {
       'By Cohort',
       'Cohort,Approved Unpaid,Pending Amount,Approved Count,Pending Count',
       ...data.by_cohort.map(c => 
-        `${c.cohort_name},${c.approved_unpaid},${c.pending_amount},${c.approved_count},${c.pending_count}`
+        `${csvCell(c.cohort_name)},${c.approved_unpaid},${c.pending_amount},${c.approved_count},${c.pending_count}`
       ),
       '',
       'Opening Soon By Day',
