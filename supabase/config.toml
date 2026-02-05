@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.collect-fingerprint]
 verify_jwt = false
+
+[functions.check-liability-alert]
+verify_jwt = false
