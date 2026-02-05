@@ -136,6 +136,7 @@ export type Database = {
           created_at: string
           details: Json
           id: string
+          idempotency_key: string | null
           ip_address: string | null
           reason: string | null
           request_id: string | null
@@ -148,6 +149,7 @@ export type Database = {
           created_at?: string
           details?: Json
           id?: string
+          idempotency_key?: string | null
           ip_address?: string | null
           reason?: string | null
           request_id?: string | null
@@ -160,6 +162,7 @@ export type Database = {
           created_at?: string
           details?: Json
           id?: string
+          idempotency_key?: string | null
           ip_address?: string | null
           reason?: string | null
           request_id?: string | null
