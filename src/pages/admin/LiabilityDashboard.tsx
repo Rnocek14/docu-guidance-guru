@@ -98,22 +98,33 @@ function MetricCard({
 }
 
 export default function LiabilityDashboard() {
-  const [cashReserve, setCashReserve] = useState<number>(0);
-  const [assumedAvgPayout, setAssumedAvgPayout] = useState<number>(300);
+  // Local input state (not tied to query)
+  const [cashReserveInput, setCashReserveInput] = useState<number>(0);
+  const [assumedAvgPayoutInput, setAssumedAvgPayoutInput] = useState<number>(300);
+  
+  // Applied state (drives query)
+  const [appliedCashReserve, setAppliedCashReserve] = useState<number>(0);
+  const [appliedAvgPayout, setAppliedAvgPayout] = useState<number>(300);
   
   const { data, isLoading, error, refetch, isRefetching } = useQuery({
-    queryKey: ['liability-snapshot', cashReserve, assumedAvgPayout],
+    queryKey: ['liability-snapshot', appliedCashReserve, appliedAvgPayout],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_liability_snapshot', {
         _days_forward: 7,
-        _cash_reserve: cashReserve,
-        _assumed_avg_first_payout: assumedAvgPayout,
+        _cash_reserve: appliedCashReserve,
+        _assumed_avg_first_payout: appliedAvgPayout,
       });
       if (error) throw error;
       return data as unknown as LiabilitySnapshot;
     },
     refetchInterval: 60000, // Refresh every minute
   });
+  
+  // Apply button handler
+  const handleApplyBufferSettings = () => {
+    setAppliedCashReserve(cashReserveInput);
+    setAppliedAvgPayout(assumedAvgPayoutInput);
+  };
 
   // MUST-FIX #3: Proper CSV escaping for values with commas/quotes
   const csvCell = (v: unknown) =>
@@ -178,11 +189,8 @@ export default function LiabilityDashboard() {
     );
   }
 
-  const totalPendingAmount = data 
-    ? (data.pending_amounts?.pending || 0) + 
-      (data.pending_amounts?.under_review || 0) + 
-      (data.pending_amounts?.approved || 0)
-    : 0;
+  // Use RPC's total_pending_amount directly for consistency
+  const totalPendingAmount = data?.total_pending_amount || 0;
 
   return (
     <DashboardLayout title="Payout Liability" navItems={adminNavItems}>
@@ -223,15 +231,16 @@ export default function LiabilityDashboard() {
             <CardDescription>Configure cash reserve and assumptions to calculate operational buffer</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <div className="space-y-2">
                 <Label htmlFor="cashReserve">Cash Reserve ($)</Label>
                 <Input
                   id="cashReserve"
                   type="number"
                   min="0"
-                  value={cashReserve}
-                  onChange={(e) => setCashReserve(Number(e.target.value) || 0)}
+                  inputMode="numeric"
+                  value={cashReserveInput}
+                  onChange={(e) => setCashReserveInput(Number(e.target.value) || 0)}
                   placeholder="0"
                 />
               </div>
@@ -241,10 +250,21 @@ export default function LiabilityDashboard() {
                   id="assumedAvgPayout"
                   type="number"
                   min="0"
-                  value={assumedAvgPayout}
-                  onChange={(e) => setAssumedAvgPayout(Number(e.target.value) || 300)}
+                  inputMode="numeric"
+                  value={assumedAvgPayoutInput}
+                  onChange={(e) => setAssumedAvgPayoutInput(Number(e.target.value) || 300)}
                   placeholder="300"
                 />
+              </div>
+              <div className="flex items-end">
+                <Button 
+                  variant="secondary" 
+                  size="sm"
+                  onClick={handleApplyBufferSettings}
+                  disabled={cashReserveInput === appliedCashReserve && assumedAvgPayoutInput === appliedAvgPayout}
+                >
+                  Apply
+                </Button>
               </div>
               {data && (
                 <>
@@ -306,7 +326,7 @@ export default function LiabilityDashboard() {
               <MetricCard
                 title="Net Buffer"
                 value={formatCurrency(data.net_buffer || 0)}
-                subtitle={cashReserve > 0 ? `Reserve: ${formatCurrency(cashReserve)}` : 'Set cash reserve above'}
+                subtitle={appliedCashReserve > 0 ? `Reserve: ${formatCurrency(appliedCashReserve)}` : 'Set cash reserve above'}
                 icon={Shield}
                 variant={(data.net_buffer || 0) < 0 ? 'critical' : (data.net_buffer || 0) < 10000 ? 'warning' : 'default'}
               />

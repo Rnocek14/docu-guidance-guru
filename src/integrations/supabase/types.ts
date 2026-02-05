@@ -1086,16 +1086,14 @@ export type Database = {
           total_accounts: number
         }[]
       }
-      get_liability_snapshot:
-        | { Args: { _days_forward?: number }; Returns: Json }
-        | {
-            Args: {
-              _assumed_avg_first_payout?: number
-              _cash_reserve?: number
-              _days_forward?: number
-            }
-            Returns: Json
-          }
+      get_liability_snapshot: {
+        Args: {
+          _assumed_avg_first_payout?: number
+          _cash_reserve?: number
+          _days_forward?: number
+        }
+        Returns: Json
+      }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
