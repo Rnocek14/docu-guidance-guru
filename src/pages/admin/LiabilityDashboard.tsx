@@ -125,7 +125,7 @@ export default function LiabilityDashboard() {
       '',
       'Opening Soon By Day',
       'Date,Count',
-      ...data.opening_soon_by_day.map(d => `${d.opens_on},${d.count}`),
+      ...data.opening_soon_by_day.map(d => `${csvCell(d.opens_on)},${d.count}`),
     ];
     
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
