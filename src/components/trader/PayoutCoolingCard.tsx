@@ -2,34 +2,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Clock, CheckCircle2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { parseLocalDate } from '@/lib/date-utils';
 
 interface PayoutCoolingCardProps {
   daysSincePass: number;
   coolingPeriodDays: number;
   windowOpensAt: string | null | undefined;
   isWindowOpen: boolean;
-}
-
-// Safe date parsing for YYYY-MM-DD format without timezone ambiguity
-function parseLocalDate(dateStr: string | null | undefined): Date | null {
-  if (!dateStr || typeof dateStr !== 'string') return null;
-  
-  try {
-    // Match YYYY-MM-DD format
-    const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (!match) return null;
-    
-    const y = Number(match[1]);
-    const m = Number(match[2]);
-    const d = Number(match[3]);
-    const date = new Date(y, m - 1, d);
-    
-    // Validate the date is real (not NaN or invalid)
-    if (isNaN(date.getTime())) return null;
-    return date;
-  } catch {
-    return null;
-  }
 }
 
 export function PayoutCoolingCard({ 
