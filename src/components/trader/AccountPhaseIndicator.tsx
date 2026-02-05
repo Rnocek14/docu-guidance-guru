@@ -1,15 +1,51 @@
 import { Badge } from '@/components/ui/badge';
-import { Target, CheckCircle2 } from 'lucide-react';
+import { Target, CheckCircle2, Clock } from 'lucide-react';
 import type { AccountStatus } from '@/lib/types';
+import { format, parseISO } from 'date-fns';
 
 interface AccountPhaseIndicatorProps {
   status: AccountStatus;
   profitTargetPercent: number;
+  payoutWindowOpened?: boolean;
+  daysRemaining?: number;
+  windowOpensAt?: string;
 }
 
-export function AccountPhaseIndicator({ status, profitTargetPercent }: AccountPhaseIndicatorProps) {
+export function AccountPhaseIndicator({ 
+  status, 
+  profitTargetPercent,
+  payoutWindowOpened = true,
+  daysRemaining,
+  windowOpensAt
+}: AccountPhaseIndicatorProps) {
   const isPerformanceAccount = status === 'passed' || status.startsWith('payout_');
   
+  // Performance Account in cooling period
+  if (isPerformanceAccount && !payoutWindowOpened && daysRemaining !== undefined) {
+    const formattedDate = windowOpensAt ? format(parseISO(windowOpensAt), 'MMM d') : 'soon';
+    return (
+      <div className="rounded-lg border border-warning/30 bg-warning/10 p-4">
+        <div className="flex items-start gap-3">
+          <div className="rounded-full bg-warning/20 p-2">
+            <Clock className="h-5 w-5 text-warning" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-warning">Payout Window Opening Soon</h3>
+              <Badge variant="secondary" className="bg-warning/20 text-warning border-warning/30">
+                {daysRemaining} days
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">
+              Your eligibility is locked in. Payout window opens {formattedDate}.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Performance Account with window open
   if (isPerformanceAccount) {
     return (
       <div className="rounded-lg border border-success/30 bg-success/10 p-4">
@@ -33,6 +69,7 @@ export function AccountPhaseIndicator({ status, profitTargetPercent }: AccountPh
     );
   }
 
+  // Challenge phase
   return (
     <div className="rounded-lg border border-primary/30 bg-primary/10 p-4">
       <div className="flex items-start gap-3">
