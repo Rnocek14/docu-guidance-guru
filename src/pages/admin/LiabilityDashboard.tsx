@@ -111,20 +111,29 @@ export default function LiabilityDashboard() {
   const [appliedCashReserve, setAppliedCashReserve] = useState<number>(0);
   const [appliedAvgPayout, setAppliedAvgPayout] = useState<number>(300);
   
-  // Load persisted settings on mount
+  // Load persisted settings on mount (with error resilience)
   useEffect(() => {
+    let mounted = true;
+
     const loadSettings = async () => {
-      const { data } = await supabase.rpc('get_liability_buffer_settings');
-      if (data && typeof data === 'object' && !('error' in data)) {
-        const settings = data as { cash_reserve: number; assumed_avg_first_payout: number };
-        setCashReserveInput(settings.cash_reserve);
-        setAssumedAvgPayoutInput(settings.assumed_avg_first_payout);
-        setAppliedCashReserve(settings.cash_reserve);
-        setAppliedAvgPayout(settings.assumed_avg_first_payout);
+      try {
+        const { data, error } = await supabase.rpc('get_liability_buffer_settings');
+        if (!mounted) return;
+
+        if (!error && data && typeof data === 'object' && !('error' in data)) {
+          const s = data as { cash_reserve: number; assumed_avg_first_payout: number };
+          setCashReserveInput(s.cash_reserve);
+          setAssumedAvgPayoutInput(s.assumed_avg_first_payout);
+          setAppliedCashReserve(s.cash_reserve);
+          setAppliedAvgPayout(s.assumed_avg_first_payout);
+        }
+      } finally {
+        if (mounted) setSettingsLoaded(true);
       }
-      setSettingsLoaded(true);
     };
+
     loadSettings();
+    return () => { mounted = false; };
   }, []);
   
   // Mutation to persist settings
@@ -161,15 +170,31 @@ export default function LiabilityDashboard() {
     refetchInterval: 60000, // Refresh every minute
   });
   
-  // Apply button handler - also persists to DB
+  // Client-side clamping helper
+  const clampNum = (v: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, Number.isFinite(v) ? v : min));
+
+  // Apply button handler - clamps inputs + persists to DB
   const handleApplyBufferSettings = () => {
-    setAppliedCashReserve(cashReserveInput);
-    setAppliedAvgPayout(assumedAvgPayoutInput);
+    const cr = clampNum(cashReserveInput, 0, 1_000_000_000);
+    const avg = clampNum(assumedAvgPayoutInput, 0, 100_000);
+
+    setCashReserveInput(cr);
+    setAssumedAvgPayoutInput(avg);
+    setAppliedCashReserve(cr);
+    setAppliedAvgPayout(avg);
+
     // Persist in background (don't block the refetch)
-    saveSettingsMutation.mutate({
-      cash_reserve: cashReserveInput,
-      assumed_avg_first_payout: assumedAvgPayoutInput,
-    });
+    saveSettingsMutation.mutate({ cash_reserve: cr, assumed_avg_first_payout: avg });
+  };
+
+  // Reset to defaults helper
+  const handleResetDefaults = () => {
+    setCashReserveInput(0);
+    setAssumedAvgPayoutInput(300);
+    setAppliedCashReserve(0);
+    setAppliedAvgPayout(300);
+    saveSettingsMutation.mutate({ cash_reserve: 0, assumed_avg_first_payout: 300 });
   };
 
   // MUST-FIX #3: Proper CSV escaping for values with commas/quotes
@@ -275,11 +300,33 @@ export default function LiabilityDashboard() {
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Net Buffer Negative</AlertTitle>
-            <AlertDescription>
-              Current cash reserve ({formatCurrency(data.cash_reserve || 0)}) is insufficient to cover 
-              pending liability ({formatCurrency(data.total_pending_amount || 0)}) plus expected 
-              opening-soon liability ({formatCurrency(data.expected_opening_soon_liability || 0)}). 
-              Shortfall: <strong>{formatCurrency(Math.abs(data.net_buffer || 0))}</strong>
+            <AlertDescription className="flex flex-col gap-3">
+              <span>
+                Current cash reserve ({formatCurrency(data.cash_reserve || 0)}) is insufficient to cover 
+                pending liability ({formatCurrency(data.total_pending_amount || 0)}) plus expected 
+                opening-soon liability ({formatCurrency(data.expected_opening_soon_liability || 0)}). 
+                Shortfall: <strong>{formatCurrency(Math.abs(data.net_buffer || 0))}</strong>
+              </span>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => refetch()}
+                  disabled={isRefetching}
+                  className="bg-background"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isRefetching ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleResetDefaults}
+                  className="bg-background"
+                >
+                  Reset to Defaults
+                </Button>
+              </div>
             </AlertDescription>
           </Alert>
         )}
