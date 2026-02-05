@@ -503,6 +503,7 @@ export type Database = {
           reviewed_by: string | null
           status: Database["public"]["Enums"]["payout_status"]
           submitted_amount: number | null
+          updated_at: string | null
         }
         Insert: {
           account_id: string
@@ -521,6 +522,7 @@ export type Database = {
           reviewed_by?: string | null
           status?: Database["public"]["Enums"]["payout_status"]
           submitted_amount?: number | null
+          updated_at?: string | null
         }
         Update: {
           account_id?: string
@@ -539,6 +541,7 @@ export type Database = {
           reviewed_by?: string | null
           status?: Database["public"]["Enums"]["payout_status"]
           submitted_amount?: number | null
+          updated_at?: string | null
         }
         Relationships: [
           {
