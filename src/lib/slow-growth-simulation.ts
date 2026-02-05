@@ -34,7 +34,7 @@ const SLOW_GROWTH_ASSUMPTIONS: MonteCarloAssumptions = {
 
   // Costs
   variableCostPerAccount: 8,
-  fixedMonthlyCosts: 12000, // lower fixed costs in early stage
+  fixedMonthlyCosts: 1500, // solo operator: Supabase + hosting + Lovable + misc
 
   // Your production knobs
   knobs: {
