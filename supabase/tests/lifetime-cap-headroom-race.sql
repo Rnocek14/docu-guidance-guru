@@ -353,6 +353,17 @@ SELECT pg_sleep(5);
   RAISE NOTICE '✅ Profile total consistent (>= cohort total): $%', _profile_total;
  
   -- ASSERTION 6: The unpaid payout should still be approved (not corrupted)
+
+  -- ASSERTION 5: Profile total should be at least cohort total (may include other cohorts)
+  -- We can't assert exact equality since profile is global across all cohorts
+  IF _profile_total < _cohort_total THEN
+    RAISE EXCEPTION 'FAIL: Profile total ($%) is less than cohort total ($%). Data inconsistency!',
+      _profile_total, _cohort_total;
+   END IF;
+ 
+  RAISE NOTICE '✅ Profile total consistent (>= cohort total): $%', _profile_total;
+ 
+  -- ASSERTION 6: The unpaid payout should still be approved (not corrupted)
    IF _payout_a.status = 'approved' AND _payout_b.status = 'paid' THEN
      RAISE NOTICE '✅ Payout A stayed approved (blocked by headroom check)';
      RAISE NOTICE '✅ Payout B won the race and paid';
