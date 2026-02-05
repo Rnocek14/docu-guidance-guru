@@ -124,18 +124,20 @@
    _account record;
    _cohort_total numeric;
    _profile_total numeric;
-   _expected_total numeric;
-   _payout_amount numeric := 100;  -- from seed script
+  _payout_amount numeric;
  BEGIN
    SELECT * INTO _payout FROM payouts WHERE id = _payout_id;
    SELECT * INTO _account FROM accounts WHERE id = _payout.account_id;
  
-   SELECT ucp.lifetime_paid_total INTO _cohort_total
+  -- Derive amount from actual payout (not hardcoded)
+  _payout_amount := _payout.amount;
+
+  SELECT COALESCE(ucp.lifetime_paid_total, 0) INTO _cohort_total
    FROM user_cohort_payouts ucp
    WHERE ucp.user_id = _account.user_id
      AND ucp.cohort_id = _account.cohort_id;
  
-   SELECT pf.lifetime_paid_total INTO _profile_total
+  SELECT COALESCE(pf.lifetime_paid_total, 0) INTO _profile_total
    FROM profiles pf
    WHERE pf.user_id = _account.user_id;
  
@@ -145,6 +147,7 @@
    RAISE NOTICE 'Payout status:         %', _payout.status;
    RAISE NOTICE 'Payout paid_at:        %', _payout.paid_at;
    RAISE NOTICE 'Payment reference:     %', _payout.payment_reference;
+  RAISE NOTICE 'Payout amount:         $%', _payout_amount;
    RAISE NOTICE '';
    RAISE NOTICE 'Cohort lifetime_total: $%', _cohort_total;
    RAISE NOTICE 'Profile lifetime_total: $%', _profile_total;
@@ -160,21 +163,25 @@
      RAISE EXCEPTION 'FAIL: Unexpected payment_reference: %', _payout.payment_reference;
    END IF;
  
-   RAISE NOTICE '✅ Payout correctly paid once with reference: %', _payout.payment_reference;
- 
-   -- Check that totals incremented exactly once (not twice)
-   -- Note: We expect cohort_total = starting_total + payout_amount
-   -- Since seed resets to 0, we expect exactly $100
+  -- Check cohort total incremented exactly once
    IF _cohort_total != _payout_amount THEN
-     RAISE EXCEPTION 'FAIL: Cohort total should be $% but got $% (possible double-increment!)', 
+    RAISE EXCEPTION 'FAIL: Cohort total should be $% but got $% (possible double-increment!)',
        _payout_amount, _cohort_total;
    END IF;
  
-   RAISE NOTICE '✅ Cohort total incremented exactly once: $%', _cohort_total;
+  -- Check profile total incremented exactly once (catches bug where profiles increments twice)
+  IF _profile_total != _payout_amount THEN
+    RAISE EXCEPTION 'FAIL: Profile total should be $% but got $% (possible double-increment!)',
+      _payout_amount, _profile_total;
+  END IF;
+
+  RAISE NOTICE '✅ Paid once. ref=% amount=$% cohort_total=$% profile_total=$%',
+    _payout.payment_reference, _payout_amount, _cohort_total, _profile_total;
    RAISE NOTICE '';
    RAISE NOTICE '✅ ALL CONCURRENCY CHECKS PASSED';
    RAISE NOTICE '   - FOR UPDATE locking prevented race';
    RAISE NOTICE '   - Idempotency prevented double-increment';
+  RAISE NOTICE '   - Both totals (cohort + profile) incremented exactly once';
    RAISE NOTICE '============================================';
  END $$;
  */
