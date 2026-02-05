@@ -19,7 +19,9 @@ function parseLocalDate(dateStr: string | null | undefined): Date | null {
     const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (!match) return null;
     
-    const [, y, m, d] = match.map(Number);
+    const y = Number(match[1]);
+    const m = Number(match[2]);
+    const d = Number(match[3]);
     const date = new Date(y, m - 1, d);
     
     // Validate the date is real (not NaN or invalid)
@@ -37,7 +39,9 @@ export function PayoutCoolingCard({
   isWindowOpen 
 }: PayoutCoolingCardProps) {
   const daysRemaining = Math.max(0, coolingPeriodDays - daysSincePass);
-  const progress = Math.min(100, (daysSincePass / coolingPeriodDays) * 100);
+  const progress = coolingPeriodDays > 0 
+    ? Math.min(100, (daysSincePass / coolingPeriodDays) * 100) 
+    : 100;
   
   // Safe date formatting - no timezone ambiguity
   const parsedDate = parseLocalDate(windowOpensAt);
