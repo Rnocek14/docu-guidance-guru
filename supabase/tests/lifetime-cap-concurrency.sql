@@ -127,6 +127,11 @@
   _payout_amount numeric;
  BEGIN
    SELECT * INTO _payout FROM payouts WHERE id = _payout_id;
+  
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Payout not found for id=%. Did you paste the correct UUID?', _payout_id;
+  END IF;
+  
    SELECT * INTO _account FROM accounts WHERE id = _payout.account_id;
  
   -- Derive amount from actual payout (not hardcoded)
@@ -158,6 +163,10 @@
      RAISE EXCEPTION 'FAIL: Payout should be paid, got %', _payout.status;
    END IF;
  
+  IF _payout.paid_at IS NULL THEN
+    RAISE EXCEPTION 'FAIL: Payout is paid but paid_at is NULL';
+  END IF;
+
    -- The first session's reference should win
    IF _payout.payment_reference NOT IN ('race-session-A', 'race-session-B') THEN
      RAISE EXCEPTION 'FAIL: Unexpected payment_reference: %', _payout.payment_reference;
