@@ -31,7 +31,7 @@ const actionCategories: Record<string, AuditAction[]> = {
   flag: ['flag_created', 'flag_cleared', 'flag_escalated'],
   payout: ['payout_requested', 'payout_approved', 'payout_rejected'],
   role: ['role_assigned', 'role_revoked'],
-  system: ['intake_paused', 'intake_resumed', 'evidence_pack_exported', 'trade_reconciliation_run'],
+  system: ['intake_paused', 'intake_resumed', 'evidence_pack_exported', 'trade_reconciliation_run', 'liability_alert_fired'],
   cohort: ['cohort_updated'],
 };
 
