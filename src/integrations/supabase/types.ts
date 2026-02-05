@@ -438,6 +438,54 @@ export type Database = {
         }
         Relationships: []
       }
+      liability_alerts: {
+        Row: {
+          alert_type: string
+          assumed_avg_first_payout: number
+          cash_reserve: number
+          channels: Json
+          cooldown_minutes: number
+          created_at: string
+          id: string
+          is_active: boolean
+          last_state: string
+          last_triggered_at: string | null
+          recipients: Json
+          threshold: number
+          updated_at: string
+        }
+        Insert: {
+          alert_type?: string
+          assumed_avg_first_payout?: number
+          cash_reserve?: number
+          channels?: Json
+          cooldown_minutes?: number
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_state?: string
+          last_triggered_at?: string | null
+          recipients?: Json
+          threshold?: number
+          updated_at?: string
+        }
+        Update: {
+          alert_type?: string
+          assumed_avg_first_payout?: number
+          cash_reserve?: number
+          channels?: Json
+          cooldown_minutes?: number
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_state?: string
+          last_triggered_at?: string | null
+          recipients?: Json
+          threshold?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       liability_buffer_settings: {
         Row: {
           assumed_avg_first_payout: number
@@ -778,6 +826,39 @@ export type Database = {
           },
         ]
       }
+      staff_notifications: {
+        Row: {
+          body: string | null
+          created_at: string
+          data: Json | null
+          id: string
+          is_read: boolean
+          notification_type: string
+          title: string
+          user_id: string | null
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          data?: Json | null
+          id?: string
+          is_read?: boolean
+          notification_type: string
+          title: string
+          user_id?: string | null
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          data?: Json | null
+          id?: string
+          is_read?: boolean
+          notification_type?: string
+          title?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       system_settings: {
         Row: {
           id: string
@@ -1068,6 +1149,7 @@ export type Database = {
         Args: { _account_id: string }
         Returns: Json
       }
+      check_liability_alert: { Args: never; Returns: Json }
       check_payout_method_duplicate: {
         Args: { _method_hash: string; _user_id: string }
         Returns: Json
