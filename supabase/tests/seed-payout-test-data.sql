@@ -61,12 +61,13 @@
      AND a.cohort_id = _cohort_id
      AND a.account_number LIKE (_acct_prefix || '%');
  
-   -- Wipe per-cohort totals so tests start clean
-   -- NOTE: This affects real cap totals for this user+cohort
-   DELETE FROM public.user_cohort_payouts
-   WHERE user_id = _user_id AND cohort_id = _cohort_id;
+   -- Reset per-cohort totals to zero (UPSERT - safer than DELETE)
+   INSERT INTO public.user_cohort_payouts (user_id, cohort_id, lifetime_paid_total)
+   VALUES (_user_id, _cohort_id, 0)
+   ON CONFLICT (user_id, cohort_id) DO UPDATE
+   SET lifetime_paid_total = 0;
  
-   RAISE NOTICE 'Cleaned up prior TEST-CAP artifacts and reset user_cohort_payouts for this user/cohort.';
+   RAISE NOTICE 'Cleaned up prior TEST-CAP artifacts and reset user_cohort_payouts to zero.';
  
    -- 3) Create a passed account with profit
    INSERT INTO public.accounts (

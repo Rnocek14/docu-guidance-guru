@@ -64,11 +64,12 @@
    WHERE p.status = 'approved'
      AND c.entry_fee IS NOT NULL
      AND c.lifetime_cap_multiple IS NOT NULL
+     AND a.account_number LIKE 'TEST-CAP-%'
    ORDER BY p.created_at DESC
    LIMIT 1;
  
    IF _payout_id IS NULL THEN
-     RAISE EXCEPTION 'No approved payout found in a capped cohort. Approve one payout first, then rerun.';
+     RAISE EXCEPTION 'No approved payout found for TEST-CAP-% account. Run seed-payout-test-data.sql first.';
    END IF;
  
    SELECT a.user_id, a.cohort_id INTO _user_id, _cohort_id
