@@ -125,7 +125,8 @@ export default function PayoutRequest() {
   };
 
   const isLoading = accountLoading || eligibilityLoading;
-  const isWindowOpen = eligibility?.payout_window_opened !== false;
+  // FIX #4: Stricter check - only true if explicitly true (not undefined)
+  const isWindowOpen = eligibility?.payout_window_opened === true;
   const canRequestPayout = eligibility?.eligible === true && isWindowOpen;
 
   if (isLoading) {

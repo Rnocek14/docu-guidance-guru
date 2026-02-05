@@ -1,14 +1,14 @@
 import { Badge } from '@/components/ui/badge';
 import { Target, CheckCircle2, Clock } from 'lucide-react';
 import type { AccountStatus } from '@/lib/types';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 
 interface AccountPhaseIndicatorProps {
   status: AccountStatus;
   profitTargetPercent: number;
   payoutWindowOpened?: boolean;
   daysRemaining?: number;
-  windowOpensAt?: string;
+  windowOpensAt?: string | null;
 }
 
 export function AccountPhaseIndicator({ 
@@ -21,8 +21,19 @@ export function AccountPhaseIndicator({
   const isPerformanceAccount = status === 'passed' || status.startsWith('payout_');
   
   // Performance Account in cooling period
-  if (isPerformanceAccount && !payoutWindowOpened && daysRemaining !== undefined) {
-    const formattedDate = windowOpensAt ? format(parseISO(windowOpensAt), 'MMM d') : 'soon';
+  if (isPerformanceAccount && payoutWindowOpened === false && daysRemaining !== undefined) {
+    // Safe date parsing
+    let formattedDate = 'soon';
+    if (windowOpensAt) {
+      try {
+        const parsed = parseISO(windowOpensAt);
+        if (isValid(parsed)) {
+          formattedDate = format(parsed, 'MMM d');
+        }
+      } catch {
+        formattedDate = 'soon';
+      }
+    }
     return (
       <div className="rounded-lg border border-warning/30 bg-warning/10 p-4">
         <div className="flex items-start gap-3">
