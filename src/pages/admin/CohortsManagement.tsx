@@ -38,9 +38,17 @@ import type { Tables } from '@/integrations/supabase/types';
 
 type Cohort = Tables<'cohorts'>;
 
+interface CohortStats {
+  cohort_id: string;
+  total_accounts: number;
+  passed_accounts: number;
+  passed_no_paid_payout: number;
+}
+
 interface CohortWithStats extends Cohort {
   accountCount: number;
   passedAccountCount: number;
+  passedNoPaidPayoutCount: number;
 }
 
 export default function CohortsManagement() {
@@ -60,37 +68,33 @@ export default function CohortsManagement() {
     payout_eligibility_delay_days: 7,
   });
 
-  // Fetch cohorts with account counts (including passed accounts)
+  // Fetch cohorts with account counts using server-side RPC (avoids full table scan)
   const { data: cohorts, isLoading } = useQuery({
     queryKey: ['admin-cohorts'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('cohorts')
-        .select('*')
-        .order('created_at', { ascending: false });
+      // Fetch cohorts and stats in parallel
+      const [cohortsResult, statsResult] = await Promise.all([
+        supabase.from('cohorts').select('*').order('created_at', { ascending: false }),
+        supabase.rpc('get_cohort_account_stats'),
+      ]);
 
-      if (error) throw error;
+      if (cohortsResult.error) throw cohortsResult.error;
 
-      // Get account counts per cohort (total and passed)
-      const { data: accounts } = await supabase
-        .from('accounts')
-        .select('cohort_id, status');
-
-      const countMap = new Map<string, { total: number; passed: number }>();
-      accounts?.forEach((a) => {
-        const current = countMap.get(a.cohort_id) || { total: 0, passed: 0 };
-        current.total += 1;
-        if (['passed', 'payout_requested', 'payout_under_review', 'payout_approved'].includes(a.status)) {
-          current.passed += 1;
-        }
-        countMap.set(a.cohort_id, current);
+      // Build stats lookup map
+      const statsMap = new Map<string, CohortStats>();
+      (statsResult.data as CohortStats[] || []).forEach((stat) => {
+        statsMap.set(stat.cohort_id, stat);
       });
 
-      return data.map((cohort) => ({
-        ...cohort,
-        accountCount: countMap.get(cohort.id)?.total || 0,
-        passedAccountCount: countMap.get(cohort.id)?.passed || 0,
-      })) as CohortWithStats[];
+      return cohortsResult.data.map((cohort) => {
+        const stats = statsMap.get(cohort.id);
+        return {
+          ...cohort,
+          accountCount: Number(stats?.total_accounts || 0),
+          passedAccountCount: Number(stats?.passed_accounts || 0),
+          passedNoPaidPayoutCount: Number(stats?.passed_no_paid_payout || 0),
+        };
+      }) as CohortWithStats[];
     },
   });
 
@@ -170,10 +174,10 @@ export default function CohortsManagement() {
       try {
         await supabase.from('audit_logs').insert({
           user_id: user?.id || null,
-          action: 'cohort_assigned', // Using existing enum value for cohort changes
+          action: 'cohort_updated', // Correct enum value for cohort settings changes
           details: {
+            entity_type: 'cohort',
             cohort_id: cohortId,
-            action_type: 'cohort_updated',
             changes: Object.keys(updates).map(key => ({
               field: key,
               old_value: oldValues[key as keyof Cohort],
@@ -273,8 +277,9 @@ export default function CohortsManagement() {
               Rule Immutability
             </CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            <p>Once an account is assigned to a cohort, its rules are snapshotted and frozen. Changes to cohort rules only affect new accounts.</p>
+          <CardContent className="text-sm text-muted-foreground space-y-1">
+            <p><strong>Trading rules</strong> (profit target, drawdown, daily loss) are snapshotted at account creation and cannot change.</p>
+            <p><strong>Payout policy</strong> (cooling period, caps, cooldowns) is evaluated live and may affect existing accounts.</p>
           </CardContent>
         </Card>
 
@@ -541,13 +546,13 @@ export default function CohortsManagement() {
           </DialogHeader>
           {editingCohort && (
             <div className="space-y-4 py-4">
-              {/* Warning for cohorts with passed accounts */}
-              {editingCohort.passedAccountCount > 0 && (
+              {/* Warning for cohorts with passed accounts (only those without a paid payout are affected) */}
+              {editingCohort.passedNoPaidPayoutCount > 0 && (
                 <Alert variant="destructive">
                   <AlertTriangle className="h-4 w-4" />
                   <AlertDescription>
-                    This cohort has {editingCohort.passedAccountCount} passed account(s). 
-                    Changing the cooling period will affect their payout eligibility window.
+                    This cohort has {editingCohort.passedNoPaidPayoutCount} passed account(s) without a prior paid payout. 
+                    Changing the cooling period will affect their first payout eligibility window.
                   </AlertDescription>
                 </Alert>
               )}

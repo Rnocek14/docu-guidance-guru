@@ -32,6 +32,7 @@ const actionCategories: Record<string, AuditAction[]> = {
   payout: ['payout_requested', 'payout_approved', 'payout_rejected'],
   role: ['role_assigned', 'role_revoked'],
   system: ['intake_paused', 'intake_resumed', 'evidence_pack_exported', 'trade_reconciliation_run'],
+  cohort: ['cohort_updated' as AuditAction], // Cast needed until types regenerate
 };
 
 export default function AuditLogs() {
@@ -136,6 +137,7 @@ export default function AuditLogs() {
                   <SelectItem value="flag">Flags</SelectItem>
                   <SelectItem value="payout">Payouts</SelectItem>
                   <SelectItem value="role">Role Changes</SelectItem>
+                  <SelectItem value="cohort">Cohort Changes</SelectItem>
                   <SelectItem value="system">System Actions</SelectItem>
                 </SelectContent>
               </Select>
