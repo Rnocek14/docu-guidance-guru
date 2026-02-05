@@ -1,13 +1,33 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Clock, CheckCircle2 } from 'lucide-react';
-import { format, parseISO, isValid } from 'date-fns';
+import { format } from 'date-fns';
 
 interface PayoutCoolingCardProps {
   daysSincePass: number;
   coolingPeriodDays: number;
   windowOpensAt: string | null | undefined;
   isWindowOpen: boolean;
+}
+
+// Safe date parsing for YYYY-MM-DD format without timezone ambiguity
+function parseLocalDate(dateStr: string | null | undefined): Date | null {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  
+  try {
+    // Match YYYY-MM-DD format
+    const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return null;
+    
+    const [, y, m, d] = match.map(Number);
+    const date = new Date(y, m - 1, d);
+    
+    // Validate the date is real (not NaN or invalid)
+    if (isNaN(date.getTime())) return null;
+    return date;
+  } catch {
+    return null;
+  }
 }
 
 export function PayoutCoolingCard({ 
@@ -19,18 +39,9 @@ export function PayoutCoolingCard({
   const daysRemaining = Math.max(0, coolingPeriodDays - daysSincePass);
   const progress = Math.min(100, (daysSincePass / coolingPeriodDays) * 100);
   
-  // FIX: Truly safe date parsing - handle null, undefined, invalid, and unexpected formats
-  let formattedDate = 'soon';
-  try {
-    if (windowOpensAt && typeof windowOpensAt === 'string' && windowOpensAt.length > 0) {
-      const parsed = parseISO(windowOpensAt);
-      if (isValid(parsed)) {
-        formattedDate = format(parsed, 'MMM d, yyyy');
-      }
-    }
-  } catch {
-    formattedDate = 'soon';
-  }
+  // Safe date formatting - no timezone ambiguity
+  const parsedDate = parseLocalDate(windowOpensAt);
+  const formattedDate = parsedDate ? format(parsedDate, 'MMM d, yyyy') : 'soon';
   
   if (isWindowOpen) {
     return (
