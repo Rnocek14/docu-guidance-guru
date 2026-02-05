@@ -154,23 +154,24 @@
  
  -- ============================================================
  -- SESSION A: Run in Tab 1 (attempts to pay Payout A)
- -- Replace <PAYOUT_A_ID> with UUID from SETUP
+-- Replace <PAYOUT_A_UUID> with Payout A UUID from SETUP
  -- ============================================================
  /*
  BEGIN;
  
--- Lock the payout row first (Session B will block here)
+-- Lock Payout A row (Session B operates on Payout B, so no direct conflict here)
+-- The real contention is on user_cohort_payouts row inside mark_payout_paid
 SELECT id, status, amount
 FROM payouts
-WHERE id = '<PAYOUT_A_ID>'::uuid
+WHERE id = '<PAYOUT_A_UUID>'::uuid
 FOR UPDATE;
 
--- Hold lock so Session B collides on user_cohort_payouts
+-- Hold lock so both sessions overlap when they hit user_cohort_payouts
 SELECT pg_sleep(5);
  
 -- Attempt to mark paid
  SELECT public.mark_payout_paid(
-   '<PAYOUT_A_ID>'::uuid,
+  '<PAYOUT_A_UUID>'::uuid,
    'headroom-race-A',
    NULL
  ) AS session_a_result;
@@ -180,14 +181,15 @@ SELECT pg_sleep(5);
  
  
  -- ============================================================
- -- SESSION B: Run in Tab 2 IMMEDIATELY after starting A
- -- Replace <PAYOUT_B_ID> with UUID from SETUP
+-- SESSION B: Run in Tab 2 IMMEDIATELY after starting Session A
+-- Replace <PAYOUT_B_UUID> with Payout B UUID from SETUP (DIFFERENT from A!)
  -- ============================================================
  /*
  BEGIN;
  
+-- Attempt to mark Payout B paid (will contend on user_cohort_payouts row)
  SELECT public.mark_payout_paid(
-   '<PAYOUT_B_ID>'::uuid,
+  '<PAYOUT_B_UUID>'::uuid,
    'headroom-race-B',
    NULL
  ) AS session_b_result;
@@ -198,13 +200,13 @@ SELECT pg_sleep(5);
  
  -- ============================================================
  -- VERIFY: Run after both sessions complete
- -- Replace UUIDs with values from SETUP
+-- Replace UUIDs with values from SETUP (must be DIFFERENT payouts!)
  -- ============================================================
  /*
  DO $$
  DECLARE
-   _payout_a_id uuid := '<PAYOUT_A_ID>';
-   _payout_b_id uuid := '<PAYOUT_B_ID>';
+  _payout_a_id uuid := '<PAYOUT_A_UUID>';
+  _payout_b_id uuid := '<PAYOUT_B_UUID>';
    _payout_a record;
    _payout_b record;
   _account_a record;
@@ -216,8 +218,15 @@ SELECT pg_sleep(5);
    _paid_count integer := 0;
   _sum_paid numeric := 0;
   _winning_amount numeric;
-  _baseline_total numeric;  -- The value we primed in SETUP (cap - headroom)
+  -- SETUP always primes with $50 payouts and $50 headroom, so baseline = cap - 50
+  _headroom_target numeric := 50;  -- Must match SETUP
+  _baseline_total numeric;
  BEGIN
+  -- Sanity check: ensure user didn't paste the same UUID twice
+  IF _payout_a_id = _payout_b_id THEN
+    RAISE EXCEPTION 'FAIL: Payout A and B have the same UUID. Use DIFFERENT payouts from SETUP.';
+  END IF;
+
   -- Use NOT FOUND pattern (record IS NULL doesn't work in PL/pgSQL)
   SELECT * INTO _payout_a FROM payouts WHERE id = _payout_a_id;
   IF NOT FOUND THEN
@@ -257,8 +266,8 @@ SELECT pg_sleep(5);
   END IF;
   _cap_amount := _cohort.entry_fee * _cohort.lifetime_cap_multiple;
 
-  -- Baseline is what we primed in SETUP: cap - headroom (where headroom = payout amount = $50)
-  _baseline_total := _cap_amount - _payout_a.amount;
+  -- Baseline is what SETUP primed: cap - headroom_target (deterministic, not derived from payout)
+  _baseline_total := _cap_amount - _headroom_target;
  
    SELECT COALESCE(ucp.lifetime_paid_total, 0) INTO _cohort_total
    FROM user_cohort_payouts ucp
@@ -314,7 +323,17 @@ SELECT pg_sleep(5);
      RAISE EXCEPTION 'FAIL: Payout B is paid but paid_at is NULL';
    END IF;
  
-  -- ASSERTION 3: Cohort total should equal baseline + one payout (= cap)
+  -- ASSERTION 3: The paid payout must have payment_reference set
+  IF _payout_a.status = 'paid' AND _payout_a.payment_reference IS NULL THEN
+    RAISE EXCEPTION 'FAIL: Payout A is paid but payment_reference is NULL';
+  END IF;
+  IF _payout_b.status = 'paid' AND _payout_b.payment_reference IS NULL THEN
+    RAISE EXCEPTION 'FAIL: Payout B is paid but payment_reference is NULL';
+  END IF;
+
+  RAISE NOTICE '✅ Paid payout has paid_at and payment_reference set';
+
+  -- ASSERTION 4: Cohort total should equal baseline + one payout (= cap)
   IF _cohort_total != (_baseline_total + _winning_amount) THEN
     RAISE EXCEPTION 'FAIL: Cohort total should be $% (baseline $% + payout $%) but got $%',
       (_baseline_total + _winning_amount), _baseline_total, _winning_amount, _cohort_total;
@@ -323,7 +342,7 @@ SELECT pg_sleep(5);
   RAISE NOTICE '✅ Cohort total incremented by exactly one payout: $% → $%',
     _baseline_total, _cohort_total;
 
-  -- ASSERTION 4: Profile total should be at least cohort total (may include other cohorts)
+  -- ASSERTION 5: Profile total should be at least cohort total (may include other cohorts)
   -- We can't assert exact equality since profile is global across all cohorts
   IF _profile_total < _cohort_total THEN
     RAISE EXCEPTION 'FAIL: Profile total ($%) is less than cohort total ($%). Data inconsistency!',
@@ -332,7 +351,7 @@ SELECT pg_sleep(5);
  
   RAISE NOTICE '✅ Profile total consistent (>= cohort total): $%', _profile_total;
  
-  -- ASSERTION 5: The unpaid payout should still be approved (not corrupted)
+  -- ASSERTION 6: The unpaid payout should still be approved (not corrupted)
    IF _payout_a.status = 'approved' AND _payout_b.status = 'paid' THEN
      RAISE NOTICE '✅ Payout A stayed approved (blocked by headroom check)';
      RAISE NOTICE '✅ Payout B won the race and paid';
@@ -341,7 +360,7 @@ SELECT pg_sleep(5);
      RAISE NOTICE '✅ Payout A won the race and paid';
    END IF;
  
-  -- ASSERTION 6: Cap not exceeded
+  -- ASSERTION 7: Cap not exceeded
   IF _cohort_total > _cap_amount THEN
     RAISE EXCEPTION 'FAIL: Cohort total ($%) exceeds cap ($%)! Cap bypass detected.',
       _cohort_total, _cap_amount;
