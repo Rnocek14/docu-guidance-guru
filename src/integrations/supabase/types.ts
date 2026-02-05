@@ -832,6 +832,7 @@ export type Database = {
           created_at: string
           data: Json | null
           id: string
+          idempotency_key: string | null
           is_read: boolean
           notification_type: string
           title: string
@@ -842,6 +843,7 @@ export type Database = {
           created_at?: string
           data?: Json | null
           id?: string
+          idempotency_key?: string | null
           is_read?: boolean
           notification_type: string
           title: string
@@ -852,6 +854,7 @@ export type Database = {
           created_at?: string
           data?: Json | null
           id?: string
+          idempotency_key?: string | null
           is_read?: boolean
           notification_type?: string
           title?: string
@@ -1280,6 +1283,7 @@ export type Database = {
         | "evidence_pack_exported"
         | "trade_reconciliation_run"
         | "cohort_updated"
+        | "liability_alert_fired"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -1461,6 +1465,7 @@ export const Constants = {
         "evidence_pack_exported",
         "trade_reconciliation_run",
         "cohort_updated",
+        "liability_alert_fired",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
