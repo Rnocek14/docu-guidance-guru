@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
@@ -7,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { 
   DollarSign, 
   AlertTriangle, 
@@ -14,7 +17,8 @@ import {
   TrendingUp,
   Download,
   RefreshCw,
-  Calendar
+  Calendar,
+  Shield
 } from 'lucide-react';
 import { parseLocalDate } from '@/lib/date-utils';
 import { format } from 'date-fns';
@@ -40,6 +44,12 @@ interface LiabilitySnapshot {
     paid_amount_14d: number;
   };
   days_forward: number;
+  // Net buffer fields
+  total_pending_amount: number;
+  expected_opening_soon_liability: number;
+  cash_reserve: number;
+  assumed_avg_first_payout: number;
+  net_buffer: number;
   error?: string;
 }
 
@@ -88,11 +98,16 @@ function MetricCard({
 }
 
 export default function LiabilityDashboard() {
+  const [cashReserve, setCashReserve] = useState<number>(0);
+  const [assumedAvgPayout, setAssumedAvgPayout] = useState<number>(300);
+  
   const { data, isLoading, error, refetch, isRefetching } = useQuery({
-    queryKey: ['liability-snapshot'],
+    queryKey: ['liability-snapshot', cashReserve, assumedAvgPayout],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_liability_snapshot', {
         _days_forward: 7,
+        _cash_reserve: cashReserve,
+        _assumed_avg_first_payout: assumedAvgPayout,
       });
       if (error) throw error;
       return data as unknown as LiabilitySnapshot;
@@ -201,10 +216,59 @@ export default function LiabilityDashboard() {
           </div>
         </div>
 
+        {/* Net Buffer Configuration */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Net Buffer Calculator</CardTitle>
+            <CardDescription>Configure cash reserve and assumptions to calculate operational buffer</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-2">
+                <Label htmlFor="cashReserve">Cash Reserve ($)</Label>
+                <Input
+                  id="cashReserve"
+                  type="number"
+                  min="0"
+                  value={cashReserve}
+                  onChange={(e) => setCashReserve(Number(e.target.value) || 0)}
+                  placeholder="0"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="assumedAvgPayout">Avg First Payout Estimate ($)</Label>
+                <Input
+                  id="assumedAvgPayout"
+                  type="number"
+                  min="0"
+                  value={assumedAvgPayout}
+                  onChange={(e) => setAssumedAvgPayout(Number(e.target.value) || 300)}
+                  placeholder="300"
+                />
+              </div>
+              {data && (
+                <>
+                  <div className="flex flex-col justify-end">
+                    <p className="text-xs text-muted-foreground">Expected Opening Soon Liability</p>
+                    <p className="text-lg font-semibold">{formatCurrency(data.expected_opening_soon_liability || 0)}</p>
+                  </div>
+                  <div className="flex flex-col justify-end">
+                    <p className="text-xs text-muted-foreground">Net Buffer</p>
+                    <p className={`text-lg font-bold ${(data.net_buffer || 0) < 0 ? 'text-destructive' : (data.net_buffer || 0) < 10000 ? 'text-warning' : 'text-primary'}`}>
+                      {formatCurrency(data.net_buffer || 0)}
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Key Metrics */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           {isLoading ? (
             <>
+              <Skeleton className="h-[120px]" />
               <Skeleton className="h-[120px]" />
               <Skeleton className="h-[120px]" />
               <Skeleton className="h-[120px]" />
@@ -238,6 +302,13 @@ export default function LiabilityDashboard() {
                 value={formatCurrency(data.velocity?.paid_amount_14d || 0)}
                 subtitle={`${data.velocity?.paid_14d || 0} payouts completed`}
                 icon={TrendingUp}
+              />
+              <MetricCard
+                title="Net Buffer"
+                value={formatCurrency(data.net_buffer || 0)}
+                subtitle={cashReserve > 0 ? `Reserve: ${formatCurrency(cashReserve)}` : 'Set cash reserve above'}
+                icon={Shield}
+                variant={(data.net_buffer || 0) < 0 ? 'critical' : (data.net_buffer || 0) < 10000 ? 'warning' : 'default'}
               />
             </>
           ) : null}
