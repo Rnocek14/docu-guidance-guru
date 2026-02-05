@@ -1,261 +1,190 @@
-# Risk Analytics AI System for Retail Prop Trading Platform
-## Revised Implementation Plan — "Detection, Not Domination"
 
----
 
-## Core Principles (Non-Negotiable)
+# Trader Dashboard Clarity Components
 
-1. **AI Never Denies Earned Payouts** — System flags, humans decide
-2. **No Retroactive Rule Changes** — Cohort rules are immutable once assigned
-3. **Intake Throttling > Punitive Enforcement** — Control who enters, not who gets punished
-4. **SIM-Only, No Market Exposure** — No hedging, no real order management
-5. **Human-in-the-Loop for All Irreversible Actions** — No auto-locks, no auto-bans, no auto-denials
+## Overview
 
----
+Add three small, high-leverage UI elements to the Trader Dashboard to eliminate trader confusion about their account phase, first payout milestone, and lifetime headroom. This is NOT a redesign - it's targeted transparency work.
 
-## Phase 1: MVP — Detection & Visibility (Weeks 1-4)
+## The Problem
 
-### 1.1 Authentication & Role-Based Access
+The backend is mathematically sound (KYC, velocity limits, lifetime caps, race-condition-safe RPCs), but traders don't experience backend correctness. They experience:
+- "Why can't I request a payout?"
+- "What's this $300 limit?"
+- "Is this legit or am I getting scammed?"
 
-**Four User Roles** (stored in separate `user_roles` table):
-- **Traders**: Personal dashboard, challenge progress, trading metrics
-- **Risk Officers**: Risk console, account reviews, flag management
-- **Support Staff**: Limited view for disputes and inquiries
-- **Administrators**: Full system access, configuration, user management
+The biggest risk is user confusion, not system abuse.
 
-**Security**: Roles stored separately from profiles to prevent privilege escalation.
+## The Solution: 3 Targeted Components
 
----
+### 1. Phase Indicator Banner
 
-### 1.2 Database Schema (Supabase)
+A prominent banner at the top of the dashboard showing:
 
-| Table | Purpose |
-|-------|---------|
-| `profiles` | User info, KYC status |
-| `user_roles` | Role assignments (separate table) |
-| `accounts` | Trading accounts, balance, status, cohort assignment |
-| `cohorts` | Versioned rule sets (immutable once assigned) |
-| `trades` | Trade event logs |
-| `violations` | Rule breach detections with timestamps |
-| `risk_scores` | Edge Score, Abuse Score, Payment Risk Score |
-| `flags` | Pending human review items |
-| `audit_logs` | Complete decision trail for all actions |
-| `payouts` | Payout requests and approval status |
-
----
-
-### 1.3 Risk Scoring Engine (Advisory Only)
-
-**Edge Score** (Performance Indicator) — *Informs intake decisions, does NOT block*
-- Win rate vs. population average
-- Speed-to-milestone tracking
-- Profit factor calculations
-- Thresholds: <50 Normal | 50-80 Notable | ≥80 **Flags for Review**
-
-**Abuse Score** (Compliance Index) — *Flags for human review, does NOT auto-lock*
-- Multi-account detection signals (IP, device, email patterns)
-- Coordinated trading pattern detection
-- Promotion usage patterns
-- Thresholds: 0-30 Good | 30-70 Caution | ≥70 **Auto-Flag + Human Review Required**
-
-**Payment Risk Score** — *Informs payout review, does NOT block*
-- Payment processor fraud signals
-- Name/ID verification matching
-- Geographic anomalies
-- Thresholds: 0-40 Normal | 40-70 Extra Verification | ≥70 **Human Review Required**
-
-**⚠️ Critical**: Scores are ADVISORY. They inform human decisions. They do NOT trigger automatic denial, lock, or block actions.
-
----
-
-### 1.4 Deterministic Rule Engine
-
-**What It Does**:
-- Monitors rule compliance in real-time
-- Calculates drawdown, daily P&L, position sizes
-- **Detects** rule breaches instantly
-- **Marks** account state (e.g., "Breached", "Under Review")
-- **Logs** all detections to audit trail
-
-**What It Does NOT Do**:
-- ❌ Reject orders
-- ❌ Auto-lock accounts
-- ❌ Deny payouts
-- ❌ Block trading
-
-**Account States**:
 ```
-Active → Breached (detected) → Failed (human-confirmed)
-Active → Passed → Payout Review → Payout Approved (human)
+Challenge Phase         ->  "Keep trading to hit your profit target"
+  OR
+Performance Account     ->  "You're payout-eligible!"
 ```
 
-Human confirmation required for all terminal state transitions.
+**Logic:**
+- `status === 'active'` = Challenge Phase (evaluation)
+- `status === 'passed'` or any `payout_*` status = Performance Account (PA)
+- Show different icons and colors for each phase
 
----
+**Placement:** Top of TraderDashboard, immediately after the welcome section.
 
-### 1.5 Trader Dashboard
+### 2. First Payout Milestone Card
 
-**Challenge Progress View**:
-- Real-time equity and P&L display
-- Visual drawdown tracker with threshold line
-- Progress toward profit target (percentage)
-- Trading days counter
+A small card (only visible in PA phase) showing:
 
-**Rule Status Panel**:
-- Checklist of all active rules (pass/warning/breach status)
-- Current position relative to limits
-- **Proactive warnings** when approaching thresholds (80% of limit)
+```
+First Payout Milestone: $300
+(Higher payouts unlock after your first withdrawal)
+```
 
-**Account Lifecycle**:
-- Current stage indicator
-- Status messages for any holds or reviews
-- Clear, transparent communication
+**Data source:** `cohort.first_payout_cap_amount` (already in the accounts query)
 
-**Trading Metrics**:
-- Win rate, profit factor display
-- Trade history with filtering
-- Performance charts
+**Key framing:**
+- Call it "Milestone" not "Cap"
+- Explain that subsequent payouts are not limited to $300
+- Only show for PA-phase accounts
 
----
+### 3. Lifetime Headroom Display
 
-### 1.6 Risk Officer Console
+A read-only display showing:
 
-**Live Monitoring Dashboard**:
-- All accounts with risk score indicators (color-coded)
-- Filter by score thresholds, account state
-- Pending flags queue
+```
+Lifetime Payout Remaining: $X,XXX
+```
 
-**Account Investigation**:
-- Deep-dive into trader activity
-- Trade-by-trade analysis
-- Score change history with reasons
-- Device/IP linking information
+**Data source:** Call `calculate_payout_eligibility` RPC which returns:
+- `lifetime_cap_amount`
+- `lifetime_paid_total`
+- `lifetime_headroom`
 
-**Flag Management**:
-- Queue of accounts requiring review
-- Actions available: **Clear Flag | Extend Review | Escalate to Admin**
-- Required documentation for all decisions
-- Complete audit trail
+**Framing:**
+- Show this as a simple progress bar (paid vs remaining)
+- Only visible for PA-phase accounts with lifetime caps configured
+- If uncapped cohort, hide this entirely
 
-**⚠️ No "Suspend" or "Ban" buttons for Risk Officers** — escalation to Admin only.
+## Technical Implementation
 
----
+### New Component: `AccountPhaseIndicator.tsx`
 
-### 1.7 Admin Panel
+Location: `src/components/trader/AccountPhaseIndicator.tsx`
 
-**User Management**:
-- View all users and roles
-- Assign/revoke roles
-- Account status management (with required documentation)
+```text
++------------------------------------------------------+
+| [Icon] CHALLENGE PHASE                               |
+| Hit your 10% profit target to unlock your            |
+| Performance Account                                  |
++------------------------------------------------------+
 
-**Payout Approval Workflow**:
-1. Trader requests payout
-2. System runs score checks → Advisory flags
-3. Risk Officer reviews (if flagged)
-4. **Admin approves or requests more info**
-5. Payout processed
+OR
 
-**No automated payout denial. Ever.**
++------------------------------------------------------+
+| [Checkmark] PERFORMANCE ACCOUNT                      |
+| You've passed! Request payouts from your profits     |
++------------------------------------------------------+
+```
 
-**Cohort Configuration**:
-- Create new rule sets for FUTURE users only
-- View existing cohorts (read-only once assigned)
-- Version history
+Props:
+- `status: AccountStatus`
+- `profitTargetPercent: number`
 
-**Intake Pause Switch**:
-- Global toggle to pause new account creation
-- Per-cohort intake throttling
-- This is the PRIMARY risk control mechanism
+### New Component: `PayoutMilestoneCard.tsx`
 
----
+Location: `src/components/trader/PayoutMilestoneCard.tsx`
 
-### 1.8 Notification System
+```text
++--------------------------------------+
+| FIRST PAYOUT MILESTONE               |
+| $300                                 |
+| Subsequent payouts are uncapped      |
+| once consistency is demonstrated.    |
++--------------------------------------+
+```
 
-**Trader Notifications**:
-- Warning alerts (approaching limits)
-- Rule breach detection (with explanation)
-- Account under review (with expected timeline)
-- Payout status updates
+Props:
+- `firstPayoutCapAmount: number | null`
+- `isFirstPayoutInCycle: boolean`
 
-**Internal Alerts**:
-- New flags for review
-- Score threshold crossings
-- Escalations
+### New Component: `LifetimeHeadroomCard.tsx`
 
-**All notifications are informational. None trigger automatic actions.**
+Location: `src/components/trader/LifetimeHeadroomCard.tsx`
 
----
+```text
++--------------------------------------+
+| LIFETIME PAYOUT HEADROOM             |
+| [===========================----]    |
+| $650 remaining of $700 total         |
++--------------------------------------+
+```
 
-### 1.9 Audit System
+Props:
+- `lifetimeCapAmount: number | null`
+- `lifetimePaidTotal: number`
+- `lifetimeHeadroom: number | null`
 
-**Every action logged**:
-- Who (user ID + role)
-- What (action type + details)
-- When (timestamp)
-- Why (reason/documentation)
-- Result (outcome)
+### Modified: `TraderDashboard.tsx`
 
-**Immutable logs** — no deletion, no modification.
+Changes:
+1. Add query for payout eligibility (for PA-phase accounts only)
+2. Insert `AccountPhaseIndicator` after welcome section
+3. Add new section with `PayoutMilestoneCard` and `LifetimeHeadroomCard` (PA-phase only)
 
-**Exportable for compliance review.**
+### Data Flow
 
----
+```text
+TraderDashboard
+  |
+  +-- accounts query (existing)
+  |     |-- status
+  |     |-- cohort.first_payout_cap_amount
+  |     |-- cohort.entry_fee
+  |     |-- cohort.lifetime_cap_multiple
+  |
+  +-- eligibility query (new, only for PA-phase)
+        |-- is_first_payout_in_cycle
+        |-- lifetime_headroom
+        |-- lifetime_paid_total
+        |-- lifetime_cap_amount
+```
 
-## Deferred to Phase 2+ (Do NOT Build Now)
+## File Changes Summary
 
-| Feature | Reason to Defer |
-|---------|-----------------|
-| Order rejection | Violates human-in-the-loop |
-| Auto-lock/auto-ban | Violates human-in-the-loop |
-| Correlation trade blocking | Overreach for SIM |
-| Hedging triggers | No market exposure |
-| Scenario analysis tools | Complexity creep |
-| ML feature pipelines | Premature optimization |
-| Graph visualizations | Nice-to-have, not MVP |
-| Sharpe ratio calculations | Analytics, not core risk |
-| Platform exposure dashboards | Firm-level, not MVP |
+| File | Action | Description |
+|------|--------|-------------|
+| `src/components/trader/AccountPhaseIndicator.tsx` | Create | Phase banner (Challenge vs PA) |
+| `src/components/trader/PayoutMilestoneCard.tsx` | Create | First payout milestone display |
+| `src/components/trader/LifetimeHeadroomCard.tsx` | Create | Lifetime headroom progress |
+| `src/pages/trader/TraderDashboard.tsx` | Modify | Integrate all three components |
+| `src/lib/types.ts` | Modify | Add `PayoutEligibility` interface |
 
----
+## Copy Guidelines
 
-## Litmus Test Before Any Feature
+| Element | Avoid | Use |
+|---------|-------|-----|
+| $300 limit | "First payout cap" | "First Payout Milestone" |
+| Phase name | "Evaluation" | "Challenge Phase" |
+| Funded phase | "Funded" | "Performance Account (PA)" |
+| Lifetime limit | "Lifetime cap" | "Lifetime Payout Headroom" |
 
-> "Could this feature automatically take money, deny money, or stop trading without a human explicitly approving it?"
+## Out of Scope (Postpone)
 
-If **YES** → Do not build.
-If **NO** → Safe to implement.
+- Tier ladder comparison UI
+- PA rule deep dives
+- AI-driven personalization
+- Advanced payout analytics
+- Challenge → PA transition celebration modal
 
----
+## Verification Steps
 
-## Technology Stack
+After implementation:
+1. View dashboard with `active` status account - should show "Challenge Phase"
+2. View dashboard with `passed` status account - should show "Performance Account"
+3. Confirm first payout milestone shows cohort's `first_payout_cap_amount`
+4. Confirm lifetime headroom shows correct values from eligibility RPC
+5. Confirm components don't appear for uncapped cohorts
 
-- **Frontend**: React + TypeScript + Tailwind CSS + shadcn/ui
-- **Backend**: External Supabase
-  - PostgreSQL with RLS
-  - Edge Functions for webhooks
-  - Real-time subscriptions for dashboards
-- **Charts**: Recharts
-- **State**: React Query
-- **Auth**: Supabase Auth with role-based access (roles in separate table)
-
----
-
-## Implementation Order
-
-1. **Week 1**: Database schema + Auth + Role system
-2. **Week 2**: Rule engine (detection only) + Account state machine
-3. **Week 3**: Trader Dashboard + Warnings
-4. **Week 4**: Risk Console + Flag management + Audit logs
-
----
-
-## Success Criteria for Phase 1
-
-✅ Traders see real-time progress and warnings
-✅ Rule breaches detected instantly, logged immutably
-✅ Risk officers can review flagged accounts
-✅ Admins approve all payouts manually
-✅ Complete audit trail for every decision
-✅ No automated denials, locks, or rejections
-✅ Intake pause switch functional
-
-This is the "Detection, Not Domination" foundation. Phase 2 adds intelligence. Phase 3 adds scale.
