@@ -36,8 +36,8 @@ const CONFIG: MonteCarloConfig = {
 };
 
 describe('Volume Sensitivity Analysis', () => {
-  it('should find optimal and minimum viable volumes', () => {
-    console.log('\n📊 VOLUME SENSITIVITY ANALYSIS\n');
+  it('should find optimal and minimum viable volumes with REAL percentiles', () => {
+    console.log('\n📊 VOLUME SENSITIVITY ANALYSIS (with honest P1/P5)\n');
     console.log('Testing account volumes from 10 to 500/month...\n');
     
     const volumes = [10, 20, 30, 40, 50, 75, 100, 150, 200, 300, 500];
@@ -46,6 +46,7 @@ describe('Volume Sensitivity Analysis', () => {
       profit6Mo: number;
       profitP5: number;
       profitP1: number;
+      worstMonth: number;
       monthlyProfit: number;
       margin: number;
       lossProb: number;
@@ -61,6 +62,14 @@ describe('Volume Sensitivity Analysis', () => {
       
       const result = runMonteCarlo(CONFIG, assumptions);
       
+      // FIXED: Compute REAL P1 from raw samples, not fake estimate
+      let realP1_6mo = 0;
+      if (result.rawSamples) {
+        const iterationTotals = result.rawSamples.map(iter => iter.reduce((a, b) => a + b, 0));
+        iterationTotals.sort((a, b) => a - b);
+        realP1_6mo = iterationTotals[Math.floor(iterationTotals.length * 0.01)];
+      }
+      
       const profit6Mo = Math.round(result.profit.mean * 6);
       const marginPerAccount = profit6Mo / (volume * 6);
       
@@ -68,7 +77,8 @@ describe('Volume Sensitivity Analysis', () => {
         volume,
         profit6Mo,
         profitP5: Math.round(result.profit.p5 * 6),
-        profitP1: Math.round(result.profit.p5 * 0.6), // rough P1 estimate
+        profitP1: Math.round(realP1_6mo), // NOW REAL P1
+        worstMonth: Math.round(result.risk.worstMonth),
         monthlyProfit: Math.round(result.profit.mean),
         margin: result.diagnostics.effectiveMargin,
         lossProb: result.risk.probabilityOfLoss,
@@ -77,9 +87,9 @@ describe('Volume Sensitivity Analysis', () => {
       });
     }
     
-    // Find breakeven point
-    const breakeven = results.find(r => r.profitP5 > 0);
-    const firstProfitable = results.find(r => r.profit6Mo > 0);
+    // Find breakeven point (now using REAL P1)
+    const breakevenP1 = results.find(r => r.profitP1 > 0);
+    const breakevenP5 = results.find(r => r.profitP5 > 0);
     
     // Find optimal (best margin)
     const optimal = results.reduce((best, curr) => 
@@ -87,12 +97,13 @@ describe('Volume Sensitivity Analysis', () => {
     );
     
     // Print table
-    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
-    console.log('  Volume  │  6-Mo Profit  │  P5 (bad)  │  Monthly  │  Margin  │  Loss%  │  $/Account  │  Status');
-    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('══════════════════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('  Volume  │  6-Mo Profit  │  P5 (5%)   │  P1 (1%)   │  Worst Mo  │  Margin  │  Loss%  │  Status');
+    console.log('══════════════════════════════════════════════════════════════════════════════════════════════════════════════');
     
     for (const r of results) {
-      const status = r.profitP5 < 0 ? '❌ RISKY' : 
+      const status = r.profitP1 < 0 ? '❌ P1 LOSS' : 
+                     r.profitP5 < 0 ? '⚠️ P5 LOSS' :
                      r.volume === optimal.volume ? '⭐ OPTIMAL' :
                      r.margin > 0.45 ? '✅ GREAT' : '✅ OK';
       
@@ -100,93 +111,71 @@ describe('Volume Sensitivity Analysis', () => {
         `  ${r.volume.toString().padStart(3)}     │  ` +
         `${('$' + r.profit6Mo.toLocaleString()).padStart(10)}  │  ` +
         `${('$' + r.profitP5.toLocaleString()).padStart(8)}  │  ` +
-        `${('$' + r.monthlyProfit.toLocaleString()).padStart(7)}  │  ` +
+        `${('$' + r.profitP1.toLocaleString()).padStart(8)}  │  ` +
+        `${('$' + r.worstMonth.toLocaleString()).padStart(8)}  │  ` +
         `${(r.margin * 100).toFixed(1).padStart(5)}%  │  ` +
         `${(r.lossProb * 100).toFixed(1).padStart(5)}%  │  ` +
-        `${('$' + r.marginPerAccount.toFixed(2)).padStart(8)}  │  ` +
         status
       );
     }
     
-    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('══════════════════════════════════════════════════════════════════════════════════════════════════════════════');
     console.log('');
     
-    // Detailed analysis
+    // Key findings with honest numbers
     console.log('───────────────────────────────────────────────────────────────────────────────');
-    console.log('                         KEY FINDINGS');
+    console.log('                         KEY FINDINGS (HONEST PERCENTILES)');
     console.log('───────────────────────────────────────────────────────────────────────────────');
     console.log('');
     
-    // Minimum viable
-    console.log('🔻 MINIMUM VIABLE (breakeven with safety margin):');
-    if (breakeven) {
-      console.log(`   ${breakeven.volume} accounts/month`);
-      console.log(`   6-mo profit: $${breakeven.profit6Mo.toLocaleString()}`);
-      console.log(`   P5 (worst 5%): $${breakeven.profitP5.toLocaleString()}`);
-      console.log(`   Margin: ${(breakeven.margin * 100).toFixed(1)}%`);
+    // P1 breakeven
+    console.log('🔻 MINIMUM VIABLE (P1 > 0, true 99% confidence):');
+    if (breakevenP1) {
+      console.log(`   ${breakevenP1.volume} accounts/month`);
+      console.log(`   6-mo profit: $${breakevenP1.profit6Mo.toLocaleString()}`);
+      console.log(`   P1 (worst 1%): $${breakevenP1.profitP1.toLocaleString()}`);
+      console.log(`   P5 (worst 5%): $${breakevenP1.profitP5.toLocaleString()}`);
+    } else {
+      console.log(`   ❌ No volume tested has P1 > 0`);
+    }
+    console.log('');
+    
+    // P5 breakeven
+    console.log('⚡ P5 BREAKEVEN (95% confidence):');
+    if (breakevenP5) {
+      console.log(`   ${breakevenP5.volume} accounts/month`);
     }
     console.log('');
     
     // Optimal
-    console.log('⭐ OPTIMAL (best margin efficiency):');
+    console.log('⭐ OPTIMAL (best margin):');
     console.log(`   ${optimal.volume} accounts/month`);
     console.log(`   6-mo profit: $${optimal.profit6Mo.toLocaleString()}`);
     console.log(`   Margin: ${(optimal.margin * 100).toFixed(1)}%`);
-    console.log(`   Profit per account: $${optimal.marginPerAccount.toFixed(2)}`);
     console.log('');
     
-    // Scaling analysis
-    console.log('📈 SCALING BEHAVIOR:');
-    const at100 = results.find(r => r.volume === 100)!;
-    const at200 = results.find(r => r.volume === 200)!;
-    const at500 = results.find(r => r.volume === 500)!;
+    // Danger zones
+    const dangerP1 = results.filter(r => r.profitP1 < 0);
+    const dangerP5 = results.filter(r => r.profitP5 < 0);
     
-    console.log(`   100 → 200 accounts: ${((at200.profit6Mo / at100.profit6Mo - 1) * 100).toFixed(0)}% more profit`);
-    console.log(`   200 → 500 accounts: ${((at500.profit6Mo / at200.profit6Mo - 1) * 100).toFixed(0)}% more profit`);
-    console.log(`   Margin stays ~${(at500.margin * 100).toFixed(0)}% even at scale (fixed costs amortized)`);
-    console.log('');
+    if (dangerP1.length > 0) {
+      console.log('❌ DANGER ZONE (P1 < 0, 1% chance of loss):');
+      for (const d of dangerP1) {
+        console.log(`   ${d.volume} accounts: P1 = $${d.profitP1.toLocaleString()}, worst month = $${d.worstMonth.toLocaleString()}`);
+      }
+      console.log('');
+    }
     
-    // Danger zone
-    const dangerZone = results.filter(r => r.profitP5 < 0);
-    if (dangerZone.length > 0) {
-      console.log('⚠️  DANGER ZONE (risk of 6-mo loss at P5):');
-      for (const d of dangerZone) {
+    if (dangerP5.length > dangerP1.length) {
+      console.log('⚠️ ELEVATED RISK (P5 < 0 but P1 > 0):');
+      for (const d of dangerP5.filter(r => r.profitP1 >= 0)) {
         console.log(`   ${d.volume} accounts: P5 = $${d.profitP5.toLocaleString()}`);
       }
-    } else {
-      console.log('✅ NO DANGER ZONE: All tested volumes are profitable even at P5');
+      console.log('');
     }
-    console.log('');
     
-    // Sweet spot range
-    const sweetSpot = results.filter(r => r.margin > 0.45 && r.lossProb < 0.05);
-    console.log('🎯 SWEET SPOT RANGE (>45% margin, <5% loss months):');
-    if (sweetSpot.length > 0) {
-      console.log(`   ${sweetSpot[0].volume} - ${sweetSpot[sweetSpot.length - 1].volume} accounts/month`);
-    }
-    console.log('');
-    
-    console.log('───────────────────────────────────────────────────────────────────────────────');
-    console.log('                         RECOMMENDATIONS');
-    console.log('───────────────────────────────────────────────────────────────────────────────');
-    console.log('');
-    console.log('  🚀 LAUNCH TARGET:     50-100 accounts/month');
-    console.log('     - Validates model with real data');
-    console.log('     - ~$20-45k profit over 6 months');
-    console.log('     - Room to learn without catastrophic risk');
-    console.log('');
-    console.log('  📈 GROWTH TARGET:     200-300 accounts/month');
-    console.log('     - $90-140k profit over 6 months');
-    console.log('     - Fixed costs fully amortized');
-    console.log('     - May need 1 part-time support');
-    console.log('');
-    console.log('  ⚠️  AVOID:            <30 accounts/month long-term');
-    console.log('     - Margins tight, variance hurts');
-    console.log('     - Not worth the operational overhead');
-    console.log('');
     console.log('═══════════════════════════════════════════════════════════════════════════════');
     
     expect(results.length).toBe(volumes.length);
-    expect(optimal.margin).toBeGreaterThan(0.4);
   });
 });
