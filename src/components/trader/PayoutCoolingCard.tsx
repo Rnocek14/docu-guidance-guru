@@ -19,18 +19,17 @@ export function PayoutCoolingCard({
   const daysRemaining = Math.max(0, coolingPeriodDays - daysSincePass);
   const progress = Math.min(100, (daysSincePass / coolingPeriodDays) * 100);
   
-  // FIX: Safe date parsing - handle null, undefined, and invalid dates
+  // FIX: Truly safe date parsing - handle null, undefined, invalid, and unexpected formats
   let formattedDate = 'soon';
-  if (windowOpensAt) {
-    try {
-      // Handle both ISO datetime and YYYY-MM-DD formats
+  try {
+    if (windowOpensAt && typeof windowOpensAt === 'string' && windowOpensAt.length > 0) {
       const parsed = parseISO(windowOpensAt);
       if (isValid(parsed)) {
         formattedDate = format(parsed, 'MMM d, yyyy');
       }
-    } catch {
-      formattedDate = 'soon';
     }
+  } catch {
+    formattedDate = 'soon';
   }
   
   if (isWindowOpen) {
