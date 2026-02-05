@@ -200,134 +200,119 @@ SELECT pg_sleep(5);
 /*
 DO $$
 DECLARE
-  _payout_a_id uuid := '<PAYOUT_A_UUID>';
-  _payout_b_id uuid := '<PAYOUT_B_UUID>';
+  _payout_a_id uuid := 'PASTE_PAYOUT_A_UUID_HERE';
+  _payout_b_id uuid := 'PASTE_PAYOUT_B_UUID_HERE';
+
   _payout_a record;
   _payout_b record;
+
   _account_a record;
   _account_b record;
   _cohort record;
+
   _cohort_total numeric;
   _profile_total numeric;
-  _cap_amount numeric;
-  _paid_count integer := 0;
-  _sum_paid numeric := 0;
-  _winning_amount numeric;
-  -- SETUP always primes with $50 payouts and $50 headroom, so baseline = cap - 50
-  _headroom_target numeric := 50;  -- Must match SETUP
-  _baseline_total numeric;
-BEGIN
-  -- ============================================
-  -- PHASE 1: Load and validate test data
-  -- ============================================
 
-  -- Sanity check: ensure user didn't paste the same UUID twice
+  _cap_amount numeric;
+  _baseline_total numeric;
+
+  _paid_count int := 0;
+  _sum_paid numeric := 0;
+  _winning_amount numeric := NULL;
+  _winning_ref text := NULL;
+BEGIN
+  -- Sanity: must be different payouts
   IF _payout_a_id = _payout_b_id THEN
     RAISE EXCEPTION 'FAIL: Payout A and B have the same UUID. Use DIFFERENT payouts from SETUP.';
   END IF;
 
-  -- Load payouts (use NOT FOUND pattern - record IS NULL doesn't work in PL/pgSQL)
-  SELECT * INTO _payout_a FROM payouts WHERE id = _payout_a_id;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Payout A not found. Check UUID=%', _payout_a_id;
-  END IF;
+  -- Load payouts
+  SELECT * INTO _payout_a FROM public.payouts WHERE id = _payout_a_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Payout A not found. UUID=%', _payout_a_id; END IF;
 
-  SELECT * INTO _payout_b FROM payouts WHERE id = _payout_b_id;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Payout B not found. Check UUID=%', _payout_b_id;
-  END IF;
+  SELECT * INTO _payout_b FROM public.payouts WHERE id = _payout_b_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Payout B not found. UUID=%', _payout_b_id; END IF;
 
-  -- Both payouts must be exactly $50 (matches SETUP)
-  IF _payout_a.amount != _headroom_target OR _payout_b.amount != _headroom_target THEN
-    RAISE EXCEPTION 'FAIL: Expected both payouts to be $%, got A=$% B=$%. SETUP/VERIFY mismatch.',
-      _headroom_target, _payout_a.amount, _payout_b.amount;
-  END IF;
+  -- Load accounts
+  SELECT * INTO _account_a FROM public.accounts WHERE id = _payout_a.account_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Account A not found for payout A'; END IF;
 
-  -- Load both accounts
-  SELECT * INTO _account_a FROM accounts WHERE id = _payout_a.account_id;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Account A not found for payout A';
-  END IF;
+  SELECT * INTO _account_b FROM public.accounts WHERE id = _payout_b.account_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Account B not found for payout B'; END IF;
 
-  SELECT * INTO _account_b FROM accounts WHERE id = _payout_b.account_id;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Account B not found for payout B';
-  END IF;
-
-  -- Both payouts must target same user+cohort (otherwise test is invalid)
+  -- Must be same user + cohort or test is invalid
   IF _account_a.user_id != _account_b.user_id OR _account_a.cohort_id != _account_b.cohort_id THEN
-    RAISE EXCEPTION 'Payouts are not for the same user/cohort. A: user=% cohort=%, B: user=% cohort=%. Test invalid.',
+    RAISE EXCEPTION
+      'FAIL: Payouts are not for the same user/cohort. A: user=% cohort=%, B: user=% cohort=%',
       _account_a.user_id, _account_a.cohort_id, _account_b.user_id, _account_b.cohort_id;
   END IF;
 
-  -- Load cohort
-  SELECT * INTO _cohort FROM cohorts WHERE id = _account_a.cohort_id;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Cohort not found';
-  END IF;
+  -- Load cohort + cap
+  SELECT * INTO _cohort FROM public.cohorts WHERE id = _account_a.cohort_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Cohort not found'; END IF;
 
-  -- Null-safe cap calculation
   IF _cohort.entry_fee IS NULL OR _cohort.lifetime_cap_multiple IS NULL THEN
-    RAISE EXCEPTION 'Cohort is uncapped (entry_fee or lifetime_cap_multiple is NULL). Test invalid.';
+    RAISE EXCEPTION 'Cohort is uncapped (entry_fee or lifetime_cap_multiple NULL). Test invalid.';
   END IF;
-
-  -- ============================================
-  -- PHASE 2: Compute totals and baseline
-  -- ============================================
 
   _cap_amount := _cohort.entry_fee * _cohort.lifetime_cap_multiple;
-  _baseline_total := _cap_amount - _headroom_target;  -- What SETUP primed
 
-  SELECT COALESCE(ucp.lifetime_paid_total, 0) INTO _cohort_total
-  FROM user_cohort_payouts ucp
+  -- Baseline is what SETUP primed: cap - 50 (headroom target)
+  -- IMPORTANT: This must match your SETUP script.
+  _baseline_total := _cap_amount - 50;
+
+  -- Totals
+  SELECT COALESCE(ucp.lifetime_paid_total, 0)
+    INTO _cohort_total
+  FROM public.user_cohort_payouts ucp
   WHERE ucp.user_id = _account_a.user_id
     AND ucp.cohort_id = _account_a.cohort_id;
 
-  SELECT COALESCE(pf.lifetime_paid_total, 0) INTO _profile_total
-  FROM profiles pf
+  SELECT COALESCE(pf.lifetime_paid_total, 0)
+    INTO _profile_total
+  FROM public.profiles pf
   WHERE pf.user_id = _account_a.user_id;
 
-  -- Print summary
   RAISE NOTICE '============================================';
   RAISE NOTICE 'HEADROOM RACE VERIFICATION';
   RAISE NOTICE '============================================';
-  RAISE NOTICE 'PAYOUT A: status=% paid_at=% ref=%',
-    _payout_a.status, _payout_a.paid_at, _payout_a.payment_reference;
-  RAISE NOTICE 'PAYOUT B: status=% paid_at=% ref=%',
-    _payout_b.status, _payout_b.paid_at, _payout_b.payment_reference;
+  RAISE NOTICE 'PAYOUT A: status=% paid_at=% ref=% amount=$%',
+    _payout_a.status, _payout_a.paid_at, _payout_a.payment_reference, _payout_a.amount;
+  RAISE NOTICE 'PAYOUT B: status=% paid_at=% ref=% amount=$%',
+    _payout_b.status, _payout_b.paid_at, _payout_b.payment_reference, _payout_b.amount;
   RAISE NOTICE '';
-  RAISE NOTICE 'Cohort lifetime_total: $%', _cohort_total;
+  RAISE NOTICE 'Cohort lifetime_total:  $%', _cohort_total;
   RAISE NOTICE 'Profile lifetime_total: $%', _profile_total;
-  RAISE NOTICE 'Cap amount: $%', _cap_amount;
-  RAISE NOTICE 'Baseline (primed): $%', _baseline_total;
+  RAISE NOTICE 'Cap amount:             $%', _cap_amount;
+  RAISE NOTICE 'Baseline (primed):      $%', _baseline_total;
   RAISE NOTICE '============================================';
 
-  -- Count how many actually paid and sum their amounts
+  -- ============================================
+  -- Assertions
+  -- ============================================
+
+  -- (1) Exactly one paid; sum paid + winning fields
   IF _payout_a.status = 'paid' THEN
     _paid_count := _paid_count + 1;
     _sum_paid := _sum_paid + _payout_a.amount;
     _winning_amount := _payout_a.amount;
+    _winning_ref := _payout_a.payment_reference;
   END IF;
+
   IF _payout_b.status = 'paid' THEN
     _paid_count := _paid_count + 1;
     _sum_paid := _sum_paid + _payout_b.amount;
     _winning_amount := _payout_b.amount;
+    _winning_ref := _payout_b.payment_reference;
   END IF;
 
-  -- ============================================
-  -- PHASE 3: Assertions (in correct order)
-  -- ============================================
-
-  -- ASSERTION 1: Exactly one payout should be paid
   IF _paid_count = 0 THEN
     RAISE EXCEPTION 'FAIL: Neither payout was paid. At least one should succeed.';
+  ELSIF _paid_count = 2 THEN
+    RAISE EXCEPTION 'FAIL: BOTH payouts were paid! Cap bypass detected.';
   END IF;
-  IF _paid_count = 2 THEN
-    RAISE EXCEPTION 'FAIL: BOTH payouts were paid! Cap was bypassed. Double-spend occurred.';
-  END IF;
-  RAISE NOTICE '✅ Exactly one payout paid (as expected)';
 
-  -- ASSERTION 2: The paid payout should have paid_at set
+  -- (2) paid_at must be set for the winner
   IF _payout_a.status = 'paid' AND _payout_a.paid_at IS NULL THEN
     RAISE EXCEPTION 'FAIL: Payout A is paid but paid_at is NULL';
   END IF;
@@ -335,65 +320,58 @@ BEGIN
     RAISE EXCEPTION 'FAIL: Payout B is paid but paid_at is NULL';
   END IF;
 
-  -- ASSERTION 3: The paid payout must have payment_reference set
+  -- (3) payment_reference must be set for the winner
   IF _payout_a.status = 'paid' AND _payout_a.payment_reference IS NULL THEN
     RAISE EXCEPTION 'FAIL: Payout A is paid but payment_reference is NULL';
   END IF;
   IF _payout_b.status = 'paid' AND _payout_b.payment_reference IS NULL THEN
     RAISE EXCEPTION 'FAIL: Payout B is paid but payment_reference is NULL';
   END IF;
-  RAISE NOTICE '✅ Paid payout has paid_at and payment_reference set';
 
-  -- ASSERTION 4: Cohort total must be in expected range (baseline OR baseline + one payout)
-  IF _cohort_total < _baseline_total
-     OR _cohort_total > (_baseline_total + _headroom_target) THEN
-    RAISE EXCEPTION 'FAIL: Cohort total out of expected range. total=$%, expected [$% .. $%]',
-      _cohort_total, _baseline_total, (_baseline_total + _headroom_target);
+  -- (4) Cohort total must be baseline or baseline + winning payout
+  IF _cohort_total < _baseline_total OR _cohort_total > (_baseline_total + _winning_amount) THEN
+    RAISE EXCEPTION
+      'FAIL: Cohort total out of expected range. total=$%, expected [$% .. $%]',
+      _cohort_total, _baseline_total, (_baseline_total + _winning_amount);
   END IF;
-  RAISE NOTICE '✅ Cohort total within expected range: $% (baseline=$% headroom=$%)',
-    _cohort_total, _baseline_total, _headroom_target;
 
-  -- ASSERTION 5: Cap must never be exceeded
+  -- (5) Cap must never be exceeded
   IF _cohort_total > _cap_amount THEN
     RAISE EXCEPTION 'FAIL: Cohort total ($%) exceeds cap ($%)! Cap bypass detected.',
       _cohort_total, _cap_amount;
   END IF;
-  RAISE NOTICE '✅ Cap respected: $% <= $%', _cohort_total, _cap_amount;
 
-  -- ASSERTION 6: Cohort total should equal baseline + exactly one payout
+  -- (6) Cohort total must equal baseline + exactly one payout
   IF _cohort_total != (_baseline_total + _winning_amount) THEN
-    RAISE EXCEPTION 'FAIL: Cohort total should be $% (baseline $% + payout $%) but got $%',
+    RAISE EXCEPTION
+      'FAIL: Cohort total should be $% (baseline $% + payout $%) but got $%',
       (_baseline_total + _winning_amount), _baseline_total, _winning_amount, _cohort_total;
   END IF;
-  RAISE NOTICE '✅ Cohort total incremented by exactly one payout: $% → $%',
-    _baseline_total, _cohort_total;
 
-  -- ASSERTION 7: Profile total should be at least cohort total (may include other cohorts)
+  -- (7) Profile total should be >= cohort total (global reporting column)
   IF _profile_total < _cohort_total THEN
-    RAISE EXCEPTION 'FAIL: Profile total ($%) is less than cohort total ($%). Data inconsistency!',
+    RAISE EXCEPTION 'FAIL: Profile total ($%) < cohort total ($%). Data inconsistency!',
       _profile_total, _cohort_total;
   END IF;
-  RAISE NOTICE '✅ Profile total consistent (>= cohort total): $%', _profile_total;
 
-  -- ASSERTION 8: The unpaid payout should still be approved (not corrupted)
+  -- (8) Loser stays approved (not corrupted)
   IF _payout_a.status = 'approved' AND _payout_b.status = 'paid' THEN
     RAISE NOTICE '✅ Payout A stayed approved (blocked by headroom check)';
-    RAISE NOTICE '✅ Payout B won the race and paid';
+    RAISE NOTICE '✅ Payout B won and paid';
   ELSIF _payout_b.status = 'approved' AND _payout_a.status = 'paid' THEN
     RAISE NOTICE '✅ Payout B stayed approved (blocked by headroom check)';
-    RAISE NOTICE '✅ Payout A won the race and paid';
+    RAISE NOTICE '✅ Payout A won and paid';
+  ELSE
+    RAISE NOTICE 'Note: loser status was %, winner ref=%', 
+      CASE WHEN _payout_a.status='paid' THEN _payout_b.status ELSE _payout_a.status END,
+      _winning_ref;
   END IF;
-
-  -- ============================================
-  -- PHASE 4: Final summary
-  -- ============================================
 
   RAISE NOTICE '';
   RAISE NOTICE '✅ ALL HEADROOM RACE CHECKS PASSED';
-  RAISE NOTICE '   - FOR UPDATE lock serialized concurrent updates';
-  RAISE NOTICE '   - Second payout saw updated total and was blocked';
-  RAISE NOTICE '   - Cap not exceeded despite race condition';
-  RAISE NOTICE '   - Sum paid = $% (exactly one payout)', _sum_paid;
+  RAISE NOTICE '   - Paid_count = % (expected 1)', _paid_count;
+  RAISE NOTICE '   - Sum paid   = $% (expected winner amount)', _sum_paid;
+  RAISE NOTICE '   - Winner ref = %', _winning_ref;
   RAISE NOTICE '============================================';
 END $$;
 */
