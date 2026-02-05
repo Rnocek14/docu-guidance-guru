@@ -159,14 +159,9 @@
  /*
  BEGIN;
  
--- Lock Payout A row (Session B operates on Payout B, so no direct conflict here)
--- The real contention is on user_cohort_payouts row inside mark_payout_paid
-SELECT id, status, amount
-FROM payouts
-WHERE id = '<PAYOUT_A_UUID>'::uuid
-FOR UPDATE;
-
--- Hold lock so both sessions overlap when they hit user_cohort_payouts
+-- Sleep to allow Session B to start simultaneously
+-- The real contention happens on user_cohort_payouts row inside mark_payout_paid
+-- (both RPCs will hit FOR UPDATE on the same {user_id, cohort_id} row)
 SELECT pg_sleep(5);
  
 -- Attempt to mark paid
@@ -237,6 +232,12 @@ SELECT pg_sleep(5);
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Payout B not found. Check UUID=%', _payout_b_id;
    END IF;
+
+  -- ASSERTION: Both payouts must be exactly $50 (matches SETUP)
+  IF _payout_a.amount != _headroom_target OR _payout_b.amount != _headroom_target THEN
+    RAISE EXCEPTION 'FAIL: Expected both payouts to be $%, got A=$% B=$%. SETUP/VERIFY mismatch.',
+      _headroom_target, _payout_a.amount, _payout_b.amount;
+  END IF;
 
   -- Load both accounts and verify they share user+cohort
   SELECT * INTO _account_a FROM accounts WHERE id = _payout_a.account_id;
