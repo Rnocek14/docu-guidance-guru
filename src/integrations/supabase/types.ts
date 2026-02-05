@@ -1086,6 +1086,10 @@ export type Database = {
           total_accounts: number
         }[]
       }
+      get_liability_snapshot: {
+        Args: { _days_forward?: number }
+        Returns: Json
+      }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]

@@ -27,6 +27,7 @@ import UsersManagement from "./pages/admin/UsersManagement";
 import CohortsManagement from "./pages/admin/CohortsManagement";
 import AuditLogs from "./pages/admin/AuditLogs";
 import MonteCarloAnalytics from "./pages/admin/MonteCarloAnalytics";
+import LiabilityDashboard from "./pages/admin/LiabilityDashboard";
 import SupportDashboard from "./pages/support/SupportDashboard";
 import AccountDetails from "./pages/trader/AccountDetails";
 
@@ -177,6 +178,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <MonteCarloAnalytics />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/liability"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <LiabilityDashboard />
                 </ProtectedRoute>
               }
             />
