@@ -1,9 +1,11 @@
  -- ============================================================
  -- Seed Data for Lifetime Cap Verification Testing
  -- ============================================================
- -- Rerunnable: cleans up prior test artifacts before seeding.
- -- Creates: 1 passed account + 1 approved payout >= $50 in a capped cohort.
- -- Prerequisites: A user must exist in profiles table.
+ -- SAFE + RERUNNABLE:
+ -- - Deterministic user selection (joins auth.users)
+ -- - Safe cleanup (only deletes TEST-CAP-% artifacts)
+ -- - Creates: 1 passed account + 1 approved payout >= $50 in capped cohort
+ -- Prerequisites: A user must exist in profiles + auth.users.
  -- Output: account_id + payout_id printed via NOTICE.
  -- ============================================================
  
@@ -13,22 +15,31 @@
    _cohort_id uuid;
    _account_id uuid;
    _payout_id uuid;
+ 
    _entry_fee numeric := 149;
    _cap_multiple numeric := 7;
+ 
+   _acct_prefix text := 'TEST-CAP-';
  BEGIN
-   -- 0) Fetch existing test user from profiles
-   SELECT user_id INTO _user_id FROM profiles LIMIT 1;
+   -- 0) Pick a deterministic real user (must exist in profiles + auth.users)
+   SELECT p.user_id
+   INTO _user_id
+   FROM public.profiles p
+   JOIN auth.users u ON u.id = p.user_id
+   ORDER BY COALESCE(p.created_at, p.updated_at) DESC NULLS LAST, p.user_id DESC
+   LIMIT 1;
  
    IF _user_id IS NULL THEN
-     RAISE EXCEPTION 'No user found in profiles. Create a user first via signup.';
+     RAISE EXCEPTION 'No user found in profiles joined to auth.users. Create a user first via signup.';
    END IF;
  
-   -- 1) Find a capped cohort by entry_fee + lifetime_cap_multiple (not name)
-   SELECT c.id INTO _cohort_id
+   -- 1) Find capped cohort by config (not name)
+   SELECT c.id
+   INTO _cohort_id
    FROM public.cohorts c
    WHERE c.entry_fee = _entry_fee
      AND c.lifetime_cap_multiple = _cap_multiple
-   ORDER BY c.created_at DESC
+   ORDER BY c.created_at DESC NULLS LAST, c.id DESC
    LIMIT 1;
  
    IF _cohort_id IS NULL THEN
@@ -37,26 +48,25 @@
  
    RAISE NOTICE 'Using user_id=%, cohort_id=%', _user_id, _cohort_id;
  
-   -- 2) Cleanup prior seeded artifacts for this user/cohort (safe reruns)
-   -- Delete payouts tied to our prior seeded accounts in this cohort
+   -- 2) Cleanup prior TEST artifacts ONLY (safe reruns)
    DELETE FROM public.payouts p
    USING public.accounts a
    WHERE p.account_id = a.id
      AND a.user_id = _user_id
      AND a.cohort_id = _cohort_id
-     AND a.status IN ('passed','payout_requested','payout_under_review','payout_approved','active','under_review');
+     AND a.account_number LIKE (_acct_prefix || '%');
  
-   -- Delete those accounts
    DELETE FROM public.accounts a
    WHERE a.user_id = _user_id
      AND a.cohort_id = _cohort_id
-     AND a.status IN ('passed','payout_requested','payout_under_review','payout_approved','active','under_review');
+     AND a.account_number LIKE (_acct_prefix || '%');
  
    -- Wipe per-cohort totals so tests start clean
+   -- NOTE: This affects real cap totals for this user+cohort
    DELETE FROM public.user_cohort_payouts
    WHERE user_id = _user_id AND cohort_id = _cohort_id;
  
-   RAISE NOTICE 'Cleaned up prior test artifacts.';
+   RAISE NOTICE 'Cleaned up prior TEST-CAP artifacts and reset user_cohort_payouts for this user/cohort.';
  
    -- 3) Create a passed account with profit
    INSERT INTO public.accounts (
@@ -77,7 +87,7 @@
    VALUES (
      _user_id,
      _cohort_id,
-     'TEST-CAP-' || substr(gen_random_uuid()::text, 1, 8),
+     _acct_prefix || substr(gen_random_uuid()::text, 1, 8),
      'passed',
      50000,
      52000,               -- $2000 profit available
