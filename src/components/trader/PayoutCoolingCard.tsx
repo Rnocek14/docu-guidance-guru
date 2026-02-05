@@ -1,12 +1,12 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Clock, CheckCircle2 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 
 interface PayoutCoolingCardProps {
   daysSincePass: number;
   coolingPeriodDays: number;
-  windowOpensAt: string;
+  windowOpensAt: string | null | undefined;
   isWindowOpen: boolean;
 }
 
@@ -19,8 +19,19 @@ export function PayoutCoolingCard({
   const daysRemaining = Math.max(0, coolingPeriodDays - daysSincePass);
   const progress = Math.min(100, (daysSincePass / coolingPeriodDays) * 100);
   
-  // Parse the date safely
-  const formattedDate = windowOpensAt ? format(parseISO(windowOpensAt), 'MMM d, yyyy') : 'soon';
+  // FIX: Safe date parsing - handle null, undefined, and invalid dates
+  let formattedDate = 'soon';
+  if (windowOpensAt) {
+    try {
+      // Handle both ISO datetime and YYYY-MM-DD formats
+      const parsed = parseISO(windowOpensAt);
+      if (isValid(parsed)) {
+        formattedDate = format(parsed, 'MMM d, yyyy');
+      }
+    } catch {
+      formattedDate = 'soon';
+    }
+  }
   
   if (isWindowOpen) {
     return (
