@@ -112,6 +112,9 @@ export default function TraderDashboard() {
             <AccountPhaseIndicator 
               status={activeAccount.status} 
               profitTargetPercent={activeAccount.cohort?.profit_target_percent || 10}
+              payoutWindowOpened={eligibility?.payout_window_opened !== false}
+              daysRemaining={eligibility?.days_remaining}
+              windowOpensAt={eligibility?.payout_window_opens_at}
             />
 
             {/* PA-only: Payout Info Cards */}

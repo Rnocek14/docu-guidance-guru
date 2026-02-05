@@ -186,6 +186,7 @@ export interface PayoutEligibility {
   reason?: string;
   max_eligible_amount?: number;
   max_eligible_before_first_cap?: number;
+  total_eligible_by_split?: number;
   realized_profit?: number;
   cycle_baseline?: number;
   cycle_started_at?: string;
@@ -206,4 +207,13 @@ export interface PayoutEligibility {
   days_since_last_payout?: number | null;
   trading_days_since_payout?: number | null;
   kyc_status?: string;
+  // Cooling period fields
+  payout_window_opened?: boolean;
+  cooling_period_days?: number;
+  days_since_pass?: number;
+  days_remaining?: number;
+  payout_window_opens_at?: string;
+  passed_at?: string;
+  has_prior_payout?: boolean;
+  hint?: string;
 }

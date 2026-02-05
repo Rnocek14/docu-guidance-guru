@@ -196,6 +196,7 @@ export type Database = {
           min_trading_days_between_payouts: number
           name: string
           payout_cooldown_days: number
+          payout_eligibility_delay_days: number
           payout_split_percent: number
           profit_target_percent: number
           version: number
@@ -219,6 +220,7 @@ export type Database = {
           min_trading_days_between_payouts?: number
           name: string
           payout_cooldown_days?: number
+          payout_eligibility_delay_days?: number
           payout_split_percent?: number
           profit_target_percent?: number
           version?: number
@@ -242,6 +244,7 @@ export type Database = {
           min_trading_days_between_payouts?: number
           name?: string
           payout_cooldown_days?: number
+          payout_eligibility_delay_days?: number
           payout_split_percent?: number
           profit_target_percent?: number
           version?: number
