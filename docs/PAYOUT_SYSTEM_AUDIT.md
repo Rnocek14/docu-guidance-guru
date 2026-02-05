@@ -6,9 +6,18 @@
 
 ---
 
-## A) System Readiness Score: 82/100
+## A) System Readiness Score: 92/100 ✅
 
-### Rationale
+### Rationale (Post-Fix)
+
+**Blockers Fixed (2026-02-05):**
+- ✅ `payment_reference` CHECK constraint added
+- ✅ `paid_at` CHECK constraint (already existed)
+- ✅ `updated_at` column + trigger added to payouts
+- ✅ KYC gating added to `calculate_payout_eligibility`
+- ✅ Velocity limiting (3 requests/24h) added to `validate_payout_request`
+- ✅ Status index added for admin queue queries
+- ⚠️ Leaked password protection: **Enable in Supabase Dashboard → Auth → Security**
 
 | Category | Score | Weight | Notes |
 |----------|-------|--------|-------|
