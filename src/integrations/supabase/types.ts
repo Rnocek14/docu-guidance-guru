@@ -1077,6 +1077,15 @@ export type Database = {
             }
             Returns: Json
           }
+      get_cohort_account_stats: {
+        Args: never
+        Returns: {
+          cohort_id: string
+          passed_accounts: number
+          passed_no_paid_payout: number
+          total_accounts: number
+        }[]
+      }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
@@ -1154,6 +1163,7 @@ export type Database = {
         | "rule_breach_detected"
         | "evidence_pack_exported"
         | "trade_reconciliation_run"
+        | "cohort_updated"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -1334,6 +1344,7 @@ export const Constants = {
         "rule_breach_detected",
         "evidence_pack_exported",
         "trade_reconciliation_run",
+        "cohort_updated",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
