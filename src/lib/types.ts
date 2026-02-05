@@ -180,3 +180,30 @@ export interface SystemSetting {
   updated_at: string;
   updated_by: string | null;
 }
+
+export interface PayoutEligibility {
+  eligible: boolean;
+  reason?: string;
+  max_eligible_amount?: number;
+  max_eligible_before_first_cap?: number;
+  realized_profit?: number;
+  cycle_baseline?: number;
+  cycle_started_at?: string;
+  paid_since_cycle?: number;
+  paid_count_since_cycle?: number;
+  is_first_payout_in_cycle?: boolean;
+  first_payout_cap_amount?: number | null;
+  first_payout_cap_applied?: boolean;
+  lifetime_cap_amount?: number | null;
+  lifetime_paid_total?: number;
+  lifetime_headroom?: number | null;
+  lifetime_cap_applied?: boolean;
+  cohort_id?: string;
+  payout_split_percent?: number;
+  max_payout_percent_of_eligible?: number;
+  max_payout_absolute?: number | null;
+  account_status?: string;
+  days_since_last_payout?: number | null;
+  trading_days_since_payout?: number | null;
+  kyc_status?: string;
+}

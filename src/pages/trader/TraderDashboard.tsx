@@ -8,7 +8,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, AlertTriangle, Target, Calendar, DollarSign, Eye } from 'lucide-react';
-import type { Account, Cohort } from '@/lib/types';
+import type { Account, Cohort, PayoutEligibility } from '@/lib/types';
+import { AccountPhaseIndicator } from '@/components/trader/AccountPhaseIndicator';
+import { PayoutMilestoneCard } from '@/components/trader/PayoutMilestoneCard';
+import { LifetimeHeadroomCard } from '@/components/trader/LifetimeHeadroomCard';
 
 export default function TraderDashboard() {
   const { user } = useAuth();
@@ -32,7 +35,25 @@ export default function TraderDashboard() {
     enabled: !!user?.id,
   });
 
-  const activeAccount = accounts?.find((a) => a.status === 'active');
+  const activeAccount = accounts?.find((a) => 
+    a.status === 'active' || a.status === 'passed' || a.status.startsWith('payout_')
+  );
+  
+  const isPerformanceAccount = activeAccount && 
+    (activeAccount.status === 'passed' || activeAccount.status.startsWith('payout_'));
+
+  // Fetch payout eligibility for PA-phase accounts
+  const { data: eligibility } = useQuery({
+    queryKey: ['payout-eligibility', activeAccount?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('calculate_payout_eligibility', {
+        _account_id: activeAccount!.id,
+      });
+      if (error) throw error;
+      return data as unknown as PayoutEligibility;
+    },
+    enabled: !!activeAccount?.id && isPerformanceAccount,
+  });
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -87,6 +108,27 @@ export default function TraderDashboard() {
           </div>
         ) : activeAccount ? (
           <>
+            {/* Phase Indicator */}
+            <AccountPhaseIndicator 
+              status={activeAccount.status} 
+              profitTargetPercent={activeAccount.cohort?.profit_target_percent || 10}
+            />
+
+            {/* PA-only: Payout Info Cards */}
+            {isPerformanceAccount && (
+              <div className="grid gap-4 md:grid-cols-2">
+                <PayoutMilestoneCard
+                  firstPayoutCapAmount={activeAccount.cohort?.first_payout_cap_amount ?? null}
+                  isFirstPayoutInCycle={eligibility?.is_first_payout_in_cycle ?? true}
+                />
+                <LifetimeHeadroomCard
+                  lifetimeCapAmount={eligibility?.lifetime_cap_amount ?? null}
+                  lifetimePaidTotal={eligibility?.lifetime_paid_total ?? 0}
+                  lifetimeHeadroom={eligibility?.lifetime_headroom ?? null}
+                />
+              </div>
+            )}
+
             {/* Stats grid */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <Card>
