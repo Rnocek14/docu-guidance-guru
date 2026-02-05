@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
@@ -170,6 +170,33 @@ export default function LiabilityDashboard() {
     refetchInterval: 60000, // Refresh every minute
   });
   
+  // Buffer flip detection - toast when net_buffer crosses from ≥0 to <0
+  const prevNetBufferRef = useRef<number | null>(null);
+  
+  useEffect(() => {
+    const nb = data?.net_buffer;
+    if (typeof nb !== 'number') return;
+
+    // First value: set baseline, don't toast
+    if (prevNetBufferRef.current === null) {
+      prevNetBufferRef.current = nb;
+      return;
+    }
+
+    const prev = prevNetBufferRef.current;
+
+    // Flip detection: non-negative -> negative
+    if (prev >= 0 && nb < 0) {
+      toast({
+        title: 'Net Buffer turned negative',
+        description: `Shortfall: ${formatCurrency(Math.abs(nb))}. Consider increasing reserve or pausing approvals.`,
+        variant: 'destructive',
+      });
+    }
+
+    prevNetBufferRef.current = nb;
+  }, [data?.net_buffer, toast]);
+  
   // Client-side clamping helper
   const clampNum = (v: number, min: number, max: number) =>
     Math.min(max, Math.max(min, Number.isFinite(v) ? v : min));
@@ -194,7 +221,10 @@ export default function LiabilityDashboard() {
     setAssumedAvgPayoutInput(300);
     setAppliedCashReserve(0);
     setAppliedAvgPayout(300);
-    saveSettingsMutation.mutate({ cash_reserve: 0, assumed_avg_first_payout: 300 });
+    saveSettingsMutation.mutate(
+      { cash_reserve: 0, assumed_avg_first_payout: 300 },
+      { onSuccess: () => refetch() }
+    );
   };
 
   // MUST-FIX #3: Proper CSV escaping for values with commas/quotes
