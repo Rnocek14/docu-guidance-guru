@@ -438,6 +438,27 @@ export type Database = {
         }
         Relationships: []
       }
+      liability_buffer_settings: {
+        Row: {
+          assumed_avg_first_payout: number
+          cash_reserve: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          assumed_avg_first_payout?: number
+          cash_reserve?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          assumed_avg_first_payout?: number
+          cash_reserve?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       payout_methods: {
         Row: {
           block_reason: string | null
@@ -1086,6 +1107,7 @@ export type Database = {
           total_accounts: number
         }[]
       }
+      get_liability_buffer_settings: { Args: never; Returns: Json }
       get_liability_snapshot: {
         Args: {
           _assumed_avg_first_payout?: number
@@ -1121,6 +1143,10 @@ export type Database = {
         Returns: Json
       }
       reset_payout_cycle: { Args: { _account_id: string }; Returns: undefined }
+      upsert_liability_buffer_settings: {
+        Args: { _assumed_avg_first_payout: number; _cash_reserve: number }
+        Returns: Json
+      }
       validate_payout_request: {
         Args: { _account_id: string; _requested_amount: number }
         Returns: Json
