@@ -179,6 +179,80 @@ export type Database = {
           },
         ]
       }
+      chargeback_events: {
+        Row: {
+          amount: number
+          auto_freeze_applied: boolean
+          card_fingerprint: string | null
+          country: string | null
+          created_at: string
+          currency: string
+          freeze_action_id: string | null
+          id: string
+          ip: unknown
+          notes: string | null
+          occurred_at: string
+          payment_method_fingerprint: string | null
+          payment_txn_id: string | null
+          provider: string
+          provider_dispute_id: string | null
+          provider_event_id: string
+          reason_code: string | null
+          stage: string
+          user_id: string
+        }
+        Insert: {
+          amount?: number
+          auto_freeze_applied?: boolean
+          card_fingerprint?: string | null
+          country?: string | null
+          created_at?: string
+          currency?: string
+          freeze_action_id?: string | null
+          id?: string
+          ip?: unknown
+          notes?: string | null
+          occurred_at: string
+          payment_method_fingerprint?: string | null
+          payment_txn_id?: string | null
+          provider: string
+          provider_dispute_id?: string | null
+          provider_event_id: string
+          reason_code?: string | null
+          stage: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          auto_freeze_applied?: boolean
+          card_fingerprint?: string | null
+          country?: string | null
+          created_at?: string
+          currency?: string
+          freeze_action_id?: string | null
+          id?: string
+          ip?: unknown
+          notes?: string | null
+          occurred_at?: string
+          payment_method_fingerprint?: string | null
+          payment_txn_id?: string | null
+          provider?: string
+          provider_dispute_id?: string | null
+          provider_event_id?: string
+          reason_code?: string | null
+          stage?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chargeback_events_payment_txn_id_fkey"
+            columns: ["payment_txn_id"]
+            isOneToOne: false
+            referencedRelation: "payment_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cohorts: {
         Row: {
           created_at: string
@@ -510,6 +584,137 @@ export type Database = {
         }
         Relationships: []
       }
+      payment_rails: {
+        Row: {
+          allowed_countries: string[]
+          allowed_risk_tiers: number[]
+          blocked_countries: string[]
+          config: Json
+          created_at: string
+          currencies: string[]
+          id: string
+          is_enabled: boolean
+          max_single_inbound: number | null
+          max_single_outbound: number | null
+          methods: string[]
+          mode: string
+          priority: number
+          provider: string
+          rail_key: string
+          reason_disabled: string | null
+          supports_inbound: boolean
+          supports_outbound: boolean
+          updated_at: string
+        }
+        Insert: {
+          allowed_countries?: string[]
+          allowed_risk_tiers?: number[]
+          blocked_countries?: string[]
+          config?: Json
+          created_at?: string
+          currencies?: string[]
+          id?: string
+          is_enabled?: boolean
+          max_single_inbound?: number | null
+          max_single_outbound?: number | null
+          methods?: string[]
+          mode?: string
+          priority?: number
+          provider: string
+          rail_key: string
+          reason_disabled?: string | null
+          supports_inbound?: boolean
+          supports_outbound?: boolean
+          updated_at?: string
+        }
+        Update: {
+          allowed_countries?: string[]
+          allowed_risk_tiers?: number[]
+          blocked_countries?: string[]
+          config?: Json
+          created_at?: string
+          currencies?: string[]
+          id?: string
+          is_enabled?: boolean
+          max_single_inbound?: number | null
+          max_single_outbound?: number | null
+          methods?: string[]
+          mode?: string
+          priority?: number
+          provider?: string
+          rail_key?: string
+          reason_disabled?: string | null
+          supports_inbound?: boolean
+          supports_outbound?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      payment_transactions: {
+        Row: {
+          amount: number
+          created_at: string
+          currency: string
+          direction: string
+          id: string
+          idempotency_key: string
+          metadata: Json
+          provider: string
+          provider_payment_id: string | null
+          purpose: string
+          rail_key: string | null
+          status: string
+          updated_at: string
+          user_country: string | null
+          user_id: string
+          user_risk_tier: number
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          currency?: string
+          direction: string
+          id?: string
+          idempotency_key: string
+          metadata?: Json
+          provider: string
+          provider_payment_id?: string | null
+          purpose: string
+          rail_key?: string | null
+          status?: string
+          updated_at?: string
+          user_country?: string | null
+          user_id: string
+          user_risk_tier?: number
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          currency?: string
+          direction?: string
+          id?: string
+          idempotency_key?: string
+          metadata?: Json
+          provider?: string
+          provider_payment_id?: string | null
+          purpose?: string
+          rail_key?: string | null
+          status?: string
+          updated_at?: string
+          user_country?: string | null
+          user_id?: string
+          user_risk_tier?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_transactions_rail_key_fkey"
+            columns: ["rail_key"]
+            isOneToOne: false
+            referencedRelation: "payment_rails"
+            referencedColumns: ["rail_key"]
+          },
+        ]
+      }
       payout_methods: {
         Row: {
           block_reason: string | null
@@ -565,9 +770,11 @@ export type Database = {
           account_id: string
           amount: number
           calculated_eligible_amount: number | null
+          destination_name_match: boolean | null
           device_fingerprint_id: string | null
           fraud_review_id: string | null
           id: string
+          kyc_name_verified: boolean
           paid_at: string | null
           payment_reference: string | null
           payout_method_id: string | null
@@ -576,6 +783,8 @@ export type Database = {
           review_notes: string | null
           reviewed_at: string | null
           reviewed_by: string | null
+          routing_decision: Json | null
+          selected_rail_key: string | null
           status: Database["public"]["Enums"]["payout_status"]
           submitted_amount: number | null
           updated_at: string | null
@@ -584,9 +793,11 @@ export type Database = {
           account_id: string
           amount: number
           calculated_eligible_amount?: number | null
+          destination_name_match?: boolean | null
           device_fingerprint_id?: string | null
           fraud_review_id?: string | null
           id?: string
+          kyc_name_verified?: boolean
           paid_at?: string | null
           payment_reference?: string | null
           payout_method_id?: string | null
@@ -595,6 +806,8 @@ export type Database = {
           review_notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
+          routing_decision?: Json | null
+          selected_rail_key?: string | null
           status?: Database["public"]["Enums"]["payout_status"]
           submitted_amount?: number | null
           updated_at?: string | null
@@ -603,9 +816,11 @@ export type Database = {
           account_id?: string
           amount?: number
           calculated_eligible_amount?: number | null
+          destination_name_match?: boolean | null
           device_fingerprint_id?: string | null
           fraud_review_id?: string | null
           id?: string
+          kyc_name_verified?: boolean
           paid_at?: string | null
           payment_reference?: string | null
           payout_method_id?: string | null
@@ -614,6 +829,8 @@ export type Database = {
           review_notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
+          routing_decision?: Json | null
+          selected_rail_key?: string | null
           status?: Database["public"]["Enums"]["payout_status"]
           submitted_amount?: number | null
           updated_at?: string | null
@@ -646,6 +863,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "payout_methods"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payouts_selected_rail_key_fkey"
+            columns: ["selected_rail_key"]
+            isOneToOne: false
+            referencedRelation: "payment_rails"
+            referencedColumns: ["rail_key"]
           },
         ]
       }
@@ -684,37 +908,58 @@ export type Database = {
       profiles: {
         Row: {
           avatar_url: string | null
+          card_payments_blocked: boolean
+          chargeback_count_90d: number
+          chargeback_count_lifetime: number
           created_at: string
           email: string
           full_name: string | null
           id: string
           kyc_status: string | null
           kyc_verified_at: string | null
+          last_chargeback_at: string | null
           lifetime_paid_total: number
+          payouts_frozen: boolean
+          payouts_frozen_at: string | null
+          payouts_frozen_reason: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           avatar_url?: string | null
+          card_payments_blocked?: boolean
+          chargeback_count_90d?: number
+          chargeback_count_lifetime?: number
           created_at?: string
           email: string
           full_name?: string | null
           id?: string
           kyc_status?: string | null
           kyc_verified_at?: string | null
+          last_chargeback_at?: string | null
           lifetime_paid_total?: number
+          payouts_frozen?: boolean
+          payouts_frozen_at?: string | null
+          payouts_frozen_reason?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
           avatar_url?: string | null
+          card_payments_blocked?: boolean
+          chargeback_count_90d?: number
+          chargeback_count_lifetime?: number
           created_at?: string
           email?: string
           full_name?: string | null
           id?: string
           kyc_status?: string | null
           kyc_verified_at?: string | null
+          last_chargeback_at?: string | null
           lifetime_paid_total?: number
+          payouts_frozen?: boolean
+          payouts_frozen_at?: string | null
+          payouts_frozen_reason?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -1230,13 +1475,51 @@ export type Database = {
         }
         Returns: Json
       }
+      normalize_legal_name: { Args: { input: string }; Returns: string }
+      process_chargeback_event: {
+        Args: {
+          _amount: number
+          _card_fingerprint?: string
+          _country?: string
+          _currency: string
+          _ip?: unknown
+          _occurred_at: string
+          _provider: string
+          _provider_dispute_id: string
+          _provider_event_id: string
+          _reason_code: string
+          _stage: string
+          _user_id: string
+        }
+        Returns: Json
+      }
       reset_payout_cycle: { Args: { _account_id: string }; Returns: undefined }
+      select_payment_rail: {
+        Args: {
+          p_amount: number
+          p_country: string
+          p_currency?: string
+          p_direction: string
+          p_method: string
+          p_risk_tier: number
+        }
+        Returns: {
+          priority: number
+          provider: string
+          rail_key: string
+          reason: string
+        }[]
+      }
       upsert_liability_buffer_settings: {
         Args: { _assumed_avg_first_payout: number; _cash_reserve: number }
         Returns: Json
       }
       validate_payout_request: {
         Args: { _account_id: string; _requested_amount: number }
+        Returns: Json
+      }
+      verify_payout_name_match: {
+        Args: { _destination_name: string; _user_id: string }
         Returns: Json
       }
     }
