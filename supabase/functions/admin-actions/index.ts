@@ -54,13 +54,13 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Check if user is admin using has_role RPC
-    const { data: isAdmin } = await supabaseAdmin.rpc('has_role', {
+    // FIX 6: Strict role check - must be exactly true
+    const { data: isAdmin, error: roleError } = await supabaseAdmin.rpc('has_role', {
       _user_id: userId,
       _role: 'admin',
     })
 
-    if (!isAdmin) {
+    if (roleError || isAdmin !== true) {
       return new Response(
         JSON.stringify({ error: 'Forbidden: Admin role required' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -91,10 +91,15 @@ Deno.serve(async (req) => {
         )
       }
 
-      // FIX 3: Use client-provided idempotency_key or generate deterministic fallback
-      const effectiveIdempotencyKey = idempotency_key ?? `${audit_action}:${target_type}:${target_id}:${requestId}`
+      // FIX 1: Require idempotency_key from client for audit_log action
+      if (!idempotency_key) {
+        return new Response(
+          JSON.stringify({ error: 'idempotency_key is required for audit_log action' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
 
-      const { error: insertError } = await supabaseAdmin.from('audit_logs').insert({
+      const auditRow = {
         user_id: userId,
         account_id: account_id || null,
         action: audit_action,
@@ -106,20 +111,17 @@ Deno.serve(async (req) => {
           ...details,
         },
         request_id: requestId,
-        idempotency_key: effectiveIdempotencyKey,
+        idempotency_key,
         ip_address: req.headers.get('x-forwarded-for')?.split(',')[0] || null,
         user_agent: req.headers.get('user-agent') || null,
-      })
+      }
+
+      // FIX 4: Use upsert with ignoreDuplicates instead of brittle error code check
+      const { error: insertError } = await supabaseAdmin
+        .from('audit_logs')
+        .upsert(auditRow, { onConflict: 'idempotency_key', ignoreDuplicates: true })
 
       if (insertError) {
-        // Check if it's a duplicate (unique constraint violation on idempotency_key)
-        if (insertError.code === '23505' && insertError.message?.includes('idempotency_key')) {
-          // Treat duplicate as success (idempotent)
-          return new Response(
-            JSON.stringify({ success: true, request_id: requestId, deduplicated: true }),
-            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
         console.error('Audit log insert error:', insertError)
         return new Response(
           JSON.stringify({ error: 'audit_failed', message: insertError.message }),
@@ -139,11 +141,12 @@ Deno.serve(async (req) => {
       // Get current value first for idempotent audit logging
       const { data: currentSetting } = await supabaseAdmin
         .from('system_settings')
-        .select('value')
+        .select('value, id')
         .eq('key', 'global_intake_active')
         .single()
 
       const previousValue = currentSetting?.value
+      const settingId = currentSetting?.id
 
       // Update system setting
       const { error: updateError } = await supabaseAdmin
@@ -159,23 +162,27 @@ Deno.serve(async (req) => {
         throw new Error(`Failed to update setting: ${updateError.message}`)
       }
 
-      // FIX 4: Best-effort audit log - don't fail the action if audit fails
-      // Use idempotency_key to prevent duplicates on retry
-      const auditIdempotencyKey = body.idempotency_key ?? `toggle_intake:${newValue}:${requestId}`
+      // FIX 3: Deterministic idempotency key from stable inputs
+      // If client provides key, use it; otherwise derive from (action, newValue, previousValue, settingId)
+      const auditIdempotencyKey = body.idempotency_key 
+        ?? `toggle_intake:${newValue}:${String(previousValue)}:${settingId ?? 'unknown'}`
       
+      // Best-effort audit log - don't fail the action if audit fails
       try {
-        await supabaseAdmin.from('audit_logs').insert({
-          user_id: userId,
-          action: newValue ? 'intake_resumed' : 'intake_paused',
-          details: { 
-            previous_value: previousValue,
-            new_value: newValue,
-            setting_key: 'global_intake_active'
-          },
-          reason: `Global intake ${newValue ? 'resumed' : 'paused'} by admin`,
-          request_id: requestId,
-          idempotency_key: auditIdempotencyKey,
-        })
+        await supabaseAdmin
+          .from('audit_logs')
+          .upsert({
+            user_id: userId,
+            action: newValue ? 'intake_resumed' : 'intake_paused',
+            details: { 
+              previous_value: previousValue,
+              new_value: newValue,
+              setting_key: 'global_intake_active'
+            },
+            reason: `Global intake ${newValue ? 'resumed' : 'paused'} by admin`,
+            request_id: requestId,
+            idempotency_key: auditIdempotencyKey,
+          }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
       } catch (auditErr) {
         // Log but don't fail - the action succeeded
         console.error('Failed to create audit log (non-blocking):', auditErr)
