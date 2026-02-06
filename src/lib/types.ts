@@ -216,6 +216,8 @@ export interface PayoutEligibility {
   passed_at?: string;
   has_prior_payout?: boolean;
   hint?: string;
+  // Reason code for programmatic UI/analytics
+  reason_code?: string;
   // Profit buffer fields
   profit_buffer_required?: number | null;
   profit_buffer_remaining?: number;
