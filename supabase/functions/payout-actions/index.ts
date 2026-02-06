@@ -822,15 +822,16 @@ Deno.serve(async (req) => {
     const rawEventType = eventTypes[body.action]
     const eventTypeNorm = normalizeEventType(rawEventType)
     
-    // Drift guard: warn if normalization changed the value (enum mismatch risk)
-    // Format: machine-grepable, includes all relevant context
-    if (rawEventType !== eventTypeNorm) {
-      console.warn(`DRIFT_EVENT_TYPE action=${body.action} raw=${rawEventType} norm=${eventTypeNorm} request_id=${requestId}`)
-    }
-    
     const amountCents = amountToCents(effectiveAmount) // effectiveAmount comes from DB on mark_paid
     const eventKeyInput = `acctevt:${eventTypeNorm}:${payout.account_id}:${body.payout_id}:${amountCents}`
     const eventIdempotencyKey = `acctevt.${eventTypeNorm}:` + await generateDeterministicKey(eventKeyInput)
+    
+    // Drift guard: warn if normalization changed the value (enum mismatch risk)
+    // Format: machine-grepable, includes all relevant context for correlation
+    // Only logs if there's actual drift
+    if (rawEventType !== eventTypeNorm) {
+      console.warn(`DRIFT_EVENT_TYPE action=${body.action} raw=${rawEventType} norm=${eventTypeNorm} event_type=${eventTypeNorm} audit_key=${effectiveIdempotencyKey} event_key=${eventIdempotencyKey} request_id=${requestId}`)
+    }
     
     const eventResult = await insertAccountEvent(supabaseAdmin, {
       account_id: payout.account_id,

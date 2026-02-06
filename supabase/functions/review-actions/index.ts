@@ -307,14 +307,15 @@ Deno.serve(async (req) => {
         const rawEventType = body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed'
         const eventTypeNorm = normalizeEventType(rawEventType)
         
-        // Drift guard: warn if normalization changed the value (enum mismatch risk)
-        // Format: machine-grepable, includes all relevant context
-        if (rawEventType !== eventTypeNorm) {
-          console.warn(`DRIFT_EVENT_TYPE action=${body.action} raw=${rawEventType} norm=${eventTypeNorm} request_id=${requestId}`)
-        }
-        
         const eventKeyInput = `acctevt:${eventTypeNorm}:${body.account_id}:${body.action}:${newStatus}`
         const eventIdempotencyKey = `acctevt.${eventTypeNorm}:` + await generateDeterministicKey(eventKeyInput)
+        
+        // Drift guard: warn if normalization changed the value (enum mismatch risk)
+        // Format: machine-grepable, includes all relevant context for correlation
+        // Only logs if there's actual drift
+        if (rawEventType !== eventTypeNorm) {
+          console.warn(`DRIFT_EVENT_TYPE action=${body.action} raw=${rawEventType} norm=${eventTypeNorm} event_type=${eventTypeNorm} audit_key=${effectiveIdempotencyKey} event_key=${eventIdempotencyKey} request_id=${requestId}`)
+        }
         
         const eventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
