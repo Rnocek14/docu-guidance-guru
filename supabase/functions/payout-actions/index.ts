@@ -823,8 +823,9 @@ Deno.serve(async (req) => {
     const eventTypeNorm = normalizeEventType(rawEventType)
     
     // Drift guard: warn if normalization changed the value (enum mismatch risk)
+    // Format: machine-grepable, includes all relevant context
     if (rawEventType !== eventTypeNorm) {
-      console.warn('DRIFT: event_type normalization changed value', { rawEventType, eventTypeNorm, action: body.action })
+      console.warn(`DRIFT_EVENT_TYPE action=${body.action} raw=${rawEventType} norm=${eventTypeNorm} request_id=${requestId}`)
     }
     
     const amountCents = amountToCents(effectiveAmount) // effectiveAmount comes from DB on mark_paid
