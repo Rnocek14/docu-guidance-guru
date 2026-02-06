@@ -1,218 +1,129 @@
 
 
-# Trader Dashboard Clarity Components
+# Monte Carlo Sim: Payout Velocity Gates
 
-## Overview
+## Goal
+Add 3 new simulation knobs to the Monte Carlo engine that model payout velocity controls used by top firms (Tradeify, Alpha Futures, Topstep). Re-run projections to measure which gate combo moves Month 10-12 from negative/breakeven to positive -- before hardcoding anything into production RPCs.
 
-Add three small, high-leverage UI elements to the Trader Dashboard to eliminate trader confusion about their account phase, first payout milestone, and lifetime headroom. This is NOT a redesign - it's targeted transparency work.
+## Target metric
+Month 10-12 mean profit of +$2,500/month (up from ~$0 / slightly negative today).
 
-## The Problem
+---
 
-The backend is mathematically sound (KYC, velocity limits, lifetime caps, race-condition-safe RPCs), but traders don't experience backend correctness. They experience:
-- "Why can't I request a payout?"
-- "What's this $300 limit?"
-- "Is this legit or am I getting scammed?"
+## New Knobs (added to `SimulationKnobs`)
 
-The biggest risk is user confusion, not system abuse.
+| Knob | Type | Default | Description |
+|------|------|---------|-------------|
+| `minWinningDaysPerPayout` | `number` | `0` (disabled) | Minimum winning trading days required since last payout before next payout is allowed. Resets after each payout. Mirrors Tradeify/Topstep "5 winning days" rule. |
+| `requireProfitSinceLastPayout` | `boolean` | `false` | If true, account must be net profitable since last payout to request another. Prevents "drip withdraw then die" loops. |
+| `payoutCadenceDays` | `number` | `0` (disabled) | Minimum calendar days between payouts (e.g., 14 = biweekly windows). Complements winning-days gate with a time floor. |
 
-## The Solution: 3 Targeted Components
+---
 
-### 1. Phase Indicator Banner
+## How These Gates Work in the Simulation
 
-A prominent banner at the top of the dashboard showing:
+The payout request loop (lines 528-614 of `monte-carlo.ts`) currently checks:
+1. Is account active + eligible? 
+2. Random payout request probability
+3. Lifetime cap headroom
+4. Generate amount, apply split, apply caps
 
-```
-Challenge Phase         ->  "Keep trading to hit your profit target"
-  OR
-Performance Account     ->  "You're payout-eligible!"
-```
+**New logic inserted between steps 2 and 3:**
 
-**Logic:**
-- `status === 'active'` = Challenge Phase (evaluation)
-- `status === 'passed'` or any `payout_*` status = Performance Account (PA)
-- Show different icons and colors for each phase
-
-**Placement:** Top of TraderDashboard, immediately after the welcome section.
-
-### 2. First Payout Milestone Card
-
-A small card (only visible in PA phase) showing:
-
-```
-First Payout Milestone: $300
-(Higher payouts unlock after your first withdrawal)
-```
-
-**Data source:** `cohort.first_payout_cap_amount` (already in the accounts query)
-
-**Key framing:**
-- Call it "Milestone" not "Cap"
-- Explain that subsequent payouts are not limited to $300
-- Only show for PA-phase accounts
-
-### 3. Lifetime Headroom Display
-
-A read-only display showing:
-
-```
-Lifetime Payout Remaining: $X,XXX
-```
-
-**Data source:** Call `calculate_payout_eligibility` RPC which returns:
-- `lifetime_cap_amount`
-- `lifetime_paid_total`
-- `lifetime_headroom`
-
-**Framing:**
-- Show this as a simple progress bar (paid vs remaining)
-- Only visible for PA-phase accounts with lifetime caps configured
-- If uncapped cohort, hide this entirely
-
-## Technical Implementation
-
-### New Component: `AccountPhaseIndicator.tsx`
-
-Location: `src/components/trader/AccountPhaseIndicator.tsx`
+For each eligible account requesting a payout:
 
 ```text
-+------------------------------------------------------+
-| [Icon] CHALLENGE PHASE                               |
-| Hit your 10% profit target to unlock your            |
-| Performance Account                                  |
-+------------------------------------------------------+
+if minWinningDaysPerPayout > 0:
+  simulate winning days accumulation since last payout
+  (use a simple probability model: each trading day has ~55% chance of being a "winning day")
+  if accumulated winning days < minWinningDaysPerPayout:
+    skip this payout request (account must keep trading)
 
-OR
+if requireProfitSinceLastPayout AND account.payoutCount > 0:
+  simulate whether account is profitable since last payout
+  (use a ~60% probability -- most active traders are profitable in any given period)
+  if not profitable: skip
 
-+------------------------------------------------------+
-| [Checkmark] PERFORMANCE ACCOUNT                      |
-| You've passed! Request payouts from your profits     |
-+------------------------------------------------------+
+if payoutCadenceDays > 0 AND account.payoutCount > 0:
+  calculate months since last payout using daysSinceLastPayout counter
+  if daysSinceLastPayout < payoutCadenceDays: skip
 ```
 
-Props:
-- `status: AccountStatus`
-- `profitTargetPercent: number`
+The winning days gate is the most impactful because it directly reduces `payoutsPerPaidAccountPerMonth` for repeat withdrawers without blocking first payouts.
 
-### New Component: `PayoutMilestoneCard.tsx`
+---
 
-Location: `src/components/trader/PayoutMilestoneCard.tsx`
+## AccountState Changes
+
+Add to `AccountState` interface:
+- `daysSinceLastPayout: number` -- incremented each month by 30, reset to 0 on payout
+- `winningDaysSinceLastPayout: number` -- accumulated each month, reset to 0 on payout
+
+---
+
+## New Scenario Presets
+
+| Preset | Knobs | Purpose |
+|--------|-------|---------|
+| `withVelocityGate5d` | `minWinningDaysPerPayout: 5` + 7x cap | Topstep-style: 5 winning days per payout |
+| `withVelocityGate5d_profit` | above + `requireProfitSinceLastPayout: true` | Combined gate |
+| `withVelocityGate5d_biweekly` | above + `payoutCadenceDays: 14` | Full velocity control |
+| `withVelocityGate10d` | `minWinningDaysPerPayout: 10` + 7x cap | Stricter gate for comparison |
+
+---
+
+## New Test: Velocity Gate Impact Analysis
+
+A new test file `src/lib/velocity-gate-analysis.test.ts` that:
+
+1. Runs baseline (current model with 7x cap, no velocity gates)
+2. Runs each velocity gate preset
+3. Compares Month 10-12 mean, P99 drawdown, loss probability, payout/revenue ratio
+4. Outputs a formatted comparison table
+5. Asserts that velocity gates improve Month 10-12 economics
+
+---
+
+## Mechanical Invariant Tests (added to `monte-carlo.test.ts`)
+
+- Velocity gates reduce avg payouts per account per month (monotonicity)
+- Stricter gates (10d) reduce payouts more than looser gates (5d)
+- Velocity gates don't affect Month 1-2 economics significantly (they target mature cohort)
+- All existing tests continue to pass (gates default to disabled)
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `src/lib/monte-carlo.ts` | Add 3 knobs to `SimulationKnobs`, add fields to `AccountState`, add gate logic in `simulateMonth` payout loop, add new scenario presets |
+| `src/lib/velocity-gate-analysis.test.ts` | New test file: runs gate sweep, outputs comparison report |
+| `src/lib/monte-carlo.test.ts` | Add mechanical invariant tests for velocity gates |
+
+---
+
+## What This Does NOT Change
+
+- No database schema changes
+- No RPC changes
+- No UI changes
+- No edge function changes
+- All existing tests pass unchanged (gates default to 0/false)
+
+## Decision Framework (Output)
+
+After running the tests, the comparison table will show for each gate configuration:
 
 ```text
-+--------------------------------------+
-| FIRST PAYOUT MILESTONE               |
-| $300                                 |
-| Subsequent payouts are uncapped      |
-| once consistency is demonstrated.    |
-+--------------------------------------+
+Gate Config         | M10-12 Mean | P99 DD  | Loss% | Payout/Rev
+-----------------------------------------------------------------
+Baseline (no gate)  | -$200       | $11.5k  | 48%   | 0.82
+5 winning days      | +$???       | $???    | ???%  | ???
+5d + profit-since   | +$???       | $???    | ???%  | ???
+5d + profit + 14d   | +$???       | $???    | ???%  | ???
+10 winning days     | +$???       | $???    | ???%  | ???
 ```
 
-Props:
-- `firstPayoutCapAmount: number | null`
-- `isFirstPayoutInCycle: boolean`
-
-### New Component: `LifetimeHeadroomCard.tsx`
-
-Location: `src/components/trader/LifetimeHeadroomCard.tsx`
-
-```text
-+--------------------------------------+
-| LIFETIME PAYOUT HEADROOM             |
-| [===========================----]    |
-| $650 remaining of $700 total         |
-+--------------------------------------+
-```
-
-Props:
-- `lifetimeCapAmount: number | null`
-- `lifetimePaidTotal: number`
-- `lifetimeHeadroom: number | null`
-
-### Modified: `TraderDashboard.tsx`
-
-Changes:
-1. Add query for payout eligibility (for PA-phase accounts only)
-2. Insert `AccountPhaseIndicator` after welcome section
-3. Add new section with `PayoutMilestoneCard` and `LifetimeHeadroomCard` (PA-phase only)
-
-### Data Flow
-
-```text
-TraderDashboard
-  |
-  +-- accounts query (existing)
-  |     |-- status
-  |     |-- cohort.first_payout_cap_amount
-  |     |-- cohort.entry_fee
-  |     |-- cohort.lifetime_cap_multiple
-  |
-  +-- eligibility query (new, only for PA-phase)
-        |-- is_first_payout_in_cycle
-        |-- lifetime_headroom
-        |-- lifetime_paid_total
-        |-- lifetime_cap_amount
-```
-
-## File Changes Summary
-
-| File | Action | Description |
-|------|--------|-------------|
-| `src/components/trader/AccountPhaseIndicator.tsx` | Create | Phase banner (Challenge vs PA) |
-| `src/components/trader/PayoutMilestoneCard.tsx` | Create | First payout milestone display |
-| `src/components/trader/LifetimeHeadroomCard.tsx` | Create | Lifetime headroom progress |
-| `src/pages/trader/TraderDashboard.tsx` | Modify | Integrate all three components |
-| `src/lib/types.ts` | Modify | Add `PayoutEligibility` interface |
-
-## Copy Guidelines
-
-| Element | Avoid | Use |
-|---------|-------|-----|
-| $300 limit | "First payout cap" | "First Payout Milestone" |
-| Phase name | "Evaluation" | "Challenge Phase" |
-| Funded phase | "Funded" | "Performance Account (PA)" |
-| Lifetime limit | "Lifetime cap" | "Lifetime Payout Headroom" |
-
-## P0 Release Blockers
-
-### Checkout Copy Contract (MUST ship with any purchase flow)
-
-When a pricing/checkout page is built, the following disclaimer **must** appear directly above the final Pay/Submit button. This is a **release blocker** — no purchase flow ships without it.
-
-**Required line (above Pay button):**
-> You are purchasing access to a simulated trading evaluation. No real capital is traded or allocated.
-
-**Recommended second line:**
-> Payouts are performance-based rewards subject to eligibility rules and caps.
-
-**Rationale:** This single disclosure eliminates ~70% of "I thought this was real money" chargebacks and satisfies processor risk reviews. Without it, the platform is exposed to dispute losses and potential processor termination.
-
-**Red-flag phrases — never use in checkout or marketing:**
-- ❌ "funded account" / "funding"
-- ❌ "profit split" / "keep X%"
-- ❌ "withdraw profits"
-- ❌ "your capital" / "your funds"
-- ❌ "investment" / "returns" (without "simulated")
-
-### Payment Rail Design (required before going live with payouts)
-
-Outgoing payout confirmation must be webhook-driven, not trust-based:
-- Only a webhook handler (service role) can set `paid_confirmed`
-- Admin UI can only advance to `payment_initiated`
-- Required states: `approved → payment_initiated → paid_confirmed / failed`
-
-## Out of Scope (Postpone)
-
-- Tier ladder comparison UI
-- PA rule deep dives
-- AI-driven personalization
-- Advanced payout analytics
-- Challenge → PA transition celebration modal
-
-## Verification Steps
-
-After implementation:
-1. View dashboard with `active` status account - should show "Challenge Phase"
-2. View dashboard with `passed` status account - should show "Performance Account"
-3. Confirm first payout milestone shows cohort's `first_payout_cap_amount`
-4. Confirm lifetime headroom shows correct values from eligibility RPC
-5. Confirm components don't appear for uncapped cohorts
+The results tell you exactly which policy to implement in production RPCs.
 
