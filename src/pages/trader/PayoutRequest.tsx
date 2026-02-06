@@ -131,7 +131,7 @@ export default function PayoutRequest() {
   const isWindowOpen = eligibility?.payout_window_opened === true;
   const canRequestPayout = eligibility?.eligible === true && isWindowOpen;
   const reasonCode = eligibility?.reason_code ?? 'UNKNOWN';
-  const isDedicatedGate = reasonCode === 'PROFIT_BUFFER' || reasonCode === 'NO_PROFIT' || reasonCode === 'MIN_TRADING_DAYS';
+  const isDedicatedGate = reasonCode === 'PROFIT_BUFFER' || reasonCode === 'NO_PROFIT' || reasonCode === 'MIN_WINNING_DAYS';
 
   if (isLoading) {
     return (
@@ -202,14 +202,14 @@ export default function PayoutRequest() {
           </Alert>
         )}
 
-        {/* Winning Trading Days Card — show when has prior payout and required_trading_days > 0 */}
-        {eligibility && isWindowOpen && eligibility.has_prior_payout && (eligibility.required_trading_days ?? 0) > 0 && (
+        {/* Winning Trading Days Card — show when has prior payout and required_winning_days > 0 */}
+        {eligibility && isWindowOpen && eligibility.has_prior_payout && (eligibility.required_winning_days ?? 0) > 0 && (
           <PayoutWinningDaysCard
-            tradingDaysSincePayout={eligibility.trading_days_since_payout ?? 0}
-            requiredTradingDays={eligibility.required_trading_days!}
+            tradingDaysSincePayout={eligibility.winning_days_since_payout ?? 0}
+            requiredTradingDays={eligibility.required_winning_days!}
             winningDaysRemaining={eligibility.winning_days_remaining ?? 0}
             progressPct={eligibility.winning_days_progress_pct ?? 100}
-            isMet={reasonCode !== 'MIN_TRADING_DAYS'}
+            isMet={reasonCode !== 'MIN_WINNING_DAYS'}
           />
         )}
 
