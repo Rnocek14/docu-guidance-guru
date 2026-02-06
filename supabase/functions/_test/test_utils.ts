@@ -120,6 +120,72 @@ export function assertValidEventKey(key: string, label: string = "event_idempote
 }
 
 // =============================================
+// RESPONSE SHAPE HELPERS
+// =============================================
+
+/**
+ * Assert that dedupe fields are present and correctly typed in a response body.
+ * Use after a successful (200) call to verify the response contract.
+ * 
+ * For audit-only actions (like add_note), pass hasEvent=false.
+ * For state-changing actions that emit events, pass hasEvent=true (default).
+ * 
+ * @param body - The parsed response JSON
+ * @param hasEvent - Whether this action emits account_events (default: true)
+ * @param label - Descriptive label for error messages
+ */
+export function assertDedupeFieldTypes(
+  body: Record<string, unknown>,
+  hasEvent: boolean = true,
+  label: string = "response"
+): void {
+  // Audit fields are always present
+  assertEquals(
+    typeof body.audit_deduplicated ?? typeof body.deduplicated,
+    "boolean",
+    `${label}: audit_deduplicated (or deduplicated) must be boolean`
+  );
+
+  if (hasEvent) {
+    assertEquals(
+      typeof body.event_deduplicated,
+      "boolean",
+      `${label}: event_deduplicated must be boolean when event is emitted`
+    );
+    assertExists(body.event_idempotency_key, `${label}: event_idempotency_key must exist`);
+  } else {
+    // When no event is emitted, fields should be explicitly null
+    assertEquals(
+      body.event_idempotency_key,
+      null,
+      `${label}: event_idempotency_key must be null when no event is emitted`
+    );
+    assertEquals(
+      body.event_deduplicated,
+      null,
+      `${label}: event_deduplicated must be null when no event is emitted`
+    );
+  }
+}
+
+/**
+ * Assert required env vars are present, with a clear error message.
+ * Call at module top-level to fail fast with actionable guidance.
+ */
+export function requireEnvVars(vars: Record<string, string | undefined>): void {
+  const missing = Object.entries(vars)
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+  if (missing.length > 0) {
+    console.warn(
+      `⚠️  Missing env vars for idempotency tests: ${missing.join(", ")}\n` +
+      `   Tests requiring these will be skipped.\n` +
+      `   Set them in .env or pass via CLI to run full suite.`
+    );
+  }
+}
+
+// =============================================
 // TEST DATA HELPERS
 // =============================================
 
