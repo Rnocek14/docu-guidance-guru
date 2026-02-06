@@ -70,7 +70,18 @@ async function insertAuditLog(supabase: any, data: any): Promise<{ inserted: boo
 
 // Helper: Normalize payment reference for idempotency
 function normalizePaymentRef(s: string): string {
-  return s.trim().replace(/\s+/g, ' ').toUpperCase()
+  return s.trim().replace(/\s+/g, '_').toUpperCase()
+}
+
+// Helper: Normalize amount to cents integer for consistent hashing
+// Avoids 100 vs 100.0 vs 100.00 inconsistencies
+function amountToCents(amount: number): number {
+  return Math.round(amount * 100)
+}
+
+// Helper: Normalize event_type to safe charset (snake_case, no spaces)
+function normalizeEventType(eventType: string): string {
+  return eventType.toLowerCase().replace(/[^a-z0-9_]/g, '_')
 }
 
 // deno-lint-ignore no-explicit-any
@@ -271,15 +282,17 @@ Deno.serve(async (req) => {
       effectiveIdempotencyKey = body.idempotency_key
     } else {
       // Generate deterministic key from stable action-specific inputs
+      // Use cents for amount to avoid formatting inconsistencies (100 vs 100.0 vs 100.00)
+      const amountCents = amountToCents(submittedAmount)
       let keyInput: string
       switch (body.action) {
         case 'mark_paid': {
           const normalizedRef = normalizePaymentRef(body.payment_reference ?? '')
-          keyInput = `mark_paid:${body.payout_id}:${normalizedRef}:${submittedAmount}`
+          keyInput = `mark_paid:${body.payout_id}:${normalizedRef}:${amountCents}`
           break
         }
         case 'approve':
-          keyInput = `approve:${body.payout_id}:${submittedAmount}`
+          keyInput = `approve:${body.payout_id}:${amountCents}`
           break
         case 'reject':
           keyInput = `reject:${body.payout_id}:${body.reason ?? ''}`
@@ -290,7 +303,8 @@ Deno.serve(async (req) => {
         default:
           keyInput = `payout:${body.payout_id}:${body.action}`
       }
-      effectiveIdempotencyKey = await generateDeterministicKey(keyInput)
+      // Prefix with 'audit' namespace for explicit table targeting
+      effectiveIdempotencyKey = 'audit.' + await generateDeterministicKey(keyInput)
     }
     
     // Use the same key for both audit and event deduplication
@@ -777,9 +791,11 @@ Deno.serve(async (req) => {
       mark_paid: `Your payout of $${formattedAmount} has been sent.${refText}`,
     }
 
-    // Derive event idempotency key including event_type to prevent cross-event collisions
-    const eventType = eventTypes[body.action]
-    const eventIdempotencyKey = `evt.${eventType}:${effectiveIdempotencyKey}`
+    // Derive event idempotency key with explicit table namespace + normalized event_type
+    const eventType = normalizeEventType(eventTypes[body.action])
+    // Strip 'audit.' prefix from effectiveIdempotencyKey to get base hash for event key
+    const baseHash = effectiveIdempotencyKey.replace(/^audit\./, '')
+    const eventIdempotencyKey = `acctevt.${eventType}:${baseHash}`
     
     const eventResult = await insertAccountEvent(supabaseAdmin, {
       account_id: payout.account_id,
