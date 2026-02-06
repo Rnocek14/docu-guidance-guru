@@ -817,8 +817,8 @@ Deno.serve(async (req) => {
     }
 
     // Generate event idempotency key with explicit namespace IN the hash input
-    // This ensures collision protection even if someone strips prefixes
-    // CRITICAL: Use DB-sourced effectiveAmount (not client amount) for mark_paid idempotency
+    // CRITICAL: Use SAME normalized value for hash AND event_type column
+    // Store raw in event_data if needed for debugging
     const rawEventType = eventTypes[body.action]
     const eventTypeNorm = normalizeEventType(rawEventType)
     const amountCents = amountToCents(effectiveAmount) // effectiveAmount comes from DB on mark_paid
@@ -827,7 +827,7 @@ Deno.serve(async (req) => {
     
     const eventResult = await insertAccountEvent(supabaseAdmin, {
       account_id: payout.account_id,
-      event_type: rawEventType, // DB enum expects exact value (already snake_case)
+      event_type: eventTypeNorm as typeof rawEventType, // Use normalized for consistency
       request_id: requestId,
       idempotency_key: eventIdempotencyKey,
       event_data: {
@@ -835,17 +835,17 @@ Deno.serve(async (req) => {
         previous_status: previousStatus,
         new_status: effectiveNewStatus,
         amount: effectiveAmount,
-        amount_cents: amountCents, // For audit trail
+        amount_cents: amountCents,
         explanation: eventExplanations[body.action],
         payment_reference: effectivePaymentReference,
         paid_at: effectivePaidAt,
         actor_role: 'admin',
-        event_type_normalized: eventTypeNorm, // For audit trail
+        raw_event_type: rawEventType, // Original for debugging
       },
     })
     
-    // Log dedupe result for ops visibility
-    console.log(`payout event dedupe: action=${body.action}, inserted=${eventResult.inserted}, key=${eventIdempotencyKey}`)
+    // Log dedupe result for ops visibility (both keys)
+    console.log(`payout dedupe: audit_inserted=${auditResult.inserted} audit_key=${effectiveIdempotencyKey}, event_inserted=${eventResult.inserted} event_key=${eventIdempotencyKey}`)
 
     // Determine if this was a duplicate request
     const wasDuplicate = (!auditResult.inserted && !eventResult.inserted) || wasIdempotentRpc
@@ -859,8 +859,11 @@ Deno.serve(async (req) => {
         new_status: effectiveNewStatus,
         action: body.action,
         request_id: requestId,
-        idempotency_key: effectiveIdempotencyKey, // Return effective key for client logging
+        audit_idempotency_key: effectiveIdempotencyKey,
+        event_idempotency_key: eventIdempotencyKey,
         deduplicated: wasDuplicate, // Clear signal: was this a retry that got deduplicated?
+        audit_deduplicated: !auditResult.inserted,
+        event_deduplicated: !eventResult.inserted,
         // mark_paid specific fields
         ...(body.action === 'mark_paid' ? {
           paid_at: effectivePaidAt,
