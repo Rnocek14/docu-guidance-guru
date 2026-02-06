@@ -42,14 +42,24 @@ const STATE_TRANSITIONS: Record<string, { from: string[]; to: string }> = {
   },
 }
 
-// Helper: Idempotent insert for audit_logs (ignores duplicates on account_id + request_id)
+// Helper: Generate deterministic idempotency key via SHA-256
+async function generateDeterministicKey(input: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(input)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+  return hashHex.slice(0, 48)
+}
+
+// Helper: Idempotent insert for audit_logs (uses idempotency_key for deduplication)
 // Returns { inserted: boolean } to track if this was a duplicate
 // deno-lint-ignore no-explicit-any
 async function insertAuditLog(supabase: any, data: any): Promise<{ inserted: boolean }> {
   const { data: result, error } = await supabase
     .from('audit_logs')
     .upsert(data, { 
-      onConflict: 'account_id,request_id',
+      onConflict: 'idempotency_key',
       ignoreDuplicates: true 
     })
     .select('id')
@@ -97,16 +107,16 @@ Deno.serve(async (req) => {
       )
     }
 
-    const token = authHeader.replace('Bearer ', '')
+    const jwt = authHeader.replace('Bearer ', '')
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 
-    // Create service role client for privileged operations
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    // FIX A: Use anon key + JWT for proper token validation (canonical pattern)
+    const supabaseUser = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+    })
 
-    // Validate token and get user
-    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token)
+    const { data: userData, error: userError } = await supabaseUser.auth.getUser()
     
     if (userError || !userData?.user) {
       return new Response(
@@ -117,23 +127,31 @@ Deno.serve(async (req) => {
 
     const userId = userData.user.id
 
-    // Check user roles
-    const { data: roleData } = await supabaseAdmin
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .in('role', ['risk_officer', 'admin'])
+    // Create service role client for privileged operations
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    )
 
-    if (!roleData || roleData.length === 0) {
+    // FIX B: Strict role check via has_any_role RPC
+    const { data: hasStaffRole, error: roleError } = await supabaseAdmin.rpc('has_any_role', {
+      _user_id: userId,
+      _roles: ['risk_officer', 'admin'],
+    })
+
+    if (roleError || hasStaffRole !== true) {
       return new Response(
         JSON.stringify({ error: 'Forbidden: Risk Officer or Admin role required' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    const userRoles = roleData.map(r => r.role)
-    const isAdmin = userRoles.includes('admin')
-    const actorRole = isAdmin ? 'admin' : 'risk_officer'
+    // Check if user is admin specifically (for admin-only actions)
+    const { data: isAdmin } = await supabaseAdmin.rpc('has_role', {
+      _user_id: userId,
+      _role: 'admin',
+    })
+    const actorRole = isAdmin === true ? 'admin' : 'risk_officer'
 
     // Parse request body
     const body: ReviewActionRequest = await req.json()
@@ -145,8 +163,8 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Enforce admin-only actions
-    if (ADMIN_ONLY_ACTIONS.includes(body.action) && !isAdmin) {
+    // Enforce admin-only actions (use strict check)
+    if (ADMIN_ONLY_ACTIONS.includes(body.action) && isAdmin !== true) {
       return new Response(
         JSON.stringify({ error: `Forbidden: Only admins can perform ${body.action}` }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -183,9 +201,12 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Use client-provided idempotency key or generate one
-    // Client-provided keys enable true retry safety
+    // Generate deterministic idempotency key for audit deduplication
     const requestId = body.idempotency_key || crypto.randomUUID()
+    // Generate deterministic audit key based on action + account + status
+    const auditIdempotencyKey = body.idempotency_key 
+      ?? await generateDeterministicKey(`${body.action}:${body.account_id}:${account.status}:${requestId}`)
+    
     const previousStatus = account.status
     let wasDuplicate = false
     let result: Record<string, unknown> = { 
@@ -237,6 +258,7 @@ Deno.serve(async (req) => {
           account_id: body.account_id,
           action: auditAction,
           request_id: requestId,
+          idempotency_key: auditIdempotencyKey,
           reason: body.reason,
           details: {
             previous_status: previousStatus,
@@ -289,11 +311,14 @@ Deno.serve(async (req) => {
 
       case 'add_note': {
         // Notes are audit-only, no state change (idempotent)
+        // Generate unique key for notes to allow multiple notes
+        const noteIdempotencyKey = await generateDeterministicKey(`add_note:${body.account_id}:${requestId}`)
         const noteResult = await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
           action: 'status_changed',
           request_id: requestId,
+          idempotency_key: noteIdempotencyKey,
           reason: body.reason || 'Review note added',
           details: {
             action_type: 'add_note',
@@ -330,11 +355,13 @@ Deno.serve(async (req) => {
         }
 
         // Audit the flag closure (idempotent)
+        const flagIdempotencyKey = await generateDeterministicKey(`close_flag:${body.flag_id}:${body.account_id}`)
         const flagAuditResult = await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
           action: 'flag_cleared',
           request_id: requestId,
+          idempotency_key: flagIdempotencyKey,
           reason: body.reason,
           details: {
             flag_id: body.flag_id,
