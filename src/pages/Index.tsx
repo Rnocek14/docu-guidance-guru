@@ -101,7 +101,8 @@ export default function Index() {
 
       {/* Footer */}
       <footer className="border-t py-8">
-        <div className="container mx-auto px-4 text-center text-muted-foreground">
+        <div className="container mx-auto px-4 text-center text-muted-foreground space-y-2">
+          <p className="text-xs">All trading activity is simulated. Payouts are performance-based rewards, not profit withdrawals or investment returns.</p>
           <p>© 2026 RiskAnalytics. Detection, Not Domination.</p>
         </div>
       </footer>
