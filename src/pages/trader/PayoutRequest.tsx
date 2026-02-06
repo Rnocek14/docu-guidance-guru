@@ -129,6 +129,8 @@ export default function PayoutRequest() {
   // FIX #4: Stricter check - only true if explicitly true (not undefined)
   const isWindowOpen = eligibility?.payout_window_opened === true;
   const canRequestPayout = eligibility?.eligible === true && isWindowOpen;
+  const reasonCode = eligibility?.reason_code ?? 'UNKNOWN';
+  const isProfitGate = reasonCode === 'PROFIT_BUFFER' || reasonCode === 'NO_PROFIT';
 
   if (isLoading) {
     return (
@@ -188,8 +190,7 @@ export default function PayoutRequest() {
         )}
 
         {/* Eligibility Status (profit gates get dedicated card instead) */}
-        {eligibility && !eligibility.eligible && isWindowOpen &&
-          eligibility.reason_code !== 'PROFIT_BUFFER' && eligibility.reason_code !== 'NO_PROFIT' && (
+        {eligibility && !eligibility.eligible && isWindowOpen && !isProfitGate && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Not Eligible for Payout</AlertTitle>
@@ -207,6 +208,7 @@ export default function PayoutRequest() {
             realizedProfit={eligibility.realized_profit ?? 0}
             profitBufferRemaining={eligibility.profit_buffer_remaining ?? 0}
             profitBufferMet={eligibility.profit_buffer_met ?? true}
+            profitBufferProgressPct={eligibility.profit_buffer_progress_pct}
           />
         )}
 
