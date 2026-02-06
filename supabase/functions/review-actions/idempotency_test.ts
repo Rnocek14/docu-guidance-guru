@@ -8,7 +8,12 @@
  * 4. Idempotency keys match between retries
  * 5. Key charset and length constraints are met
  * 
- * Run with: deno test --allow-net --allow-env supabase/functions/review-actions/idempotency_test.ts
+ * Run with: deno test -A supabase/functions/review-actions/idempotency_test.ts
+ * 
+ * Required environment variables:
+ *   TEST_STAFF_TOKEN - JWT for a staff user (risk_officer or admin)
+ *   TEST_ACCOUNT_ID - Account ID in active state (for add_note tests)
+ *   TEST_ACCOUNT_ID_BREACHED - Account ID in breached state (for clear_breach tests)
  * 
  * NOTE: Tests that query account_events directly require service_role or a staff RPC.
  * The ignore:true tests are for manual verification with elevated privileges.
@@ -20,11 +25,13 @@ import { assertEquals, assertExists, assert } from "https://deno.land/std@0.224.
 const SUPABASE_URL = Deno.env.get("VITE_SUPABASE_URL")!;
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/review-actions`;
 
-// These tests require a staff user token and test data
+// These tests require a staff user token and state-specific account IDs
 const STAFF_TOKEN = Deno.env.get("TEST_STAFF_TOKEN");
 const TEST_ACCOUNT_ID = Deno.env.get("TEST_ACCOUNT_ID");
+const TEST_ACCOUNT_ID_BREACHED = Deno.env.get("TEST_ACCOUNT_ID_BREACHED");
 
 const skipTests = !STAFF_TOKEN || !TEST_ACCOUNT_ID;
+const skipBreachTests = !STAFF_TOKEN || !TEST_ACCOUNT_ID_BREACHED;
 
 // Idempotency key format: namespace.hash or namespace.type:hash
 // Charset: alphanumeric, colon, underscore, hyphen, dot
@@ -63,14 +70,15 @@ Deno.test({
     const b1 = await r1.json();
     console.log("First add_note response:", b1);
 
-    assertEquals(r1.status, 200, "First call should succeed");
-    assertEquals(b1.success, true, "First call should succeed");
+    // First call MUST succeed - if not, test setup is wrong
+    assertEquals(r1.status, 200, `Expected 200 but got ${r1.status}: ${JSON.stringify(b1)}`);
+    assertEquals(b1.success, true, `First call should succeed: ${JSON.stringify(b1)}`);
     
     // Validate key format
     assertValidIdempotencyKey(b1.audit_idempotency_key, "audit_idempotency_key");
     
-    // First call should insert
-    assertEquals(b1.audit_deduplicated, false, "First call should insert audit");
+    // First call should NOT be deduplicated
+    assertEquals(b1.audit_deduplicated, false, "First call should insert audit (not deduped)");
 
     // Second call with identical content
     const r2 = await fetch(FUNCTION_URL, {
@@ -213,13 +221,13 @@ Deno.test({
 
 Deno.test({
   name: "review-actions: clear_breach is idempotent",
-  ignore: skipTests,
+  ignore: skipBreachTests,
   async fn() {
     const reason = `Clear breach test ${Date.now()}`;
     
     const payload = {
       action: "clear_breach",
-      account_id: TEST_ACCOUNT_ID,
+      account_id: TEST_ACCOUNT_ID_BREACHED,
       reason: reason,
     };
 
@@ -234,27 +242,30 @@ Deno.test({
     const b1 = await r1.json();
     console.log("First clear_breach response:", b1);
 
-    if (r1.status === 200 && b1.success) {
-      assertValidIdempotencyKey(b1.audit_idempotency_key, "audit_idempotency_key");
+    // First call MUST succeed - if not, test setup is wrong
+    assertEquals(r1.status, 200, `Expected 200 but got ${r1.status}: ${JSON.stringify(b1)}`);
+    assertEquals(b1.success, true, `First call should succeed: ${JSON.stringify(b1)}`);
 
-      // Second call
-      const r2 = await fetch(FUNCTION_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${STAFF_TOKEN}`,
-        },
-        body: JSON.stringify(payload),
-      });
-      const b2 = await r2.json();
-      console.log("Second clear_breach response:", b2);
+    assertValidIdempotencyKey(b1.audit_idempotency_key, "audit_idempotency_key");
+    
+    // First call should NOT be deduplicated
+    assertEquals(b1.audit_deduplicated, false, "First call should insert audit (not deduped)");
 
-      assertEquals(b2.audit_idempotency_key, b1.audit_idempotency_key, "Audit keys should match");
-      assertEquals(b2.audit_deduplicated, true, "Should be deduplicated on retry");
-    } else if (r1.status === 400) {
-      // Account not in breached state - that's fine
-      console.log("Account not in clearable state:", b1.error);
-    }
+    // Second call
+    const r2 = await fetch(FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${STAFF_TOKEN}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const b2 = await r2.json();
+    console.log("Second clear_breach response:", b2);
+
+    assertEquals(r2.status, 200, "Second call should succeed");
+    assertEquals(b2.audit_idempotency_key, b1.audit_idempotency_key, "Audit keys should match");
+    assertEquals(b2.audit_deduplicated, true, "Should be deduplicated on retry");
   },
 });
 
@@ -297,7 +308,7 @@ Deno.test({
 
 Deno.test({
   name: "review-actions: missing account_id returns 400",
-  ignore: skipTests,
+  ignore: !STAFF_TOKEN,
   async fn() {
     const res = await fetch(FUNCTION_URL, {
       method: "POST",
@@ -308,6 +319,29 @@ Deno.test({
       body: JSON.stringify({
         action: "add_note",
         // Missing account_id
+        reason: "test",
+      }),
+    });
+    
+    const body = await res.json();
+    assertEquals(res.status, 400);
+    assertExists(body.error);
+  },
+});
+
+Deno.test({
+  name: "review-actions: invalid action returns 400",
+  ignore: !STAFF_TOKEN,
+  async fn() {
+    const res = await fetch(FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${STAFF_TOKEN}`,
+      },
+      body: JSON.stringify({
+        action: "invalid_action",
+        account_id: "00000000-0000-0000-0000-000000000000",
         reason: "test",
       }),
     });
