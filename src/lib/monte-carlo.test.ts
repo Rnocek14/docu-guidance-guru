@@ -384,27 +384,36 @@ describe('Scenario Comparisons (Relative Behavior)', () => {
     expect(conservative.risk.probabilityOfLoss).toBeLessThanOrEqual(baseline.risk.probabilityOfLoss);
   }, 15000);
 
-  it('velocity gates reduce payouts vs no gates (profit-since gate)', () => {
+  it('profit gate reduces payouts vs no gates', () => {
     const noGates = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
-    const gated = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withVelocityGate5d_profit);
+    const gated = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withProfitGate);
     
-    // profit-since gate blocks ~40% of repeat payout attempts, so payouts/account must drop
+    // profit gate blocks accounts that haven't accumulated enough profit
     expect(gated.payoutDiagnostics.avgPayoutsPerAccount).toBeLessThan(
       noGates.payoutDiagnostics.avgPayoutsPerAccount
     );
   }, 15000);
 
-  it('velocity gates improve profit vs no gates', () => {
+  it('profit gate improves profit vs no gates', () => {
     const noGates = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
-    const gated = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withVelocityGate5d_profit);
+    const gated = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withProfitGate);
     
     expect(gated.profit.mean).toBeGreaterThan(noGates.profit.mean);
+  }, 15000);
+
+  it('verification cohort delays payout eligibility', () => {
+    const noVerification = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+    const withVerification = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withVerification1mo);
+    
+    // Verification reduces eligible cohort size (fewer accounts make it to funded)
+    expect(withVerification.cohortDiagnostics.avgEligibleCohortSize).toBeLessThan(
+      noVerification.cohortDiagnostics.avgEligibleCohortSize
+    );
   }, 15000);
 
   it('velocity gates default to disabled (existing tests unaffected)', () => {
     const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS);
     
-    // With defaults (all gates = 0/false), behavior should be unchanged
     expect(result.profit.mean).toBeDefined();
     expect(result.payoutDiagnostics.avgPayoutsPerAccount).toBeGreaterThan(0);
   });

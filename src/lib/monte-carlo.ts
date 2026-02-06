@@ -52,9 +52,13 @@ export interface SimulationKnobs {
   attackIntensity: number;              // 0 = none, 1 = baseline, 2+ = coordinated
   
   // Payout velocity gates (Tradeify/Topstep/Alpha Futures style)
-  minWinningDaysPerPayout: number;      // 0 = disabled. Min winning trading days since last payout before next allowed
-  requireProfitSinceLastPayout: boolean; // If true, must be net profitable since last payout to request another
-  payoutCadenceDays: number;            // 0 = disabled. Min calendar days between payouts (e.g., 14 = biweekly)
+  minWinningDaysPerPayout: number;      // 0 = disabled. Min winning trading days since last payout
+  minProfitSinceLastPayout: number;     // 0 = disabled. Min $ profit accumulated since last payout to request another
+  minMonthsBetweenPayouts: number;      // 0 = disabled. Min months between payouts (replaces cadenceDays)
+  
+  // Verification cohort (liability-maturity brake)
+  verificationMonths: number;           // 0 = disabled. Months in verification phase before payout eligibility
+  verificationFailRate: number;         // 0-1. Fraction that fail/churn during verification (monthly hazard)
 }
 
 export interface MonteCarloConfig {
@@ -231,8 +235,13 @@ export interface AccountState {
   completedByCapHit: boolean;  // TRUE only if completed due to hitting lifetime cap
   
   // Velocity gate tracking
-  daysSinceLastPayout: number;          // incremented by 30 each month, reset to 0 on payout
+  profitSinceLastPayout: number;        // simulated profit accumulated since last payout ($)
+  monthsSinceLastPayout: number;        // months since last payout, reset to 0 on payout
   winningDaysSinceLastPayout: number;   // accumulated each month, reset to 0 on payout
+  
+  // Verification phase
+  phase: 'verification' | 'funded';     // verification = can't request payouts yet
+  verificationStartMonth: number;       // when verification started
 }
 
 // Iteration-level account stats for aggregation
@@ -447,10 +456,13 @@ function simulateMonth(
   // Create new accounts with persistent IDs
   for (let i = 0; i < newPassedAccounts; i++) {
     const accountId = ctx.nextAccountId++;
+    const useVerification = knobs.verificationMonths > 0;
     ctx.accountStates.set(accountId, {
       id: accountId,
       createdMonth: monthIndex,
-      eligibleMonth: monthIndex + eligibilityLag,
+      eligibleMonth: useVerification 
+        ? monthIndex + eligibilityLag + knobs.verificationMonths  // verification delays eligibility
+        : monthIndex + eligibilityLag,
       lifetimePaidTotal: 0,
       attemptPaid: 0,
       payoutCount: 0,
@@ -458,8 +470,11 @@ function simulateMonth(
       isCompleted: false,
       isActive: true,
       completedByCapHit: false,
-      daysSinceLastPayout: 0,
+      profitSinceLastPayout: 0,
+      monthsSinceLastPayout: 0,
       winningDaysSinceLastPayout: 0,
+      phase: useVerification ? 'verification' : 'funded',
+      verificationStartMonth: monthIndex,
     });
     ctx.totalEverCreated++;
   }
@@ -509,9 +524,53 @@ function simulateMonth(
       state.payoutCount = 0;
       state.resetCount++;
       state.eligibleMonth = monthIndex + eligibilityLag; // Must wait again
-      state.daysSinceLastPayout = 0;
+      state.profitSinceLastPayout = 0;
+      state.monthsSinceLastPayout = 0;
       state.winningDaysSinceLastPayout = 0;
       // Account remains active, just restarted
+    }
+  });
+  
+  // =========================================================================
+  // VERIFICATION PHASE PROCESSING + PROFIT ACCUMULATION FOR ALL ACTIVE
+  // =========================================================================
+  let verificationFailures = 0;
+  ctx.accountStates.forEach(state => {
+    if (!state.isActive || state.isCompleted) return;
+    
+    // Verification phase: check if accounts graduate or fail
+    if (state.phase === 'verification' && knobs.verificationMonths > 0) {
+      const monthsInVerification = monthIndex - state.verificationStartMonth;
+      
+      // Monthly hazard of failing verification
+      if (knobs.verificationFailRate > 0 && random() < knobs.verificationFailRate) {
+        state.isActive = false;
+        verificationFailures++;
+        return;
+      }
+      
+      // Graduate to funded after verificationMonths
+      if (monthsInVerification >= knobs.verificationMonths) {
+        state.phase = 'funded';
+        // eligibleMonth was already set at creation to account for verification delay
+      }
+    }
+    
+    // Accumulate monthly simulated P&L for all active funded accounts
+    if (state.phase === 'funded') {
+      // Simulate monthly profit: mean ~$200/month with high variance
+      // This gives a realistic profit path for the profit-since-last-payout gate
+      const monthlyPnl = logNormal(random, 200, 180) * (random() < 0.65 ? 1 : -0.7);
+      state.profitSinceLastPayout += monthlyPnl;
+      state.monthsSinceLastPayout++;
+      
+      // Accumulate winning days (~22 trading days/month, ~55% win rate)
+      const tradingDaysThisMonth = 22;
+      let winningDays = 0;
+      for (let d = 0; d < tradingDaysThisMonth; d++) {
+        if (random() < 0.55) winningDays++;
+      }
+      state.winningDaysSinceLastPayout += winningDays;
     }
   });
   
@@ -530,59 +589,45 @@ function simulateMonth(
   let payoutApprovedCount = 0;
   let velocityGateBlocks = 0;
   
-  // All active, non-completed accounts that have reached eligibility can request payouts
+  // Only funded, active, non-completed accounts past eligibility can request payouts
   const eligibleAccounts: AccountState[] = [];
   ctx.accountStates.forEach(state => {
-    if (state.isActive && !state.isCompleted && monthIndex >= state.eligibleMonth) {
+    if (state.isActive && !state.isCompleted && state.phase === 'funded' && monthIndex >= state.eligibleMonth) {
       eligibleAccounts.push(state);
-      
-      // Accumulate velocity gate counters each month for eligible accounts
-      // ~22 trading days/month, ~55% chance each is a winning day
-      const tradingDaysThisMonth = 22;
-      const winProbPerDay = 0.55;
-      let winningDays = 0;
-      for (let d = 0; d < tradingDaysThisMonth; d++) {
-        if (random() < winProbPerDay) winningDays++;
-      }
-      state.winningDaysSinceLastPayout += winningDays;
-      state.daysSinceLastPayout += 30;
     }
   });
   
   // Each eligible account has payoutRequestRate chance of requesting this month
   for (const account of eligibleAccounts) {
-    // Probability of requesting payout this month
     if (random() > payoutRequestRate) {
-      continue; // Didn't request this month
+      continue;
     }
     
     // =====================================================================
-    // VELOCITY GATES: check before processing payout
-    // These gates throttle repeat withdrawals without blocking first payouts
+    // VELOCITY GATES: throttle repeat withdrawals (don't block first payouts)
     // =====================================================================
     
     // Gate 1: Minimum winning days since last payout
     if (knobs.minWinningDaysPerPayout > 0 && account.payoutCount > 0) {
       if (account.winningDaysSinceLastPayout < knobs.minWinningDaysPerPayout) {
         velocityGateBlocks++;
-        continue; // Must accumulate more winning days
+        continue;
       }
     }
     
-    // Gate 2: Must be profitable since last payout
-    if (knobs.requireProfitSinceLastPayout && account.payoutCount > 0) {
-      // ~60% probability of being net profitable in any given period
-      if (random() < 0.40) {
+    // Gate 2: Minimum profit since last payout (tracked, not random)
+    if (knobs.minProfitSinceLastPayout > 0 && account.payoutCount > 0) {
+      if (account.profitSinceLastPayout < knobs.minProfitSinceLastPayout) {
         velocityGateBlocks++;
-        continue; // Not profitable since last payout
+        continue;
       }
     }
     
-    // Gate 3: Minimum calendar days between payouts
-    if (knobs.payoutCadenceDays > 0 && account.payoutCount > 0) {
-      if (account.daysSinceLastPayout < knobs.payoutCadenceDays) {
+    // Gate 3: Minimum months between payouts
+    if (knobs.minMonthsBetweenPayouts > 0 && account.payoutCount > 0) {
+      if (account.monthsSinceLastPayout < knobs.minMonthsBetweenPayouts) {
         velocityGateBlocks++;
-        continue; // Too soon since last payout
+        continue;
       }
     }
     
@@ -668,7 +713,8 @@ function simulateMonth(
       account.payoutCount++;
       
       // Reset velocity gate counters after successful payout
-      account.daysSinceLastPayout = 0;
+      account.profitSinceLastPayout = 0;
+      account.monthsSinceLastPayout = 0;
       account.winningDaysSinceLastPayout = 0;
     }
   }
@@ -1111,8 +1157,10 @@ export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
     lifetimeCapPerUser: null,       // no lifetime cap by default
     attackIntensity: 0,             // no attack scenario
     minWinningDaysPerPayout: 0,     // disabled by default
-    requireProfitSinceLastPayout: false,
-    payoutCadenceDays: 0,           // disabled by default
+    minProfitSinceLastPayout: 0,    // disabled by default
+    minMonthsBetweenPayouts: 0,     // disabled by default
+    verificationMonths: 0,          // disabled by default (no verification phase)
+    verificationFailRate: 0,        // no verification failures
   },
 };
 
@@ -1206,37 +1254,58 @@ export const SCENARIO_PRESETS = {
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
       lifetimeCapPerUser: 149 * 7,
-      minWinningDaysPerPayout: 5,
+      minWinningDaysPerPayout: 15,  // ~12/month at 55% rate, so 15 = needs ~1.3 months
     },
   },
   
-  withVelocityGate5d_profit: {
+  withProfitGate: {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
       lifetimeCapPerUser: 149 * 7,
-      minWinningDaysPerPayout: 5,
-      requireProfitSinceLastPayout: true,
+      minProfitSinceLastPayout: 300,  // must accumulate $300 profit since last payout
     },
   },
   
-  withVelocityGate5d_biweekly: {
+  withProfitGate_2mo: {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
       lifetimeCapPerUser: 149 * 7,
-      minWinningDaysPerPayout: 5,
-      requireProfitSinceLastPayout: true,
-      payoutCadenceDays: 14,
+      minProfitSinceLastPayout: 300,
+      minMonthsBetweenPayouts: 2,    // bimonthly payout windows
     },
   },
   
-  withVelocityGate10d: {
+  withVerification1mo: {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
       lifetimeCapPerUser: 149 * 7,
-      minWinningDaysPerPayout: 10,
+      verificationMonths: 1,
+      verificationFailRate: 0.15,     // 15% monthly churn during verification
+    },
+  },
+  
+  withVerification2mo: {
+    ...DEFAULT_ASSUMPTIONS,
+    knobs: {
+      ...DEFAULT_ASSUMPTIONS.knobs,
+      lifetimeCapPerUser: 149 * 7,
+      verificationMonths: 2,
+      verificationFailRate: 0.15,
+    },
+  },
+  
+  withFullGateStack: {
+    ...DEFAULT_ASSUMPTIONS,
+    knobs: {
+      ...DEFAULT_ASSUMPTIONS.knobs,
+      lifetimeCapPerUser: 149 * 7,
+      minProfitSinceLastPayout: 300,
+      minMonthsBetweenPayouts: 2,
+      verificationMonths: 1,
+      verificationFailRate: 0.15,
     },
   },
 } as const;
