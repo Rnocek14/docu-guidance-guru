@@ -1,15 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { CheckCircle2, Shield, AlertTriangle, ArrowLeft } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ArrowLeft } from "lucide-react";
 import { CheckoutDisclaimer } from "@/components/checkout/CheckoutDisclaimer";
 import { TierCard, type PricingTier } from "@/components/checkout/TierCard";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 const TIERS: PricingTier[] = [
   {
@@ -74,9 +72,21 @@ export default function Checkout() {
   const handlePurchase = async () => {
     if (!disclaimerAccepted) return;
     setIsProcessing(true);
-    // TODO: Stripe checkout session creation via edge function
-    // For now, simulate
-    setTimeout(() => setIsProcessing(false), 2000);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+        body: { tierId: selectedTier, disclaimerAccepted: true },
+      });
+      if (error) throw error;
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('No checkout URL returned');
+      }
+    } catch (err) {
+      console.error('Checkout error:', err);
+      toast.error('Failed to start checkout. Please try again.');
+      setIsProcessing(false);
+    }
   };
 
   return (
