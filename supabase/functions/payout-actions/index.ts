@@ -40,12 +40,23 @@ const PAYOUT_TRANSITIONS: Record<PayoutAction, { from: string[]; to: string }> =
 // Tolerance for amount verification (cents)
 const AMOUNT_TOLERANCE = 0.01
 
+// Helper: Generate deterministic idempotency key via SHA-256
+async function generateDeterministicKey(input: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(input)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+  return hashHex.slice(0, 48) // First 48 chars for reasonable length
+}
+
+// FIX C: All audit inserts now use idempotency_key for deduplication
 // deno-lint-ignore no-explicit-any
 async function insertAuditLog(supabase: any, data: any): Promise<{ inserted: boolean }> {
   const { data: result, error } = await supabase
     .from('audit_logs')
     .upsert(data, { 
-      onConflict: 'account_id,request_id',
+      onConflict: 'idempotency_key',
       ignoreDuplicates: true 
     })
     .select('id')
@@ -136,16 +147,16 @@ Deno.serve(async (req) => {
       )
     }
 
-    const token = authHeader.replace('Bearer ', '')
+    const jwt = authHeader.replace('Bearer ', '')
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 
-    // Create service role client
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    // FIX A: Use anon key + JWT for proper token validation (canonical pattern)
+    const supabaseUser = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+    })
 
-    // Validate token and get user
-    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token)
+    const { data: userData, error: userError } = await supabaseUser.auth.getUser()
     
     if (userError || !userData?.user) {
       return new Response(
@@ -156,15 +167,19 @@ Deno.serve(async (req) => {
 
     const userId = userData.user.id
 
-    // ADMIN ONLY: Check for admin role
-    const { data: roleData } = await supabaseAdmin
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .eq('role', 'admin')
-      .single()
+    // Create service role client for privileged operations
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    )
 
-    if (!roleData) {
+    // FIX B: Strict role check via has_role RPC (must be exactly true)
+    const { data: isAdmin, error: roleError } = await supabaseAdmin.rpc('has_role', {
+      _user_id: userId,
+      _role: 'admin',
+    })
+
+    if (roleError || isAdmin !== true) {
       return new Response(
         JSON.stringify({ error: 'Forbidden: Admin role required for payout actions' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -241,25 +256,30 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Use client-provided idempotency key or generate deterministic one for mark_paid
-    // For mark_paid without idempotency_key, use deterministic ID to prevent log spam on retries
+    // Generate deterministic idempotency keys per action type
+    // This prevents duplicate audit entries on retry while ensuring stable deduplication
     let requestId: string
+    let auditIdempotencyKey: string
+    
     if (body.idempotency_key) {
+      // Client provided key - use it for both
       requestId = body.idempotency_key
+      auditIdempotencyKey = body.idempotency_key
     } else if (body.action === 'mark_paid') {
-      // Deterministic: payout_id + action + normalized payment_reference hash
-      // Normalize: trim whitespace and handle null/undefined consistently
+      // mark_paid: deterministic key from stable inputs including amount
       const normalizedRef = (body.payment_reference ?? '').trim().toLowerCase()
-      const deterministicInput = `${body.payout_id}:mark_paid:${normalizedRef}`
-      const encoder = new TextEncoder()
-      const data = encoder.encode(deterministicInput)
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-      const hashArray = Array.from(new Uint8Array(hashBuffer))
-      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-      // Format as UUID-like string for consistency
-      requestId = `${hashHex.slice(0, 8)}-${hashHex.slice(8, 12)}-${hashHex.slice(12, 16)}-${hashHex.slice(16, 20)}-${hashHex.slice(20, 32)}`
+      const keyInput = `mark_paid:${body.payout_id}:${normalizedRef}:${submittedAmount}`
+      auditIdempotencyKey = await generateDeterministicKey(keyInput)
+      requestId = auditIdempotencyKey
+    } else if (body.action === 'approve') {
+      // approve: deterministic key prevents double-approve spam
+      const keyInput = `approve:${body.payout_id}:${submittedAmount}`
+      auditIdempotencyKey = await generateDeterministicKey(keyInput)
+      requestId = auditIdempotencyKey
     } else {
+      // Other actions: fresh UUID but still set idempotency_key
       requestId = crypto.randomUUID()
+      auditIdempotencyKey = `${body.action}:${body.payout_id}:${requestId}`
     }
     const previousStatus = payout.status
     const newStatus = transition.to
@@ -580,13 +600,15 @@ Deno.serve(async (req) => {
         }
       }
       
-      // Log if admin is skipping fraud checks
+      // Log if admin is skipping fraud checks (separate audit entry with own idempotency)
       if (body.skip_fraud_check) {
+        const skipFraudKey = await generateDeterministicKey(`skip_fraud:${body.payout_id}:${submittedAmount}`)
         await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: payout.account_id,
           action: 'status_changed',
-          request_id: crypto.randomUUID(), // Separate log entry
+          request_id: crypto.randomUUID(),
+          idempotency_key: skipFraudKey,
           reason: 'Admin skipped fraud checks for payout approval',
           details: {
             payout_id: body.payout_id,
@@ -706,6 +728,7 @@ Deno.serve(async (req) => {
       account_id: payout.account_id,
       action: auditActions[body.action],
       request_id: requestId,
+      idempotency_key: auditIdempotencyKey, // Required for deduplication
       reason: body.reason || `Payout ${body.action}`,
       details: {
         payout_id: body.payout_id,
