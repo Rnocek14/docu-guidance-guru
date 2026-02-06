@@ -895,6 +895,7 @@ export type Database = {
         Row: {
           account_id: string
           amount: number
+          approved_by: string | null
           calculated_eligible_amount: number | null
           destination_name_match: boolean | null
           device_fingerprint_id: string | null
@@ -902,6 +903,7 @@ export type Database = {
           id: string
           kyc_name_verified: boolean
           paid_at: string | null
+          paid_by: string | null
           payment_reference: string | null
           payout_method_id: string | null
           request_id: string | null
@@ -918,6 +920,7 @@ export type Database = {
         Insert: {
           account_id: string
           amount: number
+          approved_by?: string | null
           calculated_eligible_amount?: number | null
           destination_name_match?: boolean | null
           device_fingerprint_id?: string | null
@@ -925,6 +928,7 @@ export type Database = {
           id?: string
           kyc_name_verified?: boolean
           paid_at?: string | null
+          paid_by?: string | null
           payment_reference?: string | null
           payout_method_id?: string | null
           request_id?: string | null
@@ -941,6 +945,7 @@ export type Database = {
         Update: {
           account_id?: string
           amount?: number
+          approved_by?: string | null
           calculated_eligible_amount?: number | null
           destination_name_match?: boolean | null
           device_fingerprint_id?: string | null
@@ -948,6 +953,7 @@ export type Database = {
           id?: string
           kyc_name_verified?: boolean
           paid_at?: string | null
+          paid_by?: string | null
           payment_reference?: string | null
           payout_method_id?: string | null
           request_id?: string | null

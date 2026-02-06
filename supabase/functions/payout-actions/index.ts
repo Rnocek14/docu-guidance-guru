@@ -715,6 +715,8 @@ Deno.serve(async (req) => {
         status: newStatus,
         reviewed_by: userId,
         reviewed_at: new Date().toISOString(),
+        // Set approved_by for separation-of-duties enforcement in mark_payout_paid
+        ...(body.action === 'approve' ? { approved_by: userId } : {}),
       }
 
       if (body.reason) {
