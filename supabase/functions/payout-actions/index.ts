@@ -68,12 +68,18 @@ async function insertAuditLog(supabase: any, data: any): Promise<{ inserted: boo
   return { inserted: result && result.length > 0 }
 }
 
+// Helper: Normalize payment reference for idempotency
+function normalizePaymentRef(s: string): string {
+  return s.trim().replace(/\s+/g, ' ').toUpperCase()
+}
+
 // deno-lint-ignore no-explicit-any
 async function insertAccountEvent(supabase: any, data: any): Promise<{ inserted: boolean }> {
+  // account_events now has idempotency_key NOT NULL UNIQUE
   const { data: result, error } = await supabase
     .from('account_events')
     .upsert(data, { 
-      onConflict: 'account_id,request_id',
+      onConflict: 'idempotency_key',
       ignoreDuplicates: true 
     })
     .select('id')
@@ -256,31 +262,39 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Generate deterministic idempotency keys per action type
-    // This prevents duplicate audit entries on retry while ensuring stable deduplication
-    let requestId: string
-    let auditIdempotencyKey: string
+    // Generate FULLY DETERMINISTIC idempotency keys per action type
+    // CRITICAL: Never include random UUIDs - retries must produce the same key
+    let effectiveIdempotencyKey: string
     
     if (body.idempotency_key) {
-      // Client provided key - use it for both
-      requestId = body.idempotency_key
-      auditIdempotencyKey = body.idempotency_key
-    } else if (body.action === 'mark_paid') {
-      // mark_paid: deterministic key from stable inputs including amount
-      const normalizedRef = (body.payment_reference ?? '').trim().toLowerCase()
-      const keyInput = `mark_paid:${body.payout_id}:${normalizedRef}:${submittedAmount}`
-      auditIdempotencyKey = await generateDeterministicKey(keyInput)
-      requestId = auditIdempotencyKey
-    } else if (body.action === 'approve') {
-      // approve: deterministic key prevents double-approve spam
-      const keyInput = `approve:${body.payout_id}:${submittedAmount}`
-      auditIdempotencyKey = await generateDeterministicKey(keyInput)
-      requestId = auditIdempotencyKey
+      // Client provided key - use as-is
+      effectiveIdempotencyKey = body.idempotency_key
     } else {
-      // Other actions: fresh UUID but still set idempotency_key
-      requestId = crypto.randomUUID()
-      auditIdempotencyKey = `${body.action}:${body.payout_id}:${requestId}`
+      // Generate deterministic key from stable action-specific inputs
+      let keyInput: string
+      switch (body.action) {
+        case 'mark_paid': {
+          const normalizedRef = normalizePaymentRef(body.payment_reference ?? '')
+          keyInput = `mark_paid:${body.payout_id}:${normalizedRef}:${submittedAmount}`
+          break
+        }
+        case 'approve':
+          keyInput = `approve:${body.payout_id}:${submittedAmount}`
+          break
+        case 'reject':
+          keyInput = `reject:${body.payout_id}:${body.reason ?? ''}`
+          break
+        case 'request_more_info':
+          keyInput = `more_info:${body.payout_id}:${body.reason ?? ''}`
+          break
+        default:
+          keyInput = `payout:${body.payout_id}:${body.action}`
+      }
+      effectiveIdempotencyKey = await generateDeterministicKey(keyInput)
     }
+    
+    // Use the same key for both audit and event deduplication
+    const requestId = effectiveIdempotencyKey
     const previousStatus = payout.status
     const newStatus = transition.to
 
@@ -728,7 +742,7 @@ Deno.serve(async (req) => {
       account_id: payout.account_id,
       action: auditActions[body.action],
       request_id: requestId,
-      idempotency_key: auditIdempotencyKey, // Required for deduplication
+      idempotency_key: effectiveIdempotencyKey, // Same key for all deduplication
       reason: body.reason || `Payout ${body.action}`,
       details: {
         payout_id: body.payout_id,
@@ -763,10 +777,14 @@ Deno.serve(async (req) => {
       mark_paid: `Your payout of $${formattedAmount} has been sent.${refText}`,
     }
 
+    // Derive event idempotency key from the same stable base (prefixed to avoid collision with audit)
+    const eventIdempotencyKey = `evt:${effectiveIdempotencyKey}`
+    
     const eventResult = await insertAccountEvent(supabaseAdmin, {
       account_id: payout.account_id,
       event_type: eventTypes[body.action],
       request_id: requestId,
+      idempotency_key: eventIdempotencyKey, // Now uses idempotency_key for deduplication
       event_data: {
         payout_id: body.payout_id,
         previous_status: previousStatus,
@@ -791,8 +809,8 @@ Deno.serve(async (req) => {
         new_status: effectiveNewStatus,
         action: body.action,
         request_id: requestId,
-        idempotent: !!body.idempotency_key || wasIdempotentRpc,
-        duplicate: wasDuplicate,
+        idempotency_key: effectiveIdempotencyKey, // Return effective key for client logging
+        deduplicated: wasDuplicate, // Clear signal: was this a retry that got deduplicated?
         // mark_paid specific fields
         ...(body.action === 'mark_paid' ? {
           paid_at: effectivePaidAt,
