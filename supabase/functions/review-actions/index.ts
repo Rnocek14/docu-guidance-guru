@@ -303,7 +303,7 @@ Deno.serve(async (req) => {
         }
 
         // Generate event idempotency key with namespace IN the hash input
-        // CRITICAL: Use the SAME normalized value for both hash AND insert to prevent mismatch
+        // CRITICAL: Use SAME normalized value for hash AND event_type column
         const rawEventType = body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed'
         const eventTypeNorm = normalizeEventType(rawEventType)
         const eventKeyInput = `acctevt:${eventTypeNorm}:${body.account_id}:${body.action}:${newStatus}`
@@ -311,7 +311,7 @@ Deno.serve(async (req) => {
         
         const eventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
-          event_type: rawEventType, // DB enum expects exact value (already snake_case)
+          event_type: eventTypeNorm as typeof rawEventType, // Use normalized for consistency
           request_id: requestId,
           idempotency_key: eventIdempotencyKey,
           event_data: {
@@ -320,12 +320,12 @@ Deno.serve(async (req) => {
             reason: body.reason,
             explanation: eventExplanations[body.action],
             actor_role: actorRole,
-            event_type_normalized: eventTypeNorm, // For audit trail
+            raw_event_type: rawEventType, // Original for debugging
           },
         })
         
-        // Log event dedupe for ops visibility
-        console.log(`review event dedupe: action=${body.action}, inserted=${eventResult.inserted}, key=${eventIdempotencyKey}`)
+        // Log dedupe result for ops visibility (both keys)
+        console.log(`review dedupe: audit_inserted=${auditResult.inserted} audit_key=${effectiveIdempotencyKey}, event_inserted=${eventResult.inserted} event_key=${eventIdempotencyKey}`)
 
         // If neither audit nor event was inserted, this was a duplicate request
         wasDuplicate = !auditResult.inserted && !eventResult.inserted
@@ -343,7 +343,7 @@ Deno.serve(async (req) => {
             .is('confirmed_at', null)
         }
 
-        result = { ...result, previous_status: previousStatus, new_status: newStatus, deduplicated: wasDuplicate, idempotency_key: effectiveIdempotencyKey }
+        result = { ...result, previous_status: previousStatus, new_status: newStatus, deduplicated: wasDuplicate, audit_deduplicated: !auditResult.inserted, event_deduplicated: !eventResult.inserted, audit_idempotency_key: effectiveIdempotencyKey, event_idempotency_key: eventIdempotencyKey }
         break
       }
 
@@ -413,11 +413,13 @@ Deno.serve(async (req) => {
         })
 
         // Generate event idempotency key with namespace IN the hash input
-        const flagEventKeyInput = `acctevt:status_changed:${body.account_id}:close_flag:${body.flag_id}`
-        const flagEventIdempotencyKey = `acctevt.status_changed:` + await generateDeterministicKey(flagEventKeyInput)
+        // Use normalized event type for consistency
+        const flagEventTypeNorm = normalizeEventType('status_changed')
+        const flagEventKeyInput = `acctevt:${flagEventTypeNorm}:${body.account_id}:close_flag:${body.flag_id}`
+        const flagEventIdempotencyKey = `acctevt.${flagEventTypeNorm}:` + await generateDeterministicKey(flagEventKeyInput)
         const flagEventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
-          event_type: 'status_changed',
+          event_type: flagEventTypeNorm as 'status_changed', // Use normalized
           request_id: requestId,
           idempotency_key: flagEventIdempotencyKey,
           event_data: {
@@ -425,10 +427,13 @@ Deno.serve(async (req) => {
             flag_id: body.flag_id,
             explanation: 'A flag on your account has been reviewed and cleared.',
             actor_role: actorRole,
+            raw_event_type: 'status_changed',
           },
         })
+        
+        console.log(`close_flag dedupe: audit_inserted=${flagAuditResult.inserted} audit_key=${effectiveIdempotencyKey}, event_inserted=${flagEventResult.inserted} event_key=${flagEventIdempotencyKey}`)
 
-        result = { ...result, flag_id: body.flag_id, flag_closed: true, deduplicated: !flagAuditResult.inserted && !flagEventResult.inserted, idempotency_key: effectiveIdempotencyKey }
+        result = { ...result, flag_id: body.flag_id, flag_closed: true, deduplicated: !flagAuditResult.inserted && !flagEventResult.inserted, audit_deduplicated: !flagAuditResult.inserted, event_deduplicated: !flagEventResult.inserted, audit_idempotency_key: effectiveIdempotencyKey, event_idempotency_key: flagEventIdempotencyKey }
         break
       }
     }
