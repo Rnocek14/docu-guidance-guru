@@ -138,10 +138,10 @@ export type Database = {
           id: string
           idempotency_key: string | null
           ip_address: string | null
-          prev_hash: string | null
+          prev_hash: string
           reason: string | null
           request_id: string | null
-          row_hash: string | null
+          row_hash: string
           user_agent: string | null
           user_id: string | null
         }
@@ -153,10 +153,10 @@ export type Database = {
           id?: string
           idempotency_key?: string | null
           ip_address?: string | null
-          prev_hash?: string | null
+          prev_hash: string
           reason?: string | null
           request_id?: string | null
-          row_hash?: string | null
+          row_hash: string
           user_agent?: string | null
           user_id?: string | null
         }
@@ -168,10 +168,10 @@ export type Database = {
           id?: string
           idempotency_key?: string | null
           ip_address?: string | null
-          prev_hash?: string | null
+          prev_hash?: string
           reason?: string | null
           request_id?: string | null
-          row_hash?: string | null
+          row_hash?: string
           user_agent?: string | null
           user_id?: string | null
         }
