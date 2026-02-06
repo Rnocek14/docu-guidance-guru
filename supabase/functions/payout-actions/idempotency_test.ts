@@ -24,6 +24,8 @@ import { assertEquals, assertExists, assert } from "https://deno.land/std@0.224.
 import {
   assertValidAuditKey,
   assertValidEventKey,
+  assertDedupeFieldTypes,
+  requireEnvVars,
   uniqueSuffix,
 } from "../_test/test_utils.ts";
 
@@ -31,9 +33,16 @@ const SUPABASE_URL = Deno.env.get("VITE_SUPABASE_URL")!;
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/payout-actions`;
 
 // These tests require an admin user token and state-specific payout IDs
+// No fallback to TEST_PAYOUT_ID — each state needs its own ID to avoid misleading results
 const ADMIN_TOKEN = Deno.env.get("TEST_ADMIN_TOKEN");
-const TEST_PAYOUT_ID_PENDING = Deno.env.get("TEST_PAYOUT_ID_PENDING") || Deno.env.get("TEST_PAYOUT_ID");
+const TEST_PAYOUT_ID_PENDING = Deno.env.get("TEST_PAYOUT_ID_PENDING");
 const TEST_PAYOUT_ID_APPROVED = Deno.env.get("TEST_PAYOUT_ID_APPROVED");
+
+requireEnvVars({
+  TEST_ADMIN_TOKEN: ADMIN_TOKEN,
+  TEST_PAYOUT_ID_PENDING,
+  TEST_PAYOUT_ID_APPROVED,
+});
 
 const skipApproveTests = !ADMIN_TOKEN || !TEST_PAYOUT_ID_PENDING;
 const skipMarkPaidTests = !ADMIN_TOKEN || !TEST_PAYOUT_ID_APPROVED;
@@ -71,6 +80,9 @@ Deno.test({
     // Validate key format and prefixes
     assertValidAuditKey(b1.audit_idempotency_key, "audit_idempotency_key");
     assertValidEventKey(b1.event_idempotency_key, "event_idempotency_key");
+
+    // Validate dedupe field types (catches accidental undefined returns)
+    assertDedupeFieldTypes(b1, true, "first approve");
 
     // First call should NOT be deduplicated
     assertEquals(b1.audit_deduplicated, false, "First call should insert audit (not deduped)");
@@ -137,6 +149,9 @@ Deno.test({
     // Validate key format and prefixes
     assertValidAuditKey(b1.audit_idempotency_key, "audit_idempotency_key");
     assertValidEventKey(b1.event_idempotency_key, "event_idempotency_key");
+
+    // Validate dedupe field types
+    assertDedupeFieldTypes(b1, true, "first mark_paid");
 
     // First call should insert (NOT deduped)
     assertEquals(b1.audit_deduplicated, false, "First call should insert audit (not deduped)");

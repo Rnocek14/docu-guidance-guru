@@ -24,6 +24,8 @@ import { assertEquals, assertExists, assert } from "https://deno.land/std@0.224.
 import {
   assertValidAuditKey,
   assertValidEventKey,
+  assertDedupeFieldTypes,
+  requireEnvVars,
   uniqueSuffix,
   AUDIT_KEY_PREFIX,
   EVENT_KEY_PREFIX,
@@ -36,6 +38,12 @@ const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/review-actions`;
 const STAFF_TOKEN = Deno.env.get("TEST_STAFF_TOKEN");
 const TEST_ACCOUNT_ID = Deno.env.get("TEST_ACCOUNT_ID");
 const TEST_ACCOUNT_ID_BREACHED = Deno.env.get("TEST_ACCOUNT_ID_BREACHED");
+
+requireEnvVars({
+  TEST_STAFF_TOKEN: STAFF_TOKEN,
+  TEST_ACCOUNT_ID,
+  TEST_ACCOUNT_ID_BREACHED,
+});
 
 const skipTests = !STAFF_TOKEN || !TEST_ACCOUNT_ID;
 const skipBreachTests = !STAFF_TOKEN || !TEST_ACCOUNT_ID_BREACHED;
@@ -72,6 +80,9 @@ Deno.test({
     // add_note only creates audit log, not account event
     assertValidAuditKey(b1.idempotency_key, "idempotency_key");
     
+    // Validate dedupe field types (add_note = audit-only, no event)
+    assertDedupeFieldTypes(b1, false, "first add_note");
+
     // First call should NOT be deduplicated
     assertEquals(b1.deduplicated, false, "First call should insert audit (not deduped)");
 
@@ -261,6 +272,9 @@ Deno.test({
     assertValidAuditKey(b1.audit_idempotency_key, "audit_idempotency_key");
     assertValidEventKey(b1.event_idempotency_key, "event_idempotency_key");
     
+    // Validate dedupe field types (clear_breach emits both audit + event)
+    assertDedupeFieldTypes(b1, true, "first clear_breach");
+
     // First call should NOT be deduplicated
     assertEquals(b1.audit_deduplicated, false, "First call should insert audit (not deduped)");
     assertEquals(b1.event_deduplicated, false, "First call should insert event (not deduped)");

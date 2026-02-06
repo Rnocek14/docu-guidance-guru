@@ -377,7 +377,7 @@ Deno.serve(async (req) => {
           },
         })
         console.log(`add_note dedupe: inserted=${noteResult.inserted}, key=${noteIdempotencyKey}`)
-        result = { ...result, note_added: true, previous_status: previousStatus, new_status: previousStatus, deduplicated: !noteResult.inserted, idempotency_key: noteIdempotencyKey }
+        result = { ...result, note_added: true, previous_status: previousStatus, new_status: previousStatus, deduplicated: !noteResult.inserted, idempotency_key: noteIdempotencyKey, audit_deduplicated: !noteResult.inserted, event_idempotency_key: null, event_deduplicated: null, event_type: null }
         break
       }
 
