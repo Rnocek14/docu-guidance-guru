@@ -265,6 +265,125 @@ Deno.serve(async (req) => {
     const newStatus = transition.to
 
     // =============================================
+    // P0-B: JURISDICTION CHECK (payout_send action for admin approval)
+    // =============================================
+    
+    // Set actor context for SECURITY DEFINER functions
+    await supabaseAdmin.rpc('set_config', { 
+      setting_name: 'app.current_user_id', 
+      setting_value: userId,
+      is_local: true 
+    }).catch(() => {}) // Ignore if not available
+
+    // Check jurisdiction for payout_send (admin approving = sending)
+    if (body.action === 'approve' || body.action === 'mark_paid') {
+      // Get user's jurisdiction status
+      const { data: jurisdictionData } = await supabaseAdmin
+        .from('user_jurisdiction')
+        .select('country_code')
+        .eq('user_id', account.user_id)
+        .single()
+
+      if (!jurisdictionData) {
+        // Try to resolve jurisdiction first
+        const { data: resolveResult } = await supabaseAdmin
+          .rpc('resolve_user_jurisdiction', { _user_id: account.user_id })
+
+        if (!resolveResult?.success) {
+          return new Response(
+            JSON.stringify({ 
+              error: 'Payout blocked: User jurisdiction unknown',
+              hint: 'User must complete KYC or billing verification to establish jurisdiction'
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+
+      // Check if jurisdiction allows payouts
+      const { data: jurisdictionRules } = await supabaseAdmin
+        .from('jurisdiction_rules')
+        .select('*')
+        .eq('country_code', jurisdictionData?.country_code || '')
+        .single()
+
+      if (!jurisdictionRules) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Payout blocked: No rules for user country',
+            country: jurisdictionData?.country_code,
+            hint: 'Country not in allowlist'
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      if (!jurisdictionRules.is_allowed || !jurisdictionRules.allow_payouts) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Payout blocked: Payouts not allowed in user region',
+            country: jurisdictionData?.country_code,
+            reason: jurisdictionRules.reason || 'policy'
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
+    // =============================================
+    // P0-B: GEO-MISMATCH HOLD CHECK (on approve)
+    // =============================================
+    
+    let geoMismatchApplied = false
+    
+    if (body.action === 'approve') {
+      // Check for geo mismatches and apply hold if found
+      const { data: mismatchResult } = await supabaseAdmin
+        .rpc('check_geo_mismatch', { _user_id: account.user_id })
+
+      if (mismatchResult?.has_mismatch) {
+        // Check if already on hold
+        const { data: profileData } = await supabaseAdmin
+          .from('profiles')
+          .select('payouts_hold, payouts_hold_reason')
+          .eq('user_id', account.user_id)
+          .single()
+
+        if (!profileData?.payouts_hold) {
+          // Apply hold
+          const { data: holdResult } = await supabaseAdmin
+            .rpc('apply_geo_mismatch_hold', { _user_id: account.user_id })
+
+          if (holdResult?.hold_applied) {
+            geoMismatchApplied = true
+            
+            // Block the approval - requires manual hold release first
+            return new Response(
+              JSON.stringify({ 
+                error: 'Payout blocked: Geo mismatch detected',
+                hold_reason: holdResult.hold_reason,
+                mismatch_details: holdResult.mismatch_details,
+                hint: 'User has conflicting location signals (IP/KYC/billing). Manual review and hold release required before approval.',
+                request_id: holdResult.request_id
+              }),
+              { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+        } else {
+          // Already on hold - block
+          return new Response(
+            JSON.stringify({ 
+              error: 'Payout blocked: User on geo-mismatch hold',
+              hold_reason: profileData.payouts_hold_reason,
+              hint: 'Release hold via admin workflow before approving payout'
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+    }
+
+    // =============================================
     // P0 BLOCKER: SERVER-SIDE ELIGIBILITY VERIFICATION
     // =============================================
     
@@ -471,6 +590,7 @@ Deno.serve(async (req) => {
             payout_id: body.payout_id,
             skip_reason: 'admin_override',
             correlations_found: correlations?.has_correlations || false,
+            geo_mismatch_applied: geoMismatchApplied,
             actor_role: 'admin',
           },
         })
