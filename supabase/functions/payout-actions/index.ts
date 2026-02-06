@@ -265,65 +265,43 @@ Deno.serve(async (req) => {
     const newStatus = transition.to
 
     // =============================================
-    // P0-B: JURISDICTION CHECK (payout_send action for admin approval)
+    // P0-B: JURISDICTION CHECK (using canonical RPC - single source of truth)
     // =============================================
     
-    // Set actor context for SECURITY DEFINER functions
-    await supabaseAdmin.rpc('set_config', { 
-      setting_name: 'app.current_user_id', 
-      setting_value: userId,
-      is_local: true 
-    }).catch(() => {}) // Ignore if not available
-
     // Check jurisdiction for payout_send (admin approving = sending)
     if (body.action === 'approve' || body.action === 'mark_paid') {
-      // Get user's jurisdiction status
-      const { data: jurisdictionData } = await supabaseAdmin
-        .from('user_jurisdiction')
-        .select('country_code')
-        .eq('user_id', account.user_id)
-        .single()
+      // First try to resolve jurisdiction if unknown
+      const { data: resolveResult } = await supabaseAdmin
+        .rpc('resolve_user_jurisdiction', { _user_id: account.user_id })
+      
+      // Use the canonical service-role RPC for jurisdiction check
+      const { data: jurisdictionCheck, error: jurisdictionError } = await supabaseAdmin
+        .rpc('assert_user_jurisdiction_allowed', { 
+          _user_id: account.user_id, 
+          p_action: 'payout_send' 
+        })
 
-      if (!jurisdictionData) {
-        // Try to resolve jurisdiction first
-        const { data: resolveResult } = await supabaseAdmin
-          .rpc('resolve_user_jurisdiction', { _user_id: account.user_id })
-
-        if (!resolveResult?.success) {
-          return new Response(
-            JSON.stringify({ 
-              error: 'Payout blocked: User jurisdiction unknown',
-              hint: 'User must complete KYC or billing verification to establish jurisdiction'
-            }),
-            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
-      }
-
-      // Check if jurisdiction allows payouts
-      const { data: jurisdictionRules } = await supabaseAdmin
-        .from('jurisdiction_rules')
-        .select('*')
-        .eq('country_code', jurisdictionData?.country_code || '')
-        .single()
-
-      if (!jurisdictionRules) {
+      if (jurisdictionError) {
+        console.error('Jurisdiction check error:', jurisdictionError)
         return new Response(
           JSON.stringify({ 
-            error: 'Payout blocked: No rules for user country',
-            country: jurisdictionData?.country_code,
-            hint: 'Country not in allowlist'
+            error: 'Payout blocked: Jurisdiction check failed',
+            details: jurisdictionError.message
           }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
 
-      if (!jurisdictionRules.is_allowed || !jurisdictionRules.allow_payouts) {
+      if (!jurisdictionCheck?.allowed) {
         return new Response(
           JSON.stringify({ 
-            error: 'Payout blocked: Payouts not allowed in user region',
-            country: jurisdictionData?.country_code,
-            reason: jurisdictionRules.reason || 'policy'
+            error: 'Payout blocked: ' + (jurisdictionCheck?.reason || 'jurisdiction_check_failed'),
+            country: jurisdictionCheck?.country,
+            hint: jurisdictionCheck?.reason === 'jurisdiction_unknown' 
+              ? 'User must complete KYC or billing verification to establish jurisdiction'
+              : jurisdictionCheck?.reason === 'kyc_required'
+              ? 'User must complete identity verification before payouts'
+              : 'Payouts not available in user region'
           }),
           { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
