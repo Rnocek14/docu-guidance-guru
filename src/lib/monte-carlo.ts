@@ -154,6 +154,7 @@ export interface MonteCarloResult {
   };
 
   rawSamples?: number[][]; // optional: all monthly profits per iteration
+  rawMonthResults?: MonthResult[][]; // optional: full per-month breakdown per iteration
 }
 
 export interface MonthResult {
@@ -1010,6 +1011,7 @@ export function runMonteCarlo(
       capHitShareOfCompletions,
     },
     rawSamples: allMonthlyProfits,
+    rawMonthResults: allMonthResults,
   };
 }
 
