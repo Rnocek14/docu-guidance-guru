@@ -88,13 +88,18 @@ Deno.test({
     console.log("Second add_note response:", b2);
 
     assertEquals(r2.status, 200, "Second call should succeed");
-    assertEquals(b2.success, true, "Second call should succeed");
+    assertEquals(b2.success, true, "Second call should report success");
     
     // Keys must match between calls
     assertEquals(b2.idempotency_key, b1.idempotency_key, "Audit keys should match");
     
     // Second call should be deduplicated
     assertEquals(b2.deduplicated, true, "Audit should be deduplicated on retry");
+    
+    // Verify previous_status/new_status present (add_note = no state change)
+    assertExists(b2.previous_status, "Second call should include previous_status");
+    assertExists(b2.new_status, "Second call should include new_status");
+    assertEquals(b2.previous_status, b2.new_status, "add_note should not change status");
   },
 });
 
@@ -206,6 +211,7 @@ Deno.test({
     console.log("Second normalized reason response:", b2);
 
     assertEquals(r2.status, 200);
+    assertEquals(b2.success, true, "Second call should report success");
     
     // After normalization, keys should match
     assertEquals(
@@ -272,6 +278,7 @@ Deno.test({
     console.log("Second clear_breach response:", b2);
 
     assertEquals(r2.status, 200, "Second call should succeed");
+    assertEquals(b2.success, true, "Second call should report success");
     assertEquals(b2.audit_idempotency_key, b1.audit_idempotency_key, "Audit keys should match");
     assertEquals(b2.event_idempotency_key, b1.event_idempotency_key, "Event keys should match");
     assertEquals(b2.audit_deduplicated, true, "Audit should be deduplicated on retry");

@@ -377,7 +377,7 @@ Deno.serve(async (req) => {
           },
         })
         console.log(`add_note dedupe: inserted=${noteResult.inserted}, key=${noteIdempotencyKey}`)
-        result = { ...result, note_added: true, deduplicated: !noteResult.inserted, idempotency_key: noteIdempotencyKey }
+        result = { ...result, note_added: true, previous_status: previousStatus, new_status: previousStatus, deduplicated: !noteResult.inserted, idempotency_key: noteIdempotencyKey }
         break
       }
 
@@ -422,9 +422,15 @@ Deno.serve(async (req) => {
 
         // Generate event idempotency key with namespace IN the hash input
         // Use normalized event type for consistency
-        const flagEventTypeNorm = normalizeEventType('status_changed')
+        const flagRawEventType = 'status_changed'
+        const flagEventTypeNorm = normalizeEventType(flagRawEventType)
         const flagEventKeyInput = `acctevt:${flagEventTypeNorm}:${body.account_id}:close_flag:${body.flag_id}`
         const flagEventIdempotencyKey = `acctevt.${flagEventTypeNorm}:` + await generateDeterministicKey(flagEventKeyInput)
+        
+        // Drift guard for close_flag event type
+        if (flagRawEventType !== flagEventTypeNorm) {
+          console.warn(`DRIFT_EVENT_TYPE action=close_flag raw=${flagRawEventType} norm=${flagEventTypeNorm} event_type=${flagEventTypeNorm} audit_key=${effectiveIdempotencyKey} event_key=${flagEventIdempotencyKey} request_id=${requestId}`)
+        }
         const flagEventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
           event_type: flagEventTypeNorm as 'status_changed', // Use normalized
@@ -441,7 +447,7 @@ Deno.serve(async (req) => {
         
         console.log(`close_flag dedupe: audit_inserted=${flagAuditResult.inserted} audit_key=${effectiveIdempotencyKey}, event_inserted=${flagEventResult.inserted} event_key=${flagEventIdempotencyKey}`)
 
-        result = { ...result, flag_id: body.flag_id, flag_closed: true, deduplicated: !flagAuditResult.inserted && !flagEventResult.inserted, audit_deduplicated: !flagAuditResult.inserted, event_deduplicated: !flagEventResult.inserted, audit_idempotency_key: effectiveIdempotencyKey, event_idempotency_key: flagEventIdempotencyKey }
+        result = { ...result, flag_id: body.flag_id, flag_closed: true, previous_status: previousStatus, new_status: previousStatus, deduplicated: !flagAuditResult.inserted && !flagEventResult.inserted, audit_deduplicated: !flagAuditResult.inserted, event_deduplicated: !flagEventResult.inserted, audit_idempotency_key: effectiveIdempotencyKey, event_idempotency_key: flagEventIdempotencyKey }
         break
       }
     }
