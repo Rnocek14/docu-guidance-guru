@@ -200,7 +200,7 @@ export default function PayoutRequest() {
         )}
 
         {/* Profit Buffer Card (repeat payouts only) */}
-        {eligibility && isWindowOpen && eligibility.profit_buffer_required != null && !eligibility.is_first_payout_in_cycle && (
+        {eligibility && isWindowOpen && eligibility.profit_buffer_required != null && eligibility.has_prior_payout && (
           <PayoutProfitBufferCard
             profitBufferRequired={eligibility.profit_buffer_required}
             realizedProfit={eligibility.realized_profit ?? 0}
