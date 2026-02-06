@@ -222,7 +222,7 @@ export default function PayoutRequest() {
                 Payout Details
               </CardTitle>
               <CardDescription>
-                Enter the amount you wish to withdraw
+                Enter the amount you'd like to request as a payout
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -230,11 +230,11 @@ export default function PayoutRequest() {
                 {/* Eligibility Summary */}
                 <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Realized Profit</span>
+                    <span className="text-muted-foreground">Simulated Performance</span>
                     <span className="font-medium">${eligibility?.realized_profit?.toFixed(2) ?? '0.00'}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Your Share ({eligibility?.payout_split_percent ?? 80}%)</span>
+                    <span className="text-muted-foreground">Payout Rate ({eligibility?.payout_split_percent ?? 80}%)</span>
                     <span className="font-medium">${eligibility?.total_eligible_by_split?.toFixed(2) ?? '0.00'}</span>
                   </div>
                   <div className="flex justify-between text-sm border-t pt-2 mt-2">

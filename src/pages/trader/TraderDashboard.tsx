@@ -168,7 +168,7 @@ export default function TraderDashboard() {
                     ${activeAccount.total_pnl.toLocaleString()}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {((activeAccount.total_pnl / activeAccount.starting_balance) * 100).toFixed(2)}% return
+                    {((activeAccount.total_pnl / activeAccount.starting_balance) * 100).toFixed(2)}% simulated return
                   </p>
                 </CardContent>
               </Card>
@@ -208,7 +208,7 @@ export default function TraderDashboard() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Target className="h-5 w-5" />
-                    Profit Target Progress
+                    Performance Target Progress
                   </CardTitle>
                   <CardDescription>
                     Target: {activeAccount.cohort?.profit_target_percent}% profit
