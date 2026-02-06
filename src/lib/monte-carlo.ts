@@ -754,6 +754,20 @@ function simulateMonth(
   // Net profit - now includes reset revenue
   const netProfit = revenue + resetRevenue - totalPayouts - fraudLoss - chargebacks - variableCosts - fixedCosts;
   
+  // =========================================================================
+  // INVARIANT: monthlyPnl must NOT appear in platform profit calculation.
+  // Platform profit = fees - payouts - costs. Trader P&L only gates eligibility.
+  // Assert: profit cannot exceed total revenue (revenue + resetRevenue)
+  // =========================================================================
+  const totalRevenueThisMonth = revenue + resetRevenue;
+  if (netProfit > totalRevenueThisMonth + 1e-6) {
+    throw new Error(
+      `[Monte Carlo] INVARIANT VIOLATION: netProfit ($${netProfit.toFixed(2)}) exceeds ` +
+      `totalRevenue ($${totalRevenueThisMonth.toFixed(2)}) in month ${monthIndex}. ` +
+      `This means a non-revenue term is leaking into profit.`
+    );
+  }
+  
   return {
     revenue,
     resetRevenue,
@@ -1030,6 +1044,20 @@ export function runMonteCarlo(
   
   // Total revenue including resets
   const avgTotalRevenue = avgRevenue + avgResetRevenue;
+  
+  // =========================================================================
+  // GLOBAL INVARIANT: annualized profit must not exceed annualized revenue
+  // This catches any systematic accounting leak across the full simulation
+  // =========================================================================
+  const annualizedProfit = mean * 12;
+  const annualizedRevenue = avgTotalRevenue * 12;
+  if (annualizedProfit > annualizedRevenue + 1) {
+    throw new Error(
+      `[Monte Carlo] GLOBAL INVARIANT VIOLATION: annualized profit ($${annualizedProfit.toFixed(0)}) ` +
+      `exceeds annualized revenue ($${annualizedRevenue.toFixed(0)}). ` +
+      `Accounting leak detected.`
+    );
+  }
   
   return {
     config,
