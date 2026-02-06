@@ -52,6 +52,11 @@ async function generateDeterministicKey(input: string): Promise<string> {
   return hashHex.slice(0, 48)
 }
 
+// Helper: Normalize event_type to safe charset (snake_case, no spaces)
+function normalizeEventType(eventType: string): string {
+  return eventType.toLowerCase().replace(/[^a-z0-9_]/g, '_')
+}
+
 // Helper: Idempotent insert for audit_logs (uses idempotency_key for deduplication)
 // Returns { inserted: boolean } to track if this was a duplicate
 // deno-lint-ignore no-explicit-any
@@ -211,7 +216,8 @@ Deno.serve(async (req) => {
       // Deterministic key from stable inputs: action + account + current_status
       // Adding current status means same action on same account but different status = different key
       const keyInput = `${body.action}:${body.account_id}:${account.status}:${body.reason ?? ''}:${body.flag_id ?? ''}`
-      effectiveIdempotencyKey = await generateDeterministicKey(keyInput)
+      // Prefix with 'audit' namespace for explicit table targeting
+      effectiveIdempotencyKey = 'audit.' + await generateDeterministicKey(keyInput)
     }
     
     const requestId = effectiveIdempotencyKey
@@ -285,9 +291,10 @@ Deno.serve(async (req) => {
           escalate: `Your account has been escalated for additional review.`,
         }
 
-        // Derive event idempotency key including event_type to prevent cross-event collisions
-        const eventType = body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed'
-        const eventIdempotencyKey = `evt.${eventType}:${effectiveIdempotencyKey}`
+        // Derive event idempotency key with explicit table namespace + normalized event_type
+        const eventType = normalizeEventType(body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed')
+        const baseHash = effectiveIdempotencyKey.replace(/^audit\./, '')
+        const eventIdempotencyKey = `acctevt.${eventType}:${baseHash}`
         
         const eventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
@@ -384,8 +391,9 @@ Deno.serve(async (req) => {
           },
         })
 
-        // Create trader-visible event for transparency (idempotent, includes event_type)
-        const flagEventIdempotencyKey = `evt.status_changed:${effectiveIdempotencyKey}`
+        // Create trader-visible event with explicit table namespace
+        const baseHash = effectiveIdempotencyKey.replace(/^audit\./, '')
+        const flagEventIdempotencyKey = `acctevt.status_changed:${baseHash}`
         const flagEventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
           event_type: 'status_changed',
