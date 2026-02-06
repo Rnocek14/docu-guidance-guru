@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.check-liability-alert]
 verify_jwt = false
+
+[functions.payout-webhook-handler]
+verify_jwt = false
