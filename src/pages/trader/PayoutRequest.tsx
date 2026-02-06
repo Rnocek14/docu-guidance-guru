@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLayout';
 import { PayoutCoolingCard } from '@/components/trader/PayoutCoolingCard';
 import { PayoutProfitBufferCard } from '@/components/trader/PayoutProfitBufferCard';
+import { PayoutWinningDaysCard } from '@/components/trader/PayoutWinningDaysCard';
 import { PayoutMilestoneCard } from '@/components/trader/PayoutMilestoneCard';
 import { LifetimeHeadroomCard } from '@/components/trader/LifetimeHeadroomCard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -130,7 +131,7 @@ export default function PayoutRequest() {
   const isWindowOpen = eligibility?.payout_window_opened === true;
   const canRequestPayout = eligibility?.eligible === true && isWindowOpen;
   const reasonCode = eligibility?.reason_code ?? 'UNKNOWN';
-  const isProfitGate = reasonCode === 'PROFIT_BUFFER' || reasonCode === 'NO_PROFIT';
+  const isDedicatedGate = reasonCode === 'PROFIT_BUFFER' || reasonCode === 'NO_PROFIT' || reasonCode === 'MIN_TRADING_DAYS';
 
   if (isLoading) {
     return (
@@ -189,8 +190,8 @@ export default function PayoutRequest() {
           />
         )}
 
-        {/* Eligibility Status (profit gates get dedicated card instead) */}
-        {eligibility && !eligibility.eligible && isWindowOpen && !isProfitGate && (
+        {/* Eligibility Status (dedicated gates get their own card instead) */}
+        {eligibility && !eligibility.eligible && isWindowOpen && !isDedicatedGate && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Not Eligible for Payout</AlertTitle>
@@ -199,6 +200,17 @@ export default function PayoutRequest() {
               {eligibility.hint && <p className="mt-1 text-sm">{eligibility.hint}</p>}
             </AlertDescription>
           </Alert>
+        )}
+
+        {/* Winning Trading Days Card — show when has prior payout and required_trading_days > 0 */}
+        {eligibility && isWindowOpen && eligibility.has_prior_payout && (eligibility.required_trading_days ?? 0) > 0 && (
+          <PayoutWinningDaysCard
+            tradingDaysSincePayout={eligibility.trading_days_since_payout ?? 0}
+            requiredTradingDays={eligibility.required_trading_days!}
+            winningDaysRemaining={eligibility.winning_days_remaining ?? 0}
+            progressPct={eligibility.winning_days_progress_pct ?? 100}
+            isMet={reasonCode !== 'MIN_TRADING_DAYS'}
+          />
         )}
 
         {/* Profit Buffer Card — show on eligible + has_prior_payout OR on denial with PROFIT_BUFFER/NO_PROFIT */}
