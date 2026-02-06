@@ -199,6 +199,7 @@ export type Database = {
           provider_event_id: string
           reason_code: string | null
           stage: string
+          updated_at: string
           user_id: string
         }
         Insert: {
@@ -220,6 +221,7 @@ export type Database = {
           provider_event_id: string
           reason_code?: string | null
           stage: string
+          updated_at?: string
           user_id: string
         }
         Update: {
@@ -241,6 +243,7 @@ export type Database = {
           provider_event_id?: string
           reason_code?: string | null
           stage?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: [
@@ -915,6 +918,7 @@ export type Database = {
           email: string
           full_name: string | null
           id: string
+          kyc_legal_name: string | null
           kyc_status: string | null
           kyc_verified_at: string | null
           last_chargeback_at: string | null
@@ -934,6 +938,7 @@ export type Database = {
           email: string
           full_name?: string | null
           id?: string
+          kyc_legal_name?: string | null
           kyc_status?: string | null
           kyc_verified_at?: string | null
           last_chargeback_at?: string | null
@@ -953,6 +958,7 @@ export type Database = {
           email?: string
           full_name?: string | null
           id?: string
+          kyc_legal_name?: string | null
           kyc_status?: string | null
           kyc_verified_at?: string | null
           last_chargeback_at?: string | null
@@ -1518,10 +1524,12 @@ export type Database = {
         Args: { _account_id: string; _requested_amount: number }
         Returns: Json
       }
-      verify_payout_name_match: {
-        Args: { _destination_name: string; _user_id: string }
-        Returns: Json
-      }
+      verify_payout_name_match:
+        | { Args: { _destination_name: string }; Returns: Json }
+        | {
+            Args: { _destination_name: string; _user_id: string }
+            Returns: Json
+          }
     }
     Enums: {
       account_event_type:
@@ -1570,6 +1578,9 @@ export type Database = {
         | "trade_reconciliation_run"
         | "cohort_updated"
         | "liability_alert_fired"
+        | "payout_freeze_auto_chargeback"
+        | "card_block_auto_chargeback"
+        | "payout_freeze_manual"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -1752,6 +1763,9 @@ export const Constants = {
         "trade_reconciliation_run",
         "cohort_updated",
         "liability_alert_fired",
+        "payout_freeze_auto_chargeback",
+        "card_block_auto_chargeback",
+        "payout_freeze_manual",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
