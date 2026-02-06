@@ -1525,6 +1525,10 @@ export type Database = {
     Functions: {
       apply_geo_mismatch_hold: { Args: { _user_id: string }; Returns: Json }
       assert_jurisdiction_allowed: { Args: { p_action: string }; Returns: Json }
+      assert_user_jurisdiction_allowed: {
+        Args: { _user_id: string; p_action: string }
+        Returns: Json
+      }
       bootstrap_first_admin: { Args: { _user_id: string }; Returns: boolean }
       bump_fingerprint_seen: { Args: { _id: string }; Returns: undefined }
       calculate_payout_eligibility: {
@@ -1601,6 +1605,7 @@ export type Database = {
       }
       manual_payout_hold_release: {
         Args: {
+          _actor_user_id: string
           _evidence_notes?: string
           _reason: string
           _target_user_id: string
@@ -1739,6 +1744,7 @@ export type Database = {
         | "jurisdiction_resolved"
         | "jurisdiction_blocked"
         | "geo_mismatch_detected"
+        | "payout_hold_release_manual"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -1928,6 +1934,7 @@ export const Constants = {
         "jurisdiction_resolved",
         "jurisdiction_blocked",
         "geo_mismatch_detected",
+        "payout_hold_release_manual",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
