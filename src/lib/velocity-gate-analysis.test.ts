@@ -87,15 +87,18 @@ describe('Velocity Gate + Verification Cohort Analysis', () => {
   it('outputs per-month breakdown and comparison table', () => {
     console.log('\n' + '='.repeat(130));
     console.log('VELOCITY GATE + VERIFICATION COHORT ANALYSIS — Per-Month Breakdown');
+    console.log(`NOTE: Using DEFAULT_ASSUMPTIONS with accountsPerMonth = ${SCENARIO_PRESETS.withLifetimeCap7x.accountsPerMonth}`);
+    console.log(`      Annual revenue ceiling = ${SCENARIO_PRESETS.withLifetimeCap7x.accountsPerMonth} × $${SCENARIO_PRESETS.withLifetimeCap7x.pricePerAccount} × 12 = $${(SCENARIO_PRESETS.withLifetimeCap7x.accountsPerMonth * SCENARIO_PRESETS.withLifetimeCap7x.pricePerAccount * 12).toLocaleString()} (before resets)`);
     console.log('='.repeat(130));
     
     // Per-month breakdown for baseline
     const baseline = results[0];
-    console.log('\nBaseline per-month:');
+    console.log('\nBaseline per-month (sanity check — these should be individual monthly means, not totals):');
     console.log(`  Month 10 mean: $${baseline.m10_mean.toFixed(0)}`);
     console.log(`  Month 11 mean: $${baseline.m11_mean.toFixed(0)}`);
     console.log(`  Month 12 mean: $${baseline.m12_mean.toFixed(0)}`);
     console.log(`  M10-12 avg:    $${baseline.m10_12_mean.toFixed(0)} /month`);
+    console.log(`  Sum M10-12:    $${(baseline.m10_mean + baseline.m11_mean + baseline.m12_mean).toFixed(0)} (total, NOT per-month)`);
     
     console.log('\n' + '-'.repeat(130));
     console.log(
