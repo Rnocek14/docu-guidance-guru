@@ -73,15 +73,30 @@ function normalizePaymentRef(s: string): string {
   return s.trim().replace(/\s+/g, '_').toUpperCase()
 }
 
-// Helper: Normalize amount to cents integer for consistent hashing
-// Avoids 100 vs 100.0 vs 100.00 inconsistencies
-function amountToCents(amount: number): number {
-  return Math.round(amount * 100)
+// Helper: Normalize reason text for idempotency (reject/request_more_info)
+function normalizeReason(s: string): string {
+  return s.trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
-// Helper: Normalize event_type to safe charset (snake_case, no spaces)
+// Helper: String-safe amount to cents conversion
+// Handles both number and string inputs, avoids floating point weirdness
+function amountToCents(v: string | number): number {
+  const s = typeof v === 'number' ? v.toFixed(2) : String(v).trim()
+  const m = s.match(/^(-?\d+)(?:\.(\d*))?$/)
+  if (!m) throw new Error('invalid_amount')
+  const dollars = parseInt(m[1], 10)
+  const frac = (m[2] ?? '').padEnd(2, '0').slice(0, 2)
+  const cents = parseInt(frac, 10)
+  return dollars * 100 + (dollars < 0 ? -cents : cents)
+}
+
+// Helper: Normalize event_type to safe charset (snake_case, no spaces, collapsed underscores)
 function normalizeEventType(eventType: string): string {
-  return eventType.toLowerCase().replace(/[^a-z0-9_]/g, '_')
+  return eventType
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
 }
 
 // deno-lint-ignore no-explicit-any
@@ -282,28 +297,34 @@ Deno.serve(async (req) => {
       effectiveIdempotencyKey = body.idempotency_key
     } else {
       // Generate deterministic key from stable action-specific inputs
+      // Include 'audit' namespace IN the hash input to prevent cross-table reuse
       // Use cents for amount to avoid formatting inconsistencies (100 vs 100.0 vs 100.00)
       const amountCents = amountToCents(submittedAmount)
       let keyInput: string
       switch (body.action) {
         case 'mark_paid': {
           const normalizedRef = normalizePaymentRef(body.payment_reference ?? '')
-          keyInput = `mark_paid:${body.payout_id}:${normalizedRef}:${amountCents}`
+          // Namespace included in hash input
+          keyInput = `audit:mark_paid:${body.payout_id}:${normalizedRef}:${amountCents}`
           break
         }
         case 'approve':
-          keyInput = `approve:${body.payout_id}:${amountCents}`
+          keyInput = `audit:approve:${body.payout_id}:${amountCents}`
           break
-        case 'reject':
-          keyInput = `reject:${body.payout_id}:${body.reason ?? ''}`
+        case 'reject': {
+          const normalizedReason = normalizeReason(body.reason ?? '')
+          keyInput = `audit:reject:${body.payout_id}:${normalizedReason}`
           break
-        case 'request_more_info':
-          keyInput = `more_info:${body.payout_id}:${body.reason ?? ''}`
+        }
+        case 'request_more_info': {
+          const normalizedReason = normalizeReason(body.reason ?? '')
+          keyInput = `audit:more_info:${body.payout_id}:${normalizedReason}`
           break
+        }
         default:
-          keyInput = `payout:${body.payout_id}:${body.action}`
+          keyInput = `audit:payout:${body.payout_id}:${body.action}`
       }
-      // Prefix with 'audit' namespace for explicit table targeting
+      // Prefix stored key with 'audit.' for explicit table targeting
       effectiveIdempotencyKey = 'audit.' + await generateDeterministicKey(keyInput)
     }
     
@@ -791,11 +812,12 @@ Deno.serve(async (req) => {
       mark_paid: `Your payout of $${formattedAmount} has been sent.${refText}`,
     }
 
-    // Derive event idempotency key with explicit table namespace + normalized event_type
+    // Generate event idempotency key with explicit namespace IN the hash input
+    // This ensures collision protection even if someone strips prefixes
     const eventType = normalizeEventType(eventTypes[body.action])
-    // Strip 'audit.' prefix from effectiveIdempotencyKey to get base hash for event key
-    const baseHash = effectiveIdempotencyKey.replace(/^audit\./, '')
-    const eventIdempotencyKey = `acctevt.${eventType}:${baseHash}`
+    const amountCents = amountToCents(effectiveAmount)
+    const eventKeyInput = `acctevt:${eventType}:${payout.account_id}:${body.payout_id}:${amountCents}`
+    const eventIdempotencyKey = `acctevt.${eventType}:` + await generateDeterministicKey(eventKeyInput)
     
     const eventResult = await insertAccountEvent(supabaseAdmin, {
       account_id: payout.account_id,

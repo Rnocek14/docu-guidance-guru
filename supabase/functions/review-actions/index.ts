@@ -52,9 +52,18 @@ async function generateDeterministicKey(input: string): Promise<string> {
   return hashHex.slice(0, 48)
 }
 
-// Helper: Normalize event_type to safe charset (snake_case, no spaces)
+// Helper: Normalize event_type to safe charset (snake_case, collapsed underscores)
 function normalizeEventType(eventType: string): string {
-  return eventType.toLowerCase().replace(/[^a-z0-9_]/g, '_')
+  return eventType
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+// Helper: Normalize reason text for idempotency
+function normalizeReason(s: string): string {
+  return s.trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
 // Helper: Idempotent insert for audit_logs (uses idempotency_key for deduplication)
@@ -213,10 +222,9 @@ Deno.serve(async (req) => {
     if (body.idempotency_key) {
       effectiveIdempotencyKey = body.idempotency_key
     } else {
-      // Deterministic key from stable inputs: action + account + current_status
-      // Adding current status means same action on same account but different status = different key
-      const keyInput = `${body.action}:${body.account_id}:${account.status}:${body.reason ?? ''}:${body.flag_id ?? ''}`
-      // Prefix with 'audit' namespace for explicit table targeting
+      // Deterministic key from stable inputs, namespace IN the hash input
+      const normalizedReason = normalizeReason(body.reason ?? '')
+      const keyInput = `audit:${body.action}:${body.account_id}:${account.status}:${normalizedReason}:${body.flag_id ?? ''}`
       effectiveIdempotencyKey = 'audit.' + await generateDeterministicKey(keyInput)
     }
     
@@ -291,10 +299,10 @@ Deno.serve(async (req) => {
           escalate: `Your account has been escalated for additional review.`,
         }
 
-        // Derive event idempotency key with explicit table namespace + normalized event_type
+        // Generate event idempotency key with namespace IN the hash input
         const eventType = normalizeEventType(body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed')
-        const baseHash = effectiveIdempotencyKey.replace(/^audit\./, '')
-        const eventIdempotencyKey = `acctevt.${eventType}:${baseHash}`
+        const eventKeyInput = `acctevt:${eventType}:${body.account_id}:${body.action}:${newStatus}`
+        const eventIdempotencyKey = `acctevt.${eventType}:` + await generateDeterministicKey(eventKeyInput)
         
         const eventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
@@ -391,9 +399,9 @@ Deno.serve(async (req) => {
           },
         })
 
-        // Create trader-visible event with explicit table namespace
-        const baseHash = effectiveIdempotencyKey.replace(/^audit\./, '')
-        const flagEventIdempotencyKey = `acctevt.status_changed:${baseHash}`
+        // Generate event idempotency key with namespace IN the hash input
+        const flagEventKeyInput = `acctevt:status_changed:${body.account_id}:close_flag:${body.flag_id}`
+        const flagEventIdempotencyKey = `acctevt.status_changed:` + await generateDeterministicKey(flagEventKeyInput)
         const flagEventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
           event_type: 'status_changed',
