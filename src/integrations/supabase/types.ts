@@ -912,6 +912,7 @@ export type Database = {
         Row: {
           avatar_url: string | null
           card_payments_blocked: boolean
+          chargeback_count_365d: number
           chargeback_count_90d: number
           chargeback_count_lifetime: number
           created_at: string
@@ -932,6 +933,7 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           card_payments_blocked?: boolean
+          chargeback_count_365d?: number
           chargeback_count_90d?: number
           chargeback_count_lifetime?: number
           created_at?: string
@@ -952,6 +954,7 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           card_payments_blocked?: boolean
+          chargeback_count_365d?: number
           chargeback_count_90d?: number
           chargeback_count_lifetime?: number
           created_at?: string
@@ -1473,6 +1476,14 @@ export type Database = {
         }
         Returns: boolean
       }
+      manual_payout_unfreeze: {
+        Args: {
+          _evidence_notes?: string
+          _reason: string
+          _target_user_id: string
+        }
+        Returns: Json
+      }
       mark_payout_paid: {
         Args: {
           _payment_reference: string
@@ -1581,6 +1592,7 @@ export type Database = {
         | "payout_freeze_auto_chargeback"
         | "card_block_auto_chargeback"
         | "payout_freeze_manual"
+        | "payout_unfreeze_manual"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -1766,6 +1778,7 @@ export const Constants = {
         "payout_freeze_auto_chargeback",
         "card_block_auto_chargeback",
         "payout_freeze_manual",
+        "payout_unfreeze_manual",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
