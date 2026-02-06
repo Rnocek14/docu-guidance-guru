@@ -271,8 +271,27 @@ Deno.serve(async (req) => {
     // Check jurisdiction for payout_send (admin approving = sending)
     if (body.action === 'approve' || body.action === 'mark_paid') {
       // First try to resolve jurisdiction if unknown
-      const { data: resolveResult } = await supabaseAdmin
+      const { data: resolveResult, error: resolveError } = await supabaseAdmin
         .rpc('resolve_user_jurisdiction', { _user_id: account.user_id })
+      
+      // Handle resolver failure with clear message to staff
+      if (resolveError) {
+        console.error('Jurisdiction resolver error:', resolveError)
+      }
+      
+      if (resolveResult && !resolveResult.success) {
+        // Specific message for no geo signals
+        if (resolveResult.reason === 'no_geo_signals') {
+          return new Response(
+            JSON.stringify({ 
+              error: 'Payout blocked: No geo signals recorded for user',
+              hint: 'Record billing country, KYC country, or IP country first. User may need to complete verification.',
+              user_id: account.user_id
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
       
       // Use the canonical service-role RPC for jurisdiction check
       const { data: jurisdictionCheck, error: jurisdictionError } = await supabaseAdmin
@@ -293,15 +312,20 @@ Deno.serve(async (req) => {
       }
 
       if (!jurisdictionCheck?.allowed) {
+        const reason = jurisdictionCheck?.reason || 'jurisdiction_check_failed'
+        const hints: Record<string, string> = {
+          'jurisdiction_unknown': 'No geo signals — record billing/KYC/IP country first',
+          'kyc_required': 'User must complete identity verification before payouts',
+          'country_blocked': 'User country is on blocklist',
+          'payouts_not_allowed': 'Payouts disabled for this region',
+          'no_rules_for_country': 'Country not in allowlist — add jurisdiction rules first'
+        }
+        
         return new Response(
           JSON.stringify({ 
-            error: 'Payout blocked: ' + (jurisdictionCheck?.reason || 'jurisdiction_check_failed'),
+            error: 'Payout blocked: ' + reason,
             country: jurisdictionCheck?.country,
-            hint: jurisdictionCheck?.reason === 'jurisdiction_unknown' 
-              ? 'User must complete KYC or billing verification to establish jurisdiction'
-              : jurisdictionCheck?.reason === 'kyc_required'
-              ? 'User must complete identity verification before payouts'
-              : 'Payouts not available in user region'
+            hint: hints[reason] || 'Payouts not available in user region'
           }),
           { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )

@@ -138,8 +138,10 @@ export type Database = {
           id: string
           idempotency_key: string | null
           ip_address: string | null
+          prev_hash: string | null
           reason: string | null
           request_id: string | null
+          row_hash: string | null
           user_agent: string | null
           user_id: string | null
         }
@@ -151,8 +153,10 @@ export type Database = {
           id?: string
           idempotency_key?: string | null
           ip_address?: string | null
+          prev_hash?: string | null
           reason?: string | null
           request_id?: string | null
+          row_hash?: string | null
           user_agent?: string | null
           user_id?: string | null
         }
@@ -164,8 +168,10 @@ export type Database = {
           id?: string
           idempotency_key?: string | null
           ip_address?: string | null
+          prev_hash?: string | null
           reason?: string | null
           request_id?: string | null
+          row_hash?: string | null
           user_agent?: string | null
           user_id?: string | null
         }
@@ -733,6 +739,36 @@ export type Database = {
           reason_disabled?: string | null
           supports_inbound?: boolean
           supports_outbound?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      payment_system_state: {
+        Row: {
+          id: string
+          is_paused_inbound: boolean
+          is_paused_outbound: boolean
+          pause_reason: string | null
+          paused_at: string | null
+          paused_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          is_paused_inbound?: boolean
+          is_paused_outbound?: boolean
+          pause_reason?: string | null
+          paused_at?: string | null
+          paused_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          is_paused_inbound?: boolean
+          is_paused_outbound?: boolean
+          pause_reason?: string | null
+          paused_at?: string | null
+          paused_by?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -1537,6 +1573,10 @@ export type Database = {
       }
       check_geo_mismatch: { Args: { _user_id: string }; Returns: Json }
       check_liability_alert: { Args: never; Returns: Json }
+      check_payment_system_paused: {
+        Args: { p_direction: string }
+        Returns: Json
+      }
       check_payout_method_duplicate: {
         Args: { _method_hash: string; _user_id: string }
         Returns: Json
@@ -1659,21 +1699,47 @@ export type Database = {
       }
       reset_payout_cycle: { Args: { _account_id: string }; Returns: undefined }
       resolve_user_jurisdiction: { Args: { _user_id: string }; Returns: Json }
-      select_payment_rail: {
+      select_payment_rail:
+        | {
+            Args: {
+              p_amount: number
+              p_country: string
+              p_currency?: string
+              p_direction: string
+              p_method: string
+              p_risk_tier: number
+            }
+            Returns: {
+              priority: number
+              provider: string
+              rail_key: string
+              reason: string
+            }[]
+          }
+        | {
+            Args: {
+              p_amount: number
+              p_country: string
+              p_currency?: string
+              p_direction: string
+              p_method: string
+              p_risk_tier: number
+            }
+            Returns: {
+              priority: number
+              provider: string
+              rail_key: string
+              reason: string
+            }[]
+          }
+      toggle_payment_system: {
         Args: {
-          p_amount: number
-          p_country: string
-          p_currency?: string
-          p_direction: string
-          p_method: string
-          p_risk_tier: number
+          _actor_user_id: string
+          _direction: string
+          _pause: boolean
+          _reason: string
         }
-        Returns: {
-          priority: number
-          provider: string
-          rail_key: string
-          reason: string
-        }[]
+        Returns: Json
       }
       upsert_liability_buffer_settings: {
         Args: { _assumed_avg_first_payout: number; _cash_reserve: number }
@@ -1681,6 +1747,10 @@ export type Database = {
       }
       validate_payout_request: {
         Args: { _account_id: string; _requested_amount: number }
+        Returns: Json
+      }
+      verify_audit_chain: {
+        Args: { _from_date?: string; _to_date?: string }
         Returns: Json
       }
       verify_payout_name_match:
@@ -1745,6 +1815,8 @@ export type Database = {
         | "jurisdiction_blocked"
         | "geo_mismatch_detected"
         | "payout_hold_release_manual"
+        | "payment_system_paused"
+        | "payment_system_resumed"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -1935,6 +2007,8 @@ export const Constants = {
         "jurisdiction_blocked",
         "geo_mismatch_detected",
         "payout_hold_release_manual",
+        "payment_system_paused",
+        "payment_system_resumed",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
