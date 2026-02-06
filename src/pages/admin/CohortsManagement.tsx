@@ -170,9 +170,9 @@ export default function CohortsManagement() {
       // Log audit via admin-actions edge function (service role writes audit_logs)
       const { data: sessionData } = await supabase.auth.getSession();
       if (sessionData?.session?.access_token) {
-        // FIX 2: Safe idempotency key generation with fallback for older browsers
+        // Safe idempotency key generation with collision-resistant fallback
         const idempotencyKey = globalThis.crypto?.randomUUID?.() 
-          ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          ?? `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
         
         try {
           await fetch('https://sfxmgwkrjwuerfkqxokq.supabase.co/functions/v1/admin-actions', {
