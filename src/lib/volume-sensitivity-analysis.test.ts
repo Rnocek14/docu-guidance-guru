@@ -26,6 +26,9 @@ const BASE_ASSUMPTIONS: Omit<MonteCarloAssumptions, 'accountsPerMonth'> = {
     resetPrice: 99,
     lifetimeCapPerUser: 149 * 7,
     attackIntensity: 0,
+    minWinningDaysPerPayout: 0,
+    requireProfitSinceLastPayout: false,
+    payoutCadenceDays: 0,
   },
 };
 

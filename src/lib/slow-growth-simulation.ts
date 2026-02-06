@@ -44,6 +44,9 @@ const SLOW_GROWTH_ASSUMPTIONS: MonteCarloAssumptions = {
     resetPrice: 99,
     lifetimeCapPerUser: 149 * 7, // 7× = $1,043
     attackIntensity: 0,
+    minWinningDaysPerPayout: 0,
+    requireProfitSinceLastPayout: false,
+    payoutCadenceDays: 0,
   },
 };
 
