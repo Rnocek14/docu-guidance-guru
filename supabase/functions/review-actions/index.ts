@@ -351,7 +351,7 @@ Deno.serve(async (req) => {
             .is('confirmed_at', null)
         }
 
-        result = { ...result, previous_status: previousStatus, new_status: newStatus, deduplicated: wasDuplicate, audit_deduplicated: !auditResult.inserted, event_deduplicated: !eventResult.inserted, audit_idempotency_key: effectiveIdempotencyKey, event_idempotency_key: eventIdempotencyKey }
+        result = { ...result, previous_status: previousStatus, new_status: newStatus, deduplicated: wasDuplicate, audit_deduplicated: !auditResult.inserted, event_deduplicated: !eventResult.inserted, audit_idempotency_key: effectiveIdempotencyKey, event_idempotency_key: eventIdempotencyKey, event_type: eventTypeNorm }
         break
       }
 
@@ -447,7 +447,7 @@ Deno.serve(async (req) => {
         
         console.log(`close_flag dedupe: audit_inserted=${flagAuditResult.inserted} audit_key=${effectiveIdempotencyKey}, event_inserted=${flagEventResult.inserted} event_key=${flagEventIdempotencyKey}`)
 
-        result = { ...result, flag_id: body.flag_id, flag_closed: true, previous_status: previousStatus, new_status: previousStatus, deduplicated: !flagAuditResult.inserted && !flagEventResult.inserted, audit_deduplicated: !flagAuditResult.inserted, event_deduplicated: !flagEventResult.inserted, audit_idempotency_key: effectiveIdempotencyKey, event_idempotency_key: flagEventIdempotencyKey }
+        result = { ...result, flag_id: body.flag_id, flag_closed: true, previous_status: previousStatus, new_status: previousStatus, deduplicated: !flagAuditResult.inserted && !flagEventResult.inserted, audit_deduplicated: !flagAuditResult.inserted, event_deduplicated: !flagEventResult.inserted, audit_idempotency_key: effectiveIdempotencyKey, event_idempotency_key: flagEventIdempotencyKey, event_type: flagEventTypeNorm }
         break
       }
     }

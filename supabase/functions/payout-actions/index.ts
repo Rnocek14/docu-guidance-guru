@@ -869,6 +869,7 @@ Deno.serve(async (req) => {
         request_id: requestId,
         audit_idempotency_key: effectiveIdempotencyKey,
         event_idempotency_key: eventIdempotencyKey,
+        event_type: eventTypeNorm,
         deduplicated: wasDuplicate, // Clear signal: was this a retry that got deduplicated?
         audit_deduplicated: !auditResult.inserted,
         event_deduplicated: !eventResult.inserted,
