@@ -187,8 +187,9 @@ export default function PayoutRequest() {
           />
         )}
 
-        {/* Eligibility Status (skip if reason_code is PROFIT_BUFFER — handled by dedicated card) */}
-        {eligibility && !eligibility.eligible && isWindowOpen && eligibility.reason_code !== 'PROFIT_BUFFER' && (
+        {/* Eligibility Status (profit gates get dedicated card instead) */}
+        {eligibility && !eligibility.eligible && isWindowOpen &&
+          eligibility.reason_code !== 'PROFIT_BUFFER' && eligibility.reason_code !== 'NO_PROFIT' && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Not Eligible for Payout</AlertTitle>
