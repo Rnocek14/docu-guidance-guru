@@ -6,13 +6,13 @@ const corsHeaders = {
 }
 
 // All payout actions are admin-only
-type PayoutAction = 'approve' | 'reject' | 'request_more_info' | 'mark_paid'
+type PayoutAction = 'approve' | 'reject' | 'request_more_info' | 'initiate_payment'
 
 interface PayoutActionRequest {
   action: PayoutAction
   payout_id: string
   reason?: string           // Required for reject, request_more_info
-  payment_reference?: string // Required for mark_paid
+  provider?: string         // Required for initiate_payment
   idempotency_key?: string
   skip_fraud_check?: boolean // Admin override for fraud checks (logged)
 }
@@ -31,9 +31,9 @@ const PAYOUT_TRANSITIONS: Record<PayoutAction, { from: string[]; to: string }> =
     from: ['pending'],
     to: 'under_review'
   },
-  mark_paid: {
+  initiate_payment: {
     from: ['approved'],
-    to: 'paid'
+    to: 'payment_initiated'
   },
 }
 
@@ -236,9 +236,9 @@ Deno.serve(async (req) => {
       )
     }
 
-    if (body.action === 'mark_paid' && !body.payment_reference) {
+    if (body.action === 'initiate_payment' && !body.provider) {
       return new Response(
-        JSON.stringify({ error: 'Payment reference is required for mark_paid' }),
+        JSON.stringify({ error: 'Provider is required for initiate_payment' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -297,15 +297,12 @@ Deno.serve(async (req) => {
       effectiveIdempotencyKey = body.idempotency_key
     } else {
       // Generate deterministic key from stable action-specific inputs
-      // Include 'audit' namespace IN the hash input to prevent cross-table reuse
-      // Use cents for amount to avoid formatting inconsistencies (100 vs 100.0 vs 100.00)
       const amountCents = amountToCents(submittedAmount)
       let keyInput: string
       switch (body.action) {
-        case 'mark_paid': {
-          const normalizedRef = normalizePaymentRef(body.payment_reference ?? '')
-          // Namespace included in hash input
-          keyInput = `audit:mark_paid:${body.payout_id}:${normalizedRef}:${amountCents}`
+        case 'initiate_payment': {
+          const normalizedProvider = (body.provider ?? '').trim().toLowerCase()
+          keyInput = `audit:initiate_payment:${body.payout_id}:${normalizedProvider}:${amountCents}`
           break
         }
         case 'approve':
@@ -324,7 +321,6 @@ Deno.serve(async (req) => {
         default:
           keyInput = `audit:payout:${body.payout_id}:${body.action}`
       }
-      // Prefix stored key with 'audit.' for explicit table targeting
       effectiveIdempotencyKey = 'audit.' + await generateDeterministicKey(keyInput)
     }
     
@@ -338,7 +334,7 @@ Deno.serve(async (req) => {
     // =============================================
     
     // Check jurisdiction for payout_send (admin approving = sending)
-    if (body.action === 'approve' || body.action === 'mark_paid') {
+    if (body.action === 'approve' || body.action === 'initiate_payment') {
       // First try to resolve jurisdiction if unknown
       const { data: resolveResult, error: resolveError } = await supabaseAdmin
         .rpc('resolve_user_jurisdiction', { _user_id: account.user_id })
@@ -674,40 +670,40 @@ Deno.serve(async (req) => {
     // EXECUTE PAYOUT STATE CHANGE
     // =============================================
 
-    // Effective values - will be set from RPC result for mark_paid
+    // Effective values
     let effectiveNewStatus = newStatus
-    let effectivePaymentReference = body.payment_reference || null
+    let effectivePaymentReference: string | null = null
     let effectivePaidAt: string | null = null
     let effectiveAmount = submittedAmount
     let wasIdempotentRpc = false
+    let paymentId: string | null = null
 
-    // For mark_paid, use the atomic RPC that handles payout + cycle reset in one transaction
-    if (body.action === 'mark_paid') {
-      const { data: markPaidResult, error: markPaidError } = await supabaseAdmin.rpc('mark_payout_paid', {
+    // For initiate_payment, use the atomic RPC
+    if (body.action === 'initiate_payment') {
+      const { data: initiateResult, error: initiateError } = await supabaseAdmin.rpc('initiate_payout_payment', {
         _payout_id: body.payout_id,
-        _payment_reference: body.payment_reference,
-        _reviewed_by: userId
+        _provider: body.provider,
+        _amount: submittedAmount,
+        _initiated_by: userId
       })
       
-      if (markPaidError) {
-        throw new Error(`Failed to mark payout paid: ${markPaidError.message}`)
+      if (initiateError) {
+        throw new Error(`Failed to initiate payment: ${initiateError.message}`)
       }
       
       // deno-lint-ignore no-explicit-any
-      const result = markPaidResult as any
+      const result = initiateResult as any
       if (!result?.success) {
         return new Response(
-          JSON.stringify({ error: result?.error || 'Failed to mark payout paid' }),
+          JSON.stringify({ error: result?.error || 'Failed to initiate payment', details: result }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
       
-      // Extract effective values from RPC result (DB truth)
-      effectiveNewStatus = result.payout?.status || 'paid'
-      effectivePaymentReference = result.payout?.payment_reference || body.payment_reference
-      effectivePaidAt = result.payout?.paid_at || new Date().toISOString()
-      effectiveAmount = result.payout?.amount || submittedAmount
-      wasIdempotentRpc = result.idempotent || false
+      effectiveNewStatus = 'payment_initiated'
+      paymentId = result.payment_id
+      effectiveAmount = result.amount || submittedAmount
+      wasIdempotentRpc = false
       
     } else {
       // For non-mark_paid actions, use regular update flow
@@ -763,14 +759,14 @@ Deno.serve(async (req) => {
       approve: 'payout_approved',
       reject: 'payout_rejected',
       request_more_info: 'status_changed',
-      mark_paid: 'status_changed',
+      initiate_payment: 'status_changed',
     }
 
     const eventTypes: Record<PayoutAction, string> = {
       approve: 'payout_approved',
       reject: 'payout_rejected',
       request_more_info: 'payout_under_review',
-      mark_paid: 'payout_paid',
+      initiate_payment: 'status_changed',
     }
 
     // Create audit log with full verification details (use effective values)
@@ -809,13 +805,11 @@ Deno.serve(async (req) => {
 
     // Create trader-visible event (use effective values)
     const formattedAmount = effectiveAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    // Handle null payment reference cleanly in message
-    const refText = effectivePaymentReference ? ` Reference: ${effectivePaymentReference}` : ''
     const eventExplanations: Record<PayoutAction, string> = {
       approve: `Your payout request for $${formattedAmount} has been approved.`,
       reject: `Your payout request has been declined. Reason: ${body.reason}`,
       request_more_info: `Additional information has been requested for your payout. Reason: ${body.reason}`,
-      mark_paid: `Your payout of $${formattedAmount} has been sent.${refText}`,
+      initiate_payment: `Your payout of $${formattedAmount} is being processed via ${body.provider}.`,
     }
 
     // Generate event idempotency key with explicit namespace IN the hash input
@@ -872,13 +866,13 @@ Deno.serve(async (req) => {
         audit_idempotency_key: effectiveIdempotencyKey,
         event_idempotency_key: eventIdempotencyKey,
         event_type: eventTypeNorm,
-        deduplicated: wasDuplicate, // Clear signal: was this a retry that got deduplicated?
+        deduplicated: wasDuplicate,
         audit_deduplicated: !auditResult.inserted,
         event_deduplicated: !eventResult.inserted,
-        // mark_paid specific fields
-        ...(body.action === 'mark_paid' ? {
-          paid_at: effectivePaidAt,
-          payment_reference: effectivePaymentReference,
+        // initiate_payment specific fields
+        ...(body.action === 'initiate_payment' ? {
+          payment_id: paymentId,
+          provider: body.provider,
         } : {}),
         // P0 verification results
         verification: body.action === 'approve' ? {
