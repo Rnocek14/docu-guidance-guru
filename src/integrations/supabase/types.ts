@@ -891,6 +891,74 @@ export type Database = {
           },
         ]
       }
+      payout_payments: {
+        Row: {
+          amount: number
+          confirmed_at: string | null
+          created_at: string
+          currency: string
+          failed_at: string | null
+          failure_code: string | null
+          failure_reason: string | null
+          id: string
+          initiated_at: string
+          initiated_by: string
+          payout_id: string
+          provider: string
+          provider_event_id: string | null
+          provider_payment_id: string | null
+          raw_webhook: Json | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          confirmed_at?: string | null
+          created_at?: string
+          currency?: string
+          failed_at?: string | null
+          failure_code?: string | null
+          failure_reason?: string | null
+          id?: string
+          initiated_at?: string
+          initiated_by: string
+          payout_id: string
+          provider: string
+          provider_event_id?: string | null
+          provider_payment_id?: string | null
+          raw_webhook?: Json | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          confirmed_at?: string | null
+          created_at?: string
+          currency?: string
+          failed_at?: string | null
+          failure_code?: string | null
+          failure_reason?: string | null
+          id?: string
+          initiated_at?: string
+          initiated_by?: string
+          payout_id?: string
+          provider?: string
+          provider_event_id?: string | null
+          provider_payment_id?: string | null
+          raw_webhook?: Json | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payout_payments_payout_id_fkey"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payouts: {
         Row: {
           account_id: string
@@ -1607,6 +1675,17 @@ export type Database = {
         Args: { _method_hash: string; _user_id: string }
         Returns: Json
       }
+      confirm_payout_payment: {
+        Args: {
+          _confirmed_at?: string
+          _payout_id: string
+          _provider: string
+          _provider_event_id: string
+          _provider_payment_id: string
+          _raw_webhook?: Json
+        }
+        Returns: Json
+      }
       detect_trade_correlations:
         | {
             Args: {
@@ -1633,6 +1712,18 @@ export type Database = {
             }
             Returns: Json
           }
+      fail_payout_payment: {
+        Args: {
+          _failure_code?: string
+          _failure_reason?: string
+          _payout_id: string
+          _provider: string
+          _provider_event_id: string
+          _provider_payment_id: string
+          _raw_webhook?: Json
+        }
+        Returns: Json
+      }
       get_cohort_account_stats: {
         Args: never
         Returns: {
@@ -1668,6 +1759,16 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      initiate_payout_payment: {
+        Args: {
+          _amount: number
+          _currency?: string
+          _initiated_by?: string
+          _payout_id: string
+          _provider: string
+        }
+        Returns: Json
       }
       manual_payout_hold_release: {
         Args: {
@@ -1860,6 +1961,9 @@ export type Database = {
         | "approved"
         | "rejected"
         | "paid"
+        | "payment_initiated"
+        | "paid_confirmed"
+        | "payment_failed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -2054,6 +2158,9 @@ export const Constants = {
         "approved",
         "rejected",
         "paid",
+        "payment_initiated",
+        "paid_confirmed",
+        "payment_failed",
       ],
     },
   },
