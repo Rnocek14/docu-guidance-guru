@@ -786,6 +786,7 @@ Deno.serve(async (req) => {
         action_type: body.action,
         submitted_amount: submittedAmount,
         effective_amount: effectiveAmount,
+        effective_amount_cents: amountToCents(effectiveAmount), // For audit trail
         calculated_eligible_amount: calculatedEligibleAmount,
         eligibility_check: eligibility,
         correlations_check: correlations?.has_correlations ? {
@@ -800,6 +801,9 @@ Deno.serve(async (req) => {
         actor_role: 'admin',
       },
     })
+    
+    // Log dedupe result for ops visibility
+    console.log(`payout audit dedupe: action=${body.action}, inserted=${auditResult.inserted}, key=${effectiveIdempotencyKey}`)
 
     // Create trader-visible event (use effective values)
     const formattedAmount = effectiveAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -814,27 +818,34 @@ Deno.serve(async (req) => {
 
     // Generate event idempotency key with explicit namespace IN the hash input
     // This ensures collision protection even if someone strips prefixes
-    const eventType = normalizeEventType(eventTypes[body.action])
-    const amountCents = amountToCents(effectiveAmount)
-    const eventKeyInput = `acctevt:${eventType}:${payout.account_id}:${body.payout_id}:${amountCents}`
-    const eventIdempotencyKey = `acctevt.${eventType}:` + await generateDeterministicKey(eventKeyInput)
+    // CRITICAL: Use DB-sourced effectiveAmount (not client amount) for mark_paid idempotency
+    const rawEventType = eventTypes[body.action]
+    const eventTypeNorm = normalizeEventType(rawEventType)
+    const amountCents = amountToCents(effectiveAmount) // effectiveAmount comes from DB on mark_paid
+    const eventKeyInput = `acctevt:${eventTypeNorm}:${payout.account_id}:${body.payout_id}:${amountCents}`
+    const eventIdempotencyKey = `acctevt.${eventTypeNorm}:` + await generateDeterministicKey(eventKeyInput)
     
     const eventResult = await insertAccountEvent(supabaseAdmin, {
       account_id: payout.account_id,
-      event_type: eventTypes[body.action],
+      event_type: rawEventType, // DB enum expects exact value (already snake_case)
       request_id: requestId,
-      idempotency_key: eventIdempotencyKey, // Now uses idempotency_key for deduplication
+      idempotency_key: eventIdempotencyKey,
       event_data: {
         payout_id: body.payout_id,
         previous_status: previousStatus,
         new_status: effectiveNewStatus,
         amount: effectiveAmount,
+        amount_cents: amountCents, // For audit trail
         explanation: eventExplanations[body.action],
         payment_reference: effectivePaymentReference,
         paid_at: effectivePaidAt,
         actor_role: 'admin',
+        event_type_normalized: eventTypeNorm, // For audit trail
       },
     })
+    
+    // Log dedupe result for ops visibility
+    console.log(`payout event dedupe: action=${body.action}, inserted=${eventResult.inserted}, key=${eventIdempotencyKey}`)
 
     // Determine if this was a duplicate request
     const wasDuplicate = (!auditResult.inserted && !eventResult.inserted) || wasIdempotentRpc
