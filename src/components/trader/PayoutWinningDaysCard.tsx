@@ -23,12 +23,12 @@ export function PayoutWinningDaysCard({
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-success" />
-            Trading Days Requirement Met
+            Winning Days Requirement Met
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            You've completed {tradingDaysSincePayout} trading day{tradingDaysSincePayout !== 1 ? 's' : ''} since
+            You've completed {tradingDaysSincePayout} winning trading day{tradingDaysSincePayout !== 1 ? 's' : ''} since
             your last payout, meeting the {requiredTradingDays}-day requirement.
           </p>
         </CardContent>
@@ -41,7 +41,7 @@ export function PayoutWinningDaysCard({
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium flex items-center gap-2">
           <CalendarDays className="h-4 w-4 text-warning" />
-          Trading Days Required
+          Winning Trading Days Required
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -56,7 +56,7 @@ export function PayoutWinningDaysCard({
             </span>
           </div>
           <p className="text-xs text-muted-foreground">
-            You need at least {requiredTradingDays} trading day{requiredTradingDays !== 1 ? 's' : ''} since
+            You need at least {requiredTradingDays} winning trading day{requiredTradingDays !== 1 ? 's' : ''} since
             your last payout before requesting another.
           </p>
         </div>

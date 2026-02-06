@@ -205,7 +205,6 @@ export interface PayoutEligibility {
   max_payout_absolute?: number | null;
   account_status?: string;
   days_since_last_payout?: number | null;
-  trading_days_since_payout?: number | null;
   kyc_status?: string;
   // Cooling period fields
   payout_window_opened?: boolean;
@@ -224,7 +223,8 @@ export interface PayoutEligibility {
   profit_buffer_met?: boolean;
   profit_buffer_progress_pct?: number;
   // Winning trading days fields
-  required_trading_days?: number;
+  winning_days_since_payout?: number;
+  required_winning_days?: number;
   winning_days_remaining?: number;
   winning_days_progress_pct?: number;
 }
