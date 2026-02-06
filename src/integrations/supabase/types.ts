@@ -488,6 +488,39 @@ export type Database = {
         }
         Relationships: []
       }
+      geo_signals: {
+        Row: {
+          confidence: number
+          country_code: string
+          id: string
+          metadata: Json
+          observed_at: string
+          signal_type: string
+          source: string | null
+          user_id: string
+        }
+        Insert: {
+          confidence?: number
+          country_code: string
+          id?: string
+          metadata?: Json
+          observed_at?: string
+          signal_type: string
+          source?: string | null
+          user_id: string
+        }
+        Update: {
+          confidence?: number
+          country_code?: string
+          id?: string
+          metadata?: Json
+          observed_at?: string
+          signal_type?: string
+          source?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       identity_clusters: {
         Row: {
           cluster_name: string | null
@@ -514,6 +547,57 @@ export type Database = {
           id?: string
           is_flagged?: boolean
           risk_score?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      jurisdiction_rules: {
+        Row: {
+          allow_evaluation: boolean
+          allow_funded_sim: boolean
+          allow_payouts: boolean
+          country_code: string
+          created_at: string
+          disclosure_version: string
+          id: string
+          is_allowed: boolean
+          reason: string | null
+          require_kyc_before_payout: boolean
+          require_kyc_before_trading: boolean
+          require_market_data_attestation: boolean
+          terms_version: string
+          updated_at: string
+        }
+        Insert: {
+          allow_evaluation?: boolean
+          allow_funded_sim?: boolean
+          allow_payouts?: boolean
+          country_code: string
+          created_at?: string
+          disclosure_version?: string
+          id?: string
+          is_allowed?: boolean
+          reason?: string | null
+          require_kyc_before_payout?: boolean
+          require_kyc_before_trading?: boolean
+          require_market_data_attestation?: boolean
+          terms_version?: string
+          updated_at?: string
+        }
+        Update: {
+          allow_evaluation?: boolean
+          allow_funded_sim?: boolean
+          allow_payouts?: boolean
+          country_code?: string
+          created_at?: string
+          disclosure_version?: string
+          id?: string
+          is_allowed?: boolean
+          reason?: string | null
+          require_kyc_before_payout?: boolean
+          require_kyc_before_trading?: boolean
+          require_market_data_attestation?: boolean
+          terms_version?: string
           updated_at?: string
         }
         Relationships: []
@@ -1297,6 +1381,33 @@ export type Database = {
           },
         ]
       }
+      user_jurisdiction: {
+        Row: {
+          confidence: number
+          country_code: string
+          notes: string | null
+          resolution_method: string
+          resolved_at: string
+          user_id: string
+        }
+        Insert: {
+          confidence?: number
+          country_code: string
+          notes?: string | null
+          resolution_method: string
+          resolved_at?: string
+          user_id: string
+        }
+        Update: {
+          confidence?: number
+          country_code?: string
+          notes?: string | null
+          resolution_method?: string
+          resolved_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           assigned_at: string
@@ -1403,12 +1514,14 @@ export type Database = {
       }
     }
     Functions: {
+      assert_jurisdiction_allowed: { Args: { p_action: string }; Returns: Json }
       bootstrap_first_admin: { Args: { _user_id: string }; Returns: boolean }
       bump_fingerprint_seen: { Args: { _id: string }; Returns: undefined }
       calculate_payout_eligibility: {
         Args: { _account_id: string }
         Returns: Json
       }
+      check_geo_mismatch: { Args: { _user_id: string }; Returns: Json }
       check_liability_alert: { Args: never; Returns: Json }
       check_payout_method_duplicate: {
         Args: { _method_hash: string; _user_id: string }
@@ -1510,7 +1623,19 @@ export type Database = {
         }
         Returns: Json
       }
+      record_geo_signal: {
+        Args: {
+          _confidence?: number
+          _country_code: string
+          _metadata?: Json
+          _signal_type: string
+          _source?: string
+          _user_id: string
+        }
+        Returns: Json
+      }
       reset_payout_cycle: { Args: { _account_id: string }; Returns: undefined }
+      resolve_user_jurisdiction: { Args: { _user_id: string }; Returns: Json }
       select_payment_rail: {
         Args: {
           p_amount: number
@@ -1593,6 +1718,9 @@ export type Database = {
         | "card_block_auto_chargeback"
         | "payout_freeze_manual"
         | "payout_unfreeze_manual"
+        | "jurisdiction_resolved"
+        | "jurisdiction_blocked"
+        | "geo_mismatch_detected"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -1779,6 +1907,9 @@ export const Constants = {
         "card_block_auto_chargeback",
         "payout_freeze_manual",
         "payout_unfreeze_manual",
+        "jurisdiction_resolved",
+        "jurisdiction_blocked",
+        "geo_mismatch_detected",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
