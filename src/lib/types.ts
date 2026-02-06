@@ -222,4 +222,5 @@ export interface PayoutEligibility {
   profit_buffer_required?: number | null;
   profit_buffer_remaining?: number;
   profit_buffer_met?: boolean;
+  profit_buffer_progress_pct?: number;
 }

@@ -7,6 +7,7 @@ interface PayoutProfitBufferCardProps {
   realizedProfit: number;
   profitBufferRemaining: number;
   profitBufferMet: boolean;
+  profitBufferProgressPct?: number;
 }
 
 export function PayoutProfitBufferCard({
@@ -14,10 +15,11 @@ export function PayoutProfitBufferCard({
   realizedProfit,
   profitBufferRemaining,
   profitBufferMet,
+  profitBufferProgressPct,
 }: PayoutProfitBufferCardProps) {
-  const progress = profitBufferRequired > 0
+  const progress = profitBufferProgressPct ?? (profitBufferRequired > 0
     ? Math.min(100, (realizedProfit / profitBufferRequired) * 100)
-    : 100;
+    : 100);
 
   if (profitBufferMet) {
     return (
