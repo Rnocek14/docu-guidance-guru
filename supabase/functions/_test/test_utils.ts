@@ -129,21 +129,18 @@ export function assertValidEventKey(key: string, label: string = "event_idempote
  * 
  * For audit-only actions (like add_note), pass hasEvent=false.
  * For state-changing actions that emit events, pass hasEvent=true (default).
- * 
- * @param body - The parsed response JSON
- * @param hasEvent - Whether this action emits account_events (default: true)
- * @param label - Descriptive label for error messages
  */
 export function assertDedupeFieldTypes(
   body: Record<string, unknown>,
   hasEvent: boolean = true,
   label: string = "response"
 ): void {
-  // Audit fields are always present
+  // Pick the correct audit dedupe field (some actions use `deduplicated` alias)
+  const auditDedupe = body.audit_deduplicated ?? body.deduplicated;
   assertEquals(
-    typeof body.audit_deduplicated ?? typeof body.deduplicated,
+    typeof auditDedupe,
     "boolean",
-    `${label}: audit_deduplicated (or deduplicated) must be boolean`
+    `${label}: audit_deduplicated (or deduplicated) must be boolean, got ${typeof auditDedupe}`
   );
 
   if (hasEvent) {
@@ -153,24 +150,26 @@ export function assertDedupeFieldTypes(
       `${label}: event_deduplicated must be boolean when event is emitted`
     );
     assertExists(body.event_idempotency_key, `${label}: event_idempotency_key must exist`);
+    assertExists(body.event_type, `${label}: event_type must exist when event is emitted`);
+    assertEquals(
+      typeof body.event_type,
+      "string",
+      `${label}: event_type must be string when event is emitted`
+    );
   } else {
-    // When no event is emitted, fields should be explicitly null
-    assertEquals(
-      body.event_idempotency_key,
-      null,
-      `${label}: event_idempotency_key must be null when no event is emitted`
-    );
-    assertEquals(
-      body.event_deduplicated,
-      null,
-      `${label}: event_deduplicated must be null when no event is emitted`
-    );
+    assertEquals(body.event_idempotency_key, null, `${label}: event_idempotency_key must be null when no event`);
+    assertEquals(body.event_deduplicated, null, `${label}: event_deduplicated must be null when no event`);
+    assertEquals(body.event_type, null, `${label}: event_type must be null when no event`);
   }
 }
 
+// =============================================
+// ENV VAR HELPERS
+// =============================================
+
 /**
- * Assert required env vars are present, with a clear error message.
- * Call at module top-level to fail fast with actionable guidance.
+ * Soft check: prints a warning listing missing env vars.
+ * Tests using these vars should set `ignore: !VAR` to skip gracefully.
  */
 export function requireEnvVars(vars: Record<string, string | undefined>): void {
   const missing = Object.entries(vars)
@@ -181,6 +180,22 @@ export function requireEnvVars(vars: Record<string, string | undefined>): void {
       `⚠️  Missing env vars for idempotency tests: ${missing.join(", ")}\n` +
       `   Tests requiring these will be skipped.\n` +
       `   Set them in .env or pass via CLI to run full suite.`
+    );
+  }
+}
+
+/**
+ * Hard check: throws if any env var is missing.
+ * Use for tests that must never be silently skipped (e.g., CI acceptance tests).
+ */
+export function requireEnvVarsStrict(vars: Record<string, string | undefined>): void {
+  const missing = Object.entries(vars)
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required env vars: ${missing.join(", ")}. ` +
+      `Set them in .env or pass via CLI.`
     );
   }
 }
