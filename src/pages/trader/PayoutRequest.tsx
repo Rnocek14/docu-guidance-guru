@@ -187,8 +187,8 @@ export default function PayoutRequest() {
           />
         )}
 
-        {/* Eligibility Status */}
-        {eligibility && !eligibility.eligible && isWindowOpen && (
+        {/* Eligibility Status (skip if reason_code is PROFIT_BUFFER — handled by dedicated card) */}
+        {eligibility && !eligibility.eligible && isWindowOpen && eligibility.reason_code !== 'PROFIT_BUFFER' && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Not Eligible for Payout</AlertTitle>
@@ -199,7 +199,7 @@ export default function PayoutRequest() {
           </Alert>
         )}
 
-        {/* Profit Buffer Card (repeat payouts only) */}
+        {/* Profit Buffer Card — show on eligible + has_prior_payout OR on denial with PROFIT_BUFFER/NO_PROFIT */}
         {eligibility && isWindowOpen && eligibility.profit_buffer_required != null && eligibility.has_prior_payout && (
           <PayoutProfitBufferCard
             profitBufferRequired={eligibility.profit_buffer_required}
