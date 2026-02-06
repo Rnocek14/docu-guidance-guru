@@ -98,6 +98,7 @@ Deno.test({
     const b2 = await r2.json();
     console.log("Second add_note response:", b2);
 
+    assertDedupeFieldTypes(b2, false, "second add_note");
     assertEquals(r2.status, 200, "Second call should succeed");
     assertEquals(b2.success, true, "Second call should report success");
     
@@ -291,6 +292,7 @@ Deno.test({
     const b2 = await r2.json();
     console.log("Second clear_breach response:", b2);
 
+    assertDedupeFieldTypes(b2, true, "second clear_breach");
     assertEquals(r2.status, 200, "Second call should succeed");
     assertEquals(b2.success, true, "Second call should report success");
     assertEquals(b2.audit_idempotency_key, b1.audit_idempotency_key, "Audit keys should match");

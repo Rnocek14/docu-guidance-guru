@@ -5,7 +5,7 @@
  * for both payout-actions and review-actions test suites.
  */
 
-import { assert, assertExists } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assert, assertEquals, assertExists } from "https://deno.land/std@0.224.0/assert/mod.ts";
 
 // =============================================
 // KEY FORMAT CONSTANTS
@@ -135,8 +135,10 @@ export function assertDedupeFieldTypes(
   hasEvent: boolean = true,
   label: string = "response"
 ): void {
+  // deno-lint-ignore no-explicit-any
+  const b = body as Record<string, any>;
   // Pick the correct audit dedupe field (some actions use `deduplicated` alias)
-  const auditDedupe = body.audit_deduplicated ?? body.deduplicated;
+  const auditDedupe = b.audit_deduplicated ?? b.deduplicated;
   assertEquals(
     typeof auditDedupe,
     "boolean",
@@ -145,21 +147,17 @@ export function assertDedupeFieldTypes(
 
   if (hasEvent) {
     assertEquals(
-      typeof body.event_deduplicated,
+      typeof b.event_deduplicated,
       "boolean",
       `${label}: event_deduplicated must be boolean when event is emitted`
     );
-    assertExists(body.event_idempotency_key, `${label}: event_idempotency_key must exist`);
-    assertExists(body.event_type, `${label}: event_type must exist when event is emitted`);
-    assertEquals(
-      typeof body.event_type,
-      "string",
-      `${label}: event_type must be string when event is emitted`
-    );
+    assertExists(b.event_idempotency_key, `${label}: event_idempotency_key must exist`);
+    assertExists(b.event_type, `${label}: event_type must exist when event is emitted`);
+    assertEquals(typeof b.event_type, "string", `${label}: event_type must be string when event is emitted`);
   } else {
-    assertEquals(body.event_idempotency_key, null, `${label}: event_idempotency_key must be null when no event`);
-    assertEquals(body.event_deduplicated, null, `${label}: event_deduplicated must be null when no event`);
-    assertEquals(body.event_type, null, `${label}: event_type must be null when no event`);
+    assertEquals(b.event_idempotency_key, null, `${label}: event_idempotency_key must be null when no event`);
+    assertEquals(b.event_deduplicated, null, `${label}: event_deduplicated must be null when no event`);
+    assertEquals(b.event_type, null, `${label}: event_type must be null when no event`);
   }
 }
 
