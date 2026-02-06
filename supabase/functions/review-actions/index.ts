@@ -306,6 +306,12 @@ Deno.serve(async (req) => {
         // CRITICAL: Use SAME normalized value for hash AND event_type column
         const rawEventType = body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed'
         const eventTypeNorm = normalizeEventType(rawEventType)
+        
+        // Drift guard: warn if normalization changed the value (enum mismatch risk)
+        if (rawEventType !== eventTypeNorm) {
+          console.warn('DRIFT: event_type normalization changed value', { rawEventType, eventTypeNorm, action: body.action })
+        }
+        
         const eventKeyInput = `acctevt:${eventTypeNorm}:${body.account_id}:${body.action}:${newStatus}`
         const eventIdempotencyKey = `acctevt.${eventTypeNorm}:` + await generateDeterministicKey(eventKeyInput)
         

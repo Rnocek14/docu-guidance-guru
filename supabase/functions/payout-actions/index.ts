@@ -821,6 +821,12 @@ Deno.serve(async (req) => {
     // Store raw in event_data if needed for debugging
     const rawEventType = eventTypes[body.action]
     const eventTypeNorm = normalizeEventType(rawEventType)
+    
+    // Drift guard: warn if normalization changed the value (enum mismatch risk)
+    if (rawEventType !== eventTypeNorm) {
+      console.warn('DRIFT: event_type normalization changed value', { rawEventType, eventTypeNorm, action: body.action })
+    }
+    
     const amountCents = amountToCents(effectiveAmount) // effectiveAmount comes from DB on mark_paid
     const eventKeyInput = `acctevt:${eventTypeNorm}:${payout.account_id}:${body.payout_id}:${amountCents}`
     const eventIdempotencyKey = `acctevt.${eventTypeNorm}:` + await generateDeterministicKey(eventKeyInput)
