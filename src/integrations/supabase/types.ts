@@ -1565,6 +1565,23 @@ export type Database = {
         Args: { _user_id: string; p_action: string }
         Returns: Json
       }
+      audit_row_canonical: {
+        Args: {
+          _account_id: string
+          _action: string
+          _created_at: string
+          _details: Json
+          _id: string
+          _idempotency: string
+          _ip: string
+          _prev_hash: string
+          _reason: string
+          _request_id: string
+          _ua: string
+          _user_id: string
+        }
+        Returns: string
+      }
       bootstrap_first_admin: { Args: { _user_id: string }; Returns: boolean }
       bump_fingerprint_seen: { Args: { _id: string }; Returns: undefined }
       calculate_payout_eligibility: {
@@ -1826,6 +1843,7 @@ export type Database = {
         | "payout_hold_release_manual"
         | "payment_system_paused"
         | "payment_system_resumed"
+        | "payout_paid"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -2018,6 +2036,7 @@ export const Constants = {
         "payout_hold_release_manual",
         "payment_system_paused",
         "payment_system_resumed",
+        "payout_paid",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
