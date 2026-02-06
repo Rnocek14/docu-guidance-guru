@@ -291,6 +291,9 @@ Deno.serve(async (req) => {
             actor_role: actorRole,
           },
         })
+        
+        // Log dedupe result for ops visibility
+        console.log(`review audit dedupe: action=${body.action}, inserted=${auditResult.inserted}, key=${effectiveIdempotencyKey}`)
 
         // Create trader-visible event (idempotent)
         const eventExplanations: Record<string, string> = {
@@ -300,13 +303,15 @@ Deno.serve(async (req) => {
         }
 
         // Generate event idempotency key with namespace IN the hash input
-        const eventType = normalizeEventType(body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed')
-        const eventKeyInput = `acctevt:${eventType}:${body.account_id}:${body.action}:${newStatus}`
-        const eventIdempotencyKey = `acctevt.${eventType}:` + await generateDeterministicKey(eventKeyInput)
+        // CRITICAL: Use the SAME normalized value for both hash AND insert to prevent mismatch
+        const rawEventType = body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed'
+        const eventTypeNorm = normalizeEventType(rawEventType)
+        const eventKeyInput = `acctevt:${eventTypeNorm}:${body.account_id}:${body.action}:${newStatus}`
+        const eventIdempotencyKey = `acctevt.${eventTypeNorm}:` + await generateDeterministicKey(eventKeyInput)
         
         const eventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
-          event_type: body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed',
+          event_type: rawEventType, // DB enum expects exact value (already snake_case)
           request_id: requestId,
           idempotency_key: eventIdempotencyKey,
           event_data: {
@@ -315,8 +320,12 @@ Deno.serve(async (req) => {
             reason: body.reason,
             explanation: eventExplanations[body.action],
             actor_role: actorRole,
+            event_type_normalized: eventTypeNorm, // For audit trail
           },
         })
+        
+        // Log event dedupe for ops visibility
+        console.log(`review event dedupe: action=${body.action}, inserted=${eventResult.inserted}, key=${eventIdempotencyKey}`)
 
         // If neither audit nor event was inserted, this was a duplicate request
         wasDuplicate = !auditResult.inserted && !eventResult.inserted
@@ -341,8 +350,10 @@ Deno.serve(async (req) => {
       case 'add_note': {
         // Notes are audit-only, no state change (idempotent)
         // Use deterministic key from note content to allow retries but not duplicate same note
-        const noteContent = body.notes || body.reason || ''
-        const noteIdempotencyKey = await generateDeterministicKey(`add_note:${body.account_id}:${noteContent}`)
+        // CRITICAL: Include 'audit:' namespace in hash input for cross-table safety
+        const noteContent = normalizeReason(body.notes || body.reason || '')
+        const noteKeyInput = `audit:add_note:${body.account_id}:${noteContent}`
+        const noteIdempotencyKey = 'audit.' + await generateDeterministicKey(noteKeyInput)
         const noteResult = await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
@@ -353,9 +364,11 @@ Deno.serve(async (req) => {
           details: {
             action_type: 'add_note',
             note: body.notes || body.reason,
+            note_normalized: noteContent, // For audit trail
             actor_role: actorRole,
           },
         })
+        console.log(`add_note dedupe: inserted=${noteResult.inserted}, key=${noteIdempotencyKey}`)
         result = { ...result, note_added: true, deduplicated: !noteResult.inserted, idempotency_key: noteIdempotencyKey }
         break
       }
