@@ -50,6 +50,11 @@ export interface SimulationKnobs {
   resetPrice: number;                   // price for reset accounts
   lifetimeCapPerUser: number | null;    // max total payouts per user lifetime
   attackIntensity: number;              // 0 = none, 1 = baseline, 2+ = coordinated
+  
+  // Payout velocity gates (Tradeify/Topstep/Alpha Futures style)
+  minWinningDaysPerPayout: number;      // 0 = disabled. Min winning trading days since last payout before next allowed
+  requireProfitSinceLastPayout: boolean; // If true, must be net profitable since last payout to request another
+  payoutCadenceDays: number;            // 0 = disabled. Min calendar days between payouts (e.g., 14 = biweekly)
 }
 
 export interface MonteCarloConfig {
@@ -224,6 +229,10 @@ export interface AccountState {
   isCompleted: boolean;        // true when lifetime cap reached or zombie completed
   isActive: boolean;           // false if failed/churned
   completedByCapHit: boolean;  // TRUE only if completed due to hitting lifetime cap
+  
+  // Velocity gate tracking
+  daysSinceLastPayout: number;          // incremented by 30 each month, reset to 0 on payout
+  winningDaysSinceLastPayout: number;   // accumulated each month, reset to 0 on payout
 }
 
 // Iteration-level account stats for aggregation
@@ -442,13 +451,15 @@ function simulateMonth(
       id: accountId,
       createdMonth: monthIndex,
       eligibleMonth: monthIndex + eligibilityLag,
-      lifetimePaidTotal: 0,  // NEVER resets - enforces per-user lifetime cap
-      attemptPaid: 0,        // resets on reset
+      lifetimePaidTotal: 0,
+      attemptPaid: 0,
       payoutCount: 0,
       resetCount: 0,
       isCompleted: false,
       isActive: true,
-      completedByCapHit: false,  // Only true if completed due to cap hit
+      completedByCapHit: false,
+      daysSinceLastPayout: 0,
+      winningDaysSinceLastPayout: 0,
     });
     ctx.totalEverCreated++;
   }
@@ -498,6 +509,8 @@ function simulateMonth(
       state.payoutCount = 0;
       state.resetCount++;
       state.eligibleMonth = monthIndex + eligibilityLag; // Must wait again
+      state.daysSinceLastPayout = 0;
+      state.winningDaysSinceLastPayout = 0;
       // Account remains active, just restarted
     }
   });
@@ -515,12 +528,24 @@ function simulateMonth(
   const lifetimeCapClippedAmounts: number[] = [];
   let payoutRequestCount = 0;
   let payoutApprovedCount = 0;
+  let velocityGateBlocks = 0;
   
   // All active, non-completed accounts that have reached eligibility can request payouts
   const eligibleAccounts: AccountState[] = [];
   ctx.accountStates.forEach(state => {
     if (state.isActive && !state.isCompleted && monthIndex >= state.eligibleMonth) {
       eligibleAccounts.push(state);
+      
+      // Accumulate velocity gate counters each month for eligible accounts
+      // ~22 trading days/month, ~55% chance each is a winning day
+      const tradingDaysThisMonth = 22;
+      const winProbPerDay = 0.55;
+      let winningDays = 0;
+      for (let d = 0; d < tradingDaysThisMonth; d++) {
+        if (random() < winProbPerDay) winningDays++;
+      }
+      state.winningDaysSinceLastPayout += winningDays;
+      state.daysSinceLastPayout += 30;
     }
   });
   
@@ -529,6 +554,36 @@ function simulateMonth(
     // Probability of requesting payout this month
     if (random() > payoutRequestRate) {
       continue; // Didn't request this month
+    }
+    
+    // =====================================================================
+    // VELOCITY GATES: check before processing payout
+    // These gates throttle repeat withdrawals without blocking first payouts
+    // =====================================================================
+    
+    // Gate 1: Minimum winning days since last payout
+    if (knobs.minWinningDaysPerPayout > 0 && account.payoutCount > 0) {
+      if (account.winningDaysSinceLastPayout < knobs.minWinningDaysPerPayout) {
+        velocityGateBlocks++;
+        continue; // Must accumulate more winning days
+      }
+    }
+    
+    // Gate 2: Must be profitable since last payout
+    if (knobs.requireProfitSinceLastPayout && account.payoutCount > 0) {
+      // ~60% probability of being net profitable in any given period
+      if (random() < 0.40) {
+        velocityGateBlocks++;
+        continue; // Not profitable since last payout
+      }
+    }
+    
+    // Gate 3: Minimum calendar days between payouts
+    if (knobs.payoutCadenceDays > 0 && account.payoutCount > 0) {
+      if (account.daysSinceLastPayout < knobs.payoutCadenceDays) {
+        velocityGateBlocks++;
+        continue; // Too soon since last payout
+      }
     }
     
     // NOTE: Reset check already happened above in lifecycle processing
@@ -611,6 +666,10 @@ function simulateMonth(
       account.lifetimePaidTotal += traderPayout;
       account.attemptPaid += traderPayout;
       account.payoutCount++;
+      
+      // Reset velocity gate counters after successful payout
+      account.daysSinceLastPayout = 0;
+      account.winningDaysSinceLastPayout = 0;
     }
   }
   
@@ -1051,6 +1110,9 @@ export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
     resetPrice: 99,                 // $99 reset
     lifetimeCapPerUser: null,       // no lifetime cap by default
     attackIntensity: 0,             // no attack scenario
+    minWinningDaysPerPayout: 0,     // disabled by default
+    requireProfitSinceLastPayout: false,
+    payoutCadenceDays: 0,           // disabled by default
   },
 };
 
@@ -1135,6 +1197,46 @@ export const SCENARIO_PRESETS = {
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
       lifetimeCapPerUser: 149 * 10, // 10× entry = $1,490
+    },
+  },
+  
+  // Velocity gate scenarios (Tradeify/Topstep/Alpha Futures style)
+  withVelocityGate5d: {
+    ...DEFAULT_ASSUMPTIONS,
+    knobs: {
+      ...DEFAULT_ASSUMPTIONS.knobs,
+      lifetimeCapPerUser: 149 * 7,
+      minWinningDaysPerPayout: 5,
+    },
+  },
+  
+  withVelocityGate5d_profit: {
+    ...DEFAULT_ASSUMPTIONS,
+    knobs: {
+      ...DEFAULT_ASSUMPTIONS.knobs,
+      lifetimeCapPerUser: 149 * 7,
+      minWinningDaysPerPayout: 5,
+      requireProfitSinceLastPayout: true,
+    },
+  },
+  
+  withVelocityGate5d_biweekly: {
+    ...DEFAULT_ASSUMPTIONS,
+    knobs: {
+      ...DEFAULT_ASSUMPTIONS.knobs,
+      lifetimeCapPerUser: 149 * 7,
+      minWinningDaysPerPayout: 5,
+      requireProfitSinceLastPayout: true,
+      payoutCadenceDays: 14,
+    },
+  },
+  
+  withVelocityGate10d: {
+    ...DEFAULT_ASSUMPTIONS,
+    knobs: {
+      ...DEFAULT_ASSUMPTIONS.knobs,
+      lifetimeCapPerUser: 149 * 7,
+      minWinningDaysPerPayout: 10,
     },
   },
 } as const;

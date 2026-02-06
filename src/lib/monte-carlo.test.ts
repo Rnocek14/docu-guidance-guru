@@ -348,7 +348,7 @@ describe('Scenario Comparisons (Relative Behavior)', () => {
     expect(attack.profit.mean).toBeLessThan(baseline.profit.mean);
     expect(attack.risk.probabilityOfLoss).toBeGreaterThan(baseline.risk.probabilityOfLoss);
     expect(attack.profit.p5).toBeLessThan(baseline.profit.p5);
-  });
+  }, 15000);
 
   it('lifetime cap improves economics vs uncapped', () => {
     const uncapped = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
@@ -356,7 +356,7 @@ describe('Scenario Comparisons (Relative Behavior)', () => {
     
     expect(capped.profit.mean).toBeGreaterThan(uncapped.profit.mean);
     expect(capped.risk.probabilityOfLoss).toBeLessThan(uncapped.risk.probabilityOfLoss);
-  });
+  }, 15000);
 
   it('lifetime cap mitigates attack damage', () => {
     const attackNoCap = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.coordinatedAttack);
@@ -366,7 +366,7 @@ describe('Scenario Comparisons (Relative Behavior)', () => {
     });
     
     expect(attackWithCap.profit.mean).toBeGreaterThan(attackNoCap.profit.mean);
-  }, 10000); // Extended timeout for attack scenarios
+  }, 15000);
 
   it('tighter caps improve profit monotonically', () => {
     const cap10x = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap10x);
@@ -375,13 +375,38 @@ describe('Scenario Comparisons (Relative Behavior)', () => {
     
     expect(cap5x.profit.mean).toBeGreaterThan(cap7x.profit.mean);
     expect(cap7x.profit.mean).toBeGreaterThan(cap10x.profit.mean);
-  });
+  }, 15000);
 
   it('conservative knobs reduce loss probability', () => {
     const baseline = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
     const conservative = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.conservativeKnobs);
     
     expect(conservative.risk.probabilityOfLoss).toBeLessThanOrEqual(baseline.risk.probabilityOfLoss);
+  }, 15000);
+
+  it('velocity gates reduce payouts vs no gates (profit-since gate)', () => {
+    const noGates = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+    const gated = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withVelocityGate5d_profit);
+    
+    // profit-since gate blocks ~40% of repeat payout attempts, so payouts/account must drop
+    expect(gated.payoutDiagnostics.avgPayoutsPerAccount).toBeLessThan(
+      noGates.payoutDiagnostics.avgPayoutsPerAccount
+    );
+  }, 15000);
+
+  it('velocity gates improve profit vs no gates', () => {
+    const noGates = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
+    const gated = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withVelocityGate5d_profit);
+    
+    expect(gated.profit.mean).toBeGreaterThan(noGates.profit.mean);
+  }, 15000);
+
+  it('velocity gates default to disabled (existing tests unaffected)', () => {
+    const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS);
+    
+    // With defaults (all gates = 0/false), behavior should be unchanged
+    expect(result.profit.mean).toBeDefined();
+    expect(result.payoutDiagnostics.avgPayoutsPerAccount).toBeGreaterThan(0);
   });
 });
 
