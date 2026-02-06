@@ -281,6 +281,7 @@ export type Database = {
           max_payout_percent: number
           max_position_size_percent: number
           max_total_drawdown_percent: number
+          min_profit_buffer: number | null
           min_trading_days: number
           min_trading_days_between_payouts: number
           name: string
@@ -305,6 +306,7 @@ export type Database = {
           max_payout_percent?: number
           max_position_size_percent?: number
           max_total_drawdown_percent?: number
+          min_profit_buffer?: number | null
           min_trading_days?: number
           min_trading_days_between_payouts?: number
           name: string
@@ -329,6 +331,7 @@ export type Database = {
           max_payout_percent?: number
           max_position_size_percent?: number
           max_total_drawdown_percent?: number
+          min_profit_buffer?: number | null
           min_trading_days?: number
           min_trading_days_between_payouts?: number
           name?: string

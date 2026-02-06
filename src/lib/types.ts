@@ -216,4 +216,8 @@ export interface PayoutEligibility {
   passed_at?: string;
   has_prior_payout?: boolean;
   hint?: string;
+  // Profit buffer fields
+  profit_buffer_required?: number | null;
+  profit_buffer_remaining?: number;
+  profit_buffer_met?: boolean;
 }

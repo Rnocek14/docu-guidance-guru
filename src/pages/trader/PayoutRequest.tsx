@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLayout';
 import { PayoutCoolingCard } from '@/components/trader/PayoutCoolingCard';
+import { PayoutProfitBufferCard } from '@/components/trader/PayoutProfitBufferCard';
 import { PayoutMilestoneCard } from '@/components/trader/PayoutMilestoneCard';
 import { LifetimeHeadroomCard } from '@/components/trader/LifetimeHeadroomCard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -196,6 +197,16 @@ export default function PayoutRequest() {
               {eligibility.hint && <p className="mt-1 text-sm">{eligibility.hint}</p>}
             </AlertDescription>
           </Alert>
+        )}
+
+        {/* Profit Buffer Card (repeat payouts only) */}
+        {eligibility && isWindowOpen && eligibility.profit_buffer_required != null && !eligibility.is_first_payout_in_cycle && (
+          <PayoutProfitBufferCard
+            profitBufferRequired={eligibility.profit_buffer_required}
+            realizedProfit={eligibility.realized_profit ?? 0}
+            profitBufferRemaining={eligibility.profit_buffer_remaining ?? 0}
+            profitBufferMet={eligibility.profit_buffer_met ?? true}
+          />
         )}
 
         {/* Payout Info Cards */}
