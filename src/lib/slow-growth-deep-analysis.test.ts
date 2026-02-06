@@ -27,8 +27,10 @@ const SOLO_OPS_ASSUMPTIONS: MonteCarloAssumptions = {
     lifetimeCapPerUser: 149 * 7,
     attackIntensity: 0,
     minWinningDaysPerPayout: 0,
-    requireProfitSinceLastPayout: false,
-    payoutCadenceDays: 0,
+    minProfitSinceLastPayout: 0,
+    minMonthsBetweenPayouts: 0,
+    verificationMonths: 0,
+    verificationFailRate: 0,
   },
 };
 
