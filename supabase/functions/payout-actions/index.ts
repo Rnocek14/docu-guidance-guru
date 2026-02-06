@@ -777,8 +777,9 @@ Deno.serve(async (req) => {
       mark_paid: `Your payout of $${formattedAmount} has been sent.${refText}`,
     }
 
-    // Derive event idempotency key from the same stable base (prefixed to avoid collision with audit)
-    const eventIdempotencyKey = `evt:${effectiveIdempotencyKey}`
+    // Derive event idempotency key including event_type to prevent cross-event collisions
+    const eventType = eventTypes[body.action]
+    const eventIdempotencyKey = `evt.${eventType}:${effectiveIdempotencyKey}`
     
     const eventResult = await insertAccountEvent(supabaseAdmin, {
       account_id: payout.account_id,

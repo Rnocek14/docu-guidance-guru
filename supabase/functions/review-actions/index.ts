@@ -285,8 +285,9 @@ Deno.serve(async (req) => {
           escalate: `Your account has been escalated for additional review.`,
         }
 
-        // Derive event idempotency key from same stable base (prefixed to avoid collision)
-        const eventIdempotencyKey = `evt:${effectiveIdempotencyKey}`
+        // Derive event idempotency key including event_type to prevent cross-event collisions
+        const eventType = body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed'
+        const eventIdempotencyKey = `evt.${eventType}:${effectiveIdempotencyKey}`
         
         const eventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
@@ -383,8 +384,8 @@ Deno.serve(async (req) => {
           },
         })
 
-        // Create trader-visible event for transparency (idempotent)
-        const flagEventIdempotencyKey = `evt:${effectiveIdempotencyKey}`
+        // Create trader-visible event for transparency (idempotent, includes event_type)
+        const flagEventIdempotencyKey = `evt.status_changed:${effectiveIdempotencyKey}`
         const flagEventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
           event_type: 'status_changed',
