@@ -27,7 +27,7 @@ export default function Index() {
       <section className="py-20 lg:py-32">
         <div className="container mx-auto px-4 text-center">
           <h1 className="text-4xl lg:text-6xl font-bold tracking-tight mb-6">
-            Prop Trading Risk Management
+            Simulated Trading Evaluation
             <br />
             <span className="text-primary">Done Right</span>
           </h1>
@@ -89,9 +89,9 @@ export default function Index() {
       {/* CTA */}
       <section className="py-20">
         <div className="container mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold mb-4">Ready to Trade?</h2>
+          <h2 className="text-3xl font-bold mb-4">Ready to Prove Your Skill?</h2>
           <p className="text-muted-foreground mb-8">
-            Join thousands of traders on the fairest prop trading platform.
+            Join thousands of traders on the fairest simulated trading evaluation platform.
           </p>
           <Link to="/signup">
             <Button size="lg">Create Your Account</Button>
@@ -102,7 +102,7 @@ export default function Index() {
       {/* Footer */}
       <footer className="border-t py-8">
         <div className="container mx-auto px-4 text-center text-muted-foreground">
-          <p>© 2024 RiskAnalytics. Detection, Not Domination.</p>
+          <p>© 2026 RiskAnalytics. Detection, Not Domination.</p>
         </div>
       </footer>
     </div>

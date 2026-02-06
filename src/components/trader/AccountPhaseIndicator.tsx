@@ -72,7 +72,7 @@ export function AccountPhaseIndicator({
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mt-1">
-              You've passed! Request payouts from your profits.
+              You've passed! You're eligible to request performance-based payouts.
             </p>
           </div>
         </div>
@@ -95,7 +95,7 @@ export function AccountPhaseIndicator({
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Hit your {profitTargetPercent}% profit target to unlock your Performance Account.
+            Hit your {profitTargetPercent}% performance target to unlock your Performance Account.
           </p>
         </div>
       </div>

@@ -54,9 +54,9 @@ export function RuleSnapshotCard({ ruleSnapshot }: RuleSnapshotCardProps) {
     },
     {
       icon: Target,
-      label: 'Profit Target',
+      label: 'Performance Target',
       value: `${ruleSnapshot.profit_target_percent}%`,
-      description: 'Required profit to pass the challenge',
+      description: 'Required performance target to pass the evaluation',
     },
     {
       icon: Calendar,
