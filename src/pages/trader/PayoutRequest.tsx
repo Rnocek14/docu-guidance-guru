@@ -295,7 +295,7 @@ export default function PayoutRequest() {
                   Your request will be reviewed by our team. Payouts are typically processed within 2-3 business days.
                 </p>
                 <p className="text-xs text-muted-foreground/70 text-center">
-                  All trading activity is simulated. Payouts are performance-based rewards, not profit withdrawals or investment returns.
+                  All trading activity is simulated. Payouts are performance-based rewards, not profit withdrawals or investment returns, and are subject to eligibility rules.
                 </p>
               </form>
             </CardContent>
