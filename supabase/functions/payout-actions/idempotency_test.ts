@@ -5,7 +5,7 @@
  * 1. approve twice with identical inputs → deduped audit+event on 2nd call
  * 2. mark_paid twice with same inputs → deduped on 2nd call
  * 3. Idempotency keys match between retries
- * 4. Key charset and length constraints are met
+ * 4. Key charset, length, and prefix constraints are met
  * 5. Normalization produces consistent keys across whitespace/case variants
  * 
  * Run with: deno test -A supabase/functions/payout-actions/idempotency_test.ts
@@ -21,6 +21,11 @@
 
 import "https://deno.land/std@0.224.0/dotenv/load.ts";
 import { assertEquals, assertExists, assert } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  assertValidAuditKey,
+  assertValidEventKey,
+  uniqueSuffix,
+} from "../_test/test_utils.ts";
 
 const SUPABASE_URL = Deno.env.get("VITE_SUPABASE_URL")!;
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/payout-actions`;
@@ -32,20 +37,6 @@ const TEST_PAYOUT_ID_APPROVED = Deno.env.get("TEST_PAYOUT_ID_APPROVED");
 
 const skipApproveTests = !ADMIN_TOKEN || !TEST_PAYOUT_ID_PENDING;
 const skipMarkPaidTests = !ADMIN_TOKEN || !TEST_PAYOUT_ID_APPROVED;
-const skipTests = !ADMIN_TOKEN || (!TEST_PAYOUT_ID_PENDING && !TEST_PAYOUT_ID_APPROVED);
-
-// Idempotency key format: namespace.hash or namespace.type:hash
-// Charset: alphanumeric, colon, underscore, hyphen, dot
-const KEY_REGEX = /^[a-zA-Z0-9:_\-.]+$/;
-const KEY_MIN_LENGTH = 10;
-const KEY_MAX_LENGTH = 200;
-
-function assertValidIdempotencyKey(key: string, label: string) {
-  assertExists(key, `${label} should exist`);
-  assert(KEY_REGEX.test(key), `${label} should match charset constraint: ${key}`);
-  assert(key.length >= KEY_MIN_LENGTH, `${label} should be >= ${KEY_MIN_LENGTH} chars: ${key.length}`);
-  assert(key.length <= KEY_MAX_LENGTH, `${label} should be <= ${KEY_MAX_LENGTH} chars: ${key.length}`);
-}
 
 Deno.test({
   name: "payout-actions: approve is idempotent (dedupes audit+event on retry)",
@@ -72,9 +63,14 @@ Deno.test({
     assertEquals(r1.status, 200, `Expected 200 but got ${r1.status}: ${JSON.stringify(b1)}`);
     assertEquals(b1.success, true, `First call should succeed: ${JSON.stringify(b1)}`);
 
-    // Validate key format
-    assertValidIdempotencyKey(b1.audit_idempotency_key, "audit_idempotency_key");
-    assertValidIdempotencyKey(b1.event_idempotency_key, "event_idempotency_key");
+    // Validate state transition (proves we got the right payout)
+    assertExists(b1.previous_status, "Response should include previous_status");
+    assertExists(b1.new_status, "Response should include new_status");
+    assertEquals(b1.new_status, "approved", "Approve should transition to approved");
+
+    // Validate key format and prefixes
+    assertValidAuditKey(b1.audit_idempotency_key, "audit_idempotency_key");
+    assertValidEventKey(b1.event_idempotency_key, "event_idempotency_key");
 
     // First call should NOT be deduplicated
     assertEquals(b1.audit_deduplicated, false, "First call should insert audit (not deduped)");
@@ -109,7 +105,7 @@ Deno.test({
   ignore: skipMarkPaidTests,
   async fn() {
     // Use messy whitespace/case to validate normalization
-    const paymentRef = `  TEST-IDEMP-${Date.now()}  `;
+    const paymentRef = `  TEST-IDEMP-${uniqueSuffix()}  `;
     
     const payload = {
       action: "mark_paid",
@@ -133,9 +129,13 @@ Deno.test({
     assertEquals(r1.status, 200, `Expected 200 but got ${r1.status}: ${JSON.stringify(b1)}`);
     assertEquals(b1.success, true, `First call should succeed: ${JSON.stringify(b1)}`);
 
-    // Validate key format
-    assertValidIdempotencyKey(b1.audit_idempotency_key, "audit_idempotency_key");
-    assertValidIdempotencyKey(b1.event_idempotency_key, "event_idempotency_key");
+    // Validate state transition
+    assertExists(b1.previous_status, "Response should include previous_status");
+    assertEquals(b1.new_status, "paid", "mark_paid should transition to paid");
+
+    // Validate key format and prefixes
+    assertValidAuditKey(b1.audit_idempotency_key, "audit_idempotency_key");
+    assertValidEventKey(b1.event_idempotency_key, "event_idempotency_key");
 
     // First call should insert (NOT deduped)
     assertEquals(b1.audit_deduplicated, false, "First call should insert audit (not deduped)");
@@ -171,7 +171,7 @@ Deno.test({
   async fn() {
     // This test verifies that the SAME logical payment ref with different formatting
     // produces the SAME idempotency key after normalization
-    const baseRef = `test-norm-${Date.now()}`;
+    const baseRef = `test-norm-${uniqueSuffix()}`;
     
     // First call with lowercase, extra whitespace
     const r1 = await fetch(FUNCTION_URL, {
@@ -190,9 +190,12 @@ Deno.test({
     console.log("First normalized ref response:", b1);
 
     assertEquals(r1.status, 200, `Expected 200 but got ${r1.status}: ${JSON.stringify(b1)}`);
-    assertValidIdempotencyKey(b1.audit_idempotency_key, "audit_idempotency_key");
+    assertValidAuditKey(b1.audit_idempotency_key, "audit_idempotency_key");
 
-    // Second call with uppercase, different whitespace
+    // First call should NOT be deduplicated
+    assertEquals(b1.audit_deduplicated, false, "First call should insert (not deduped)");
+
+    // Second call with uppercase and different whitespace
     // After normalization (trim + uppercase), should produce same key
     const r2 = await fetch(FUNCTION_URL, {
       method: "POST",
@@ -228,9 +231,10 @@ Deno.test({
   ignore: skipApproveTests,
   async fn() {
     // Use a pending payout for reject tests
-    const baseReason = `test rejection ${Date.now()}`;
+    // Test that " SOME REASON " and "some reason" produce the same key
+    const baseReason = `test rejection ${uniqueSuffix()}`;
     
-    // First call with lowercase
+    // First call with extra whitespace
     const r1 = await fetch(FUNCTION_URL, {
       method: "POST",
       headers: {
@@ -247,12 +251,12 @@ Deno.test({
     console.log("First reject response:", b1);
 
     if (r1.status === 200 && b1.success) {
-      assertValidIdempotencyKey(b1.audit_idempotency_key, "audit_idempotency_key");
+      assertValidAuditKey(b1.audit_idempotency_key, "audit_idempotency_key");
 
       // First call should NOT be deduplicated
       assertEquals(b1.audit_deduplicated, false, "First call should insert audit (not deduped)");
 
-      // Second call with uppercase and different whitespace
+      // Second call with different case and whitespace
       const r2 = await fetch(FUNCTION_URL, {
         method: "POST",
         headers: {
@@ -272,8 +276,8 @@ Deno.test({
       assertEquals(b2.audit_idempotency_key, b1.audit_idempotency_key, "Normalized reasons should produce same key");
       assertEquals(b2.audit_deduplicated, true, "Should be deduplicated on retry");
     } else {
-      // If first call fails (payout already rejected), that's a test setup issue
-      assertEquals(r1.status, 200, `Expected 200 but got ${r1.status}: ${JSON.stringify(b1)}`);
+      // If first call fails (payout not in correct state), fail with clear message
+      assertEquals(r1.status, 200, `Expected 200 but got ${r1.status}: ${JSON.stringify(b1)} - ensure TEST_PAYOUT_ID_PENDING is in pending/under_review state`);
     }
   },
 });
