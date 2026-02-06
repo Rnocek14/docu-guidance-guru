@@ -100,6 +100,7 @@ Deno.test({
     const b2 = await r2.json();
     console.log("Second approve response:", b2);
 
+    assertDedupeFieldTypes(b2, true, "second approve");
     assertEquals(r2.status, 200, "Second call should succeed");
     assertEquals(b2.success, true, "Second call should report success");
 
@@ -169,6 +170,7 @@ Deno.test({
     const b2 = await r2.json();
     console.log("Second mark_paid response:", b2);
 
+    assertDedupeFieldTypes(b2, true, "second mark_paid");
     assertEquals(r2.status, 200, "Second call should succeed");
     assertEquals(b2.success, true, "Second call should report success");
 
