@@ -167,8 +167,36 @@ export default function CohortsManagement() {
         .eq('id', cohortId);
       if (updateError) throw updateError;
 
-      // Note: Audit logging for cohort updates is handled server-side via RLS triggers
-      // Client-side insert to audit_logs is intentionally blocked for security
+      // Log audit via admin-actions edge function (service role writes audit_logs)
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session?.access_token) {
+        try {
+          await fetch('https://sfxmgwkrjwuerfkqxokq.supabase.co/functions/v1/admin-actions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${sessionData.session.access_token}`,
+            },
+            body: JSON.stringify({
+              action: 'audit_log',
+              audit_action: 'cohort_updated',
+              target_type: 'cohort',
+              target_id: cohortId,
+              reason: `Cohort settings updated: ${Object.keys(updates).join(', ')}`,
+              details: {
+                changes: Object.keys(updates).map(key => ({
+                  field: key,
+                  old_value: oldValues[key as keyof Cohort],
+                  new_value: updates[key as keyof Cohort],
+                })),
+              },
+            }),
+          });
+        } catch {
+          // Audit logging failure shouldn't block the operation
+          console.warn('Failed to log audit entry for cohort update');
+        }
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-cohorts'] });

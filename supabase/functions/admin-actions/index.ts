@@ -64,11 +64,60 @@ Deno.serve(async (req) => {
 
     // Parse request body
     const body: AdminActionRequest = await req.json()
+    const requestId = crypto.randomUUID()
+
+    if (body.action === 'audit_log') {
+      // Generic audit logging for admin actions (cohort updates, etc.)
+      const { audit_action, target_type, target_id, reason, details, account_id } = body as {
+        audit_action: string
+        target_type: string
+        target_id: string
+        reason?: string
+        details?: Record<string, unknown>
+        account_id?: string
+      }
+
+      if (!audit_action || !target_type || !target_id) {
+        return new Response(
+          JSON.stringify({ error: 'audit_action, target_type, and target_id are required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const { error: insertError } = await supabaseAdmin.from('audit_logs').insert({
+        user_id: userId,
+        account_id: account_id || null,
+        action: audit_action,
+        reason: reason ?? null,
+        details: {
+          actor_user_id: userId,
+          target_type,
+          target_id,
+          ...details,
+        },
+        request_id: requestId,
+        ip_address: req.headers.get('x-forwarded-for')?.split(',')[0] || null,
+        user_agent: req.headers.get('user-agent') || null,
+      })
+
+      if (insertError) {
+        console.error('Audit log insert error:', insertError)
+        return new Response(
+          JSON.stringify({ error: 'audit_failed', message: insertError.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, request_id: requestId }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     if (body.action === 'toggle_intake') {
       const newValue = body.value as boolean
 
-      // FIX 3: Get current value first for idempotent audit logging
+      // Get current value first for idempotent audit logging
       const { data: currentSetting } = await supabaseAdmin
         .from('system_settings')
         .select('value')
@@ -91,7 +140,7 @@ Deno.serve(async (req) => {
         throw new Error(`Failed to update setting: ${updateError.message}`)
       }
 
-      // FIX 3: Idempotent audit log with previous and new values
+      // Idempotent audit log with previous and new values
       const { error: auditError } = await supabaseAdmin
         .from('audit_logs')
         .insert({
@@ -103,6 +152,7 @@ Deno.serve(async (req) => {
             setting_key: 'global_intake_active'
           },
           reason: `Global intake ${newValue ? 'resumed' : 'paused'} by admin`,
+          request_id: requestId,
         })
 
       if (auditError) {
@@ -114,7 +164,8 @@ Deno.serve(async (req) => {
         JSON.stringify({ 
           success: true, 
           intake_active: newValue,
-          previous_value: previousValue 
+          previous_value: previousValue,
+          request_id: requestId,
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
