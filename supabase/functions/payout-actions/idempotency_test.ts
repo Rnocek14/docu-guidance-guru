@@ -89,6 +89,7 @@ Deno.test({
     console.log("Second approve response:", b2);
 
     assertEquals(r2.status, 200, "Second call should succeed");
+    assertEquals(b2.success, true, "Second call should report success");
 
     // Keys must match between calls
     assertEquals(b2.audit_idempotency_key, b1.audit_idempotency_key, "Audit keys should match");
@@ -154,6 +155,7 @@ Deno.test({
     console.log("Second mark_paid response:", b2);
 
     assertEquals(r2.status, 200, "Second call should succeed");
+    assertEquals(b2.success, true, "Second call should report success");
 
     // Keys must match (normalization should produce same hash)
     assertEquals(b2.audit_idempotency_key, b1.audit_idempotency_key, "Audit keys should match");
@@ -250,35 +252,34 @@ Deno.test({
     const b1 = await r1.json();
     console.log("First reject response:", b1);
 
-    if (r1.status === 200 && b1.success) {
-      assertValidAuditKey(b1.audit_idempotency_key, "audit_idempotency_key");
+    // First call MUST succeed - if not, test setup is wrong
+    assertEquals(r1.status, 200, `Expected 200 but got ${r1.status}: ${JSON.stringify(b1)} - ensure TEST_PAYOUT_ID_PENDING is in pending/under_review state`);
+    assertEquals(b1.success, true, `First call should succeed: ${JSON.stringify(b1)}`);
+    assertValidAuditKey(b1.audit_idempotency_key, "audit_idempotency_key");
 
-      // First call should NOT be deduplicated
-      assertEquals(b1.audit_deduplicated, false, "First call should insert audit (not deduped)");
+    // First call should NOT be deduplicated
+    assertEquals(b1.audit_deduplicated, false, "First call should insert audit (not deduped)");
 
-      // Second call with different case and whitespace
-      const r2 = await fetch(FUNCTION_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${ADMIN_TOKEN}`,
-        },
-        body: JSON.stringify({
-          action: "reject",
-          payout_id: TEST_PAYOUT_ID_PENDING,
-          reason: `   ${baseReason.toUpperCase()}   `,
-        }),
-      });
-      const b2 = await r2.json();
-      console.log("Second reject response:", b2);
+    // Second call with different case and whitespace
+    const r2 = await fetch(FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${ADMIN_TOKEN}`,
+      },
+      body: JSON.stringify({
+        action: "reject",
+        payout_id: TEST_PAYOUT_ID_PENDING,
+        reason: `   ${baseReason.toUpperCase()}   `,
+      }),
+    });
+    const b2 = await r2.json();
+    console.log("Second reject response:", b2);
 
-      assertEquals(r2.status, 200);
-      assertEquals(b2.audit_idempotency_key, b1.audit_idempotency_key, "Normalized reasons should produce same key");
-      assertEquals(b2.audit_deduplicated, true, "Should be deduplicated on retry");
-    } else {
-      // If first call fails (payout not in correct state), fail with clear message
-      assertEquals(r1.status, 200, `Expected 200 but got ${r1.status}: ${JSON.stringify(b1)} - ensure TEST_PAYOUT_ID_PENDING is in pending/under_review state`);
-    }
+    assertEquals(r2.status, 200, "Second call should succeed");
+    assertEquals(b2.success, true, "Second call should report success");
+    assertEquals(b2.audit_idempotency_key, b1.audit_idempotency_key, "Normalized reasons should produce same key");
+    assertEquals(b2.audit_deduplicated, true, "Should be deduplicated on retry");
   },
 });
 
