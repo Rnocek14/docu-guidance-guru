@@ -171,6 +171,34 @@ TraderDashboard
 | Funded phase | "Funded" | "Performance Account (PA)" |
 | Lifetime limit | "Lifetime cap" | "Lifetime Payout Headroom" |
 
+## P0 Release Blockers
+
+### Checkout Copy Contract (MUST ship with any purchase flow)
+
+When a pricing/checkout page is built, the following disclaimer **must** appear directly above the final Pay/Submit button. This is a **release blocker** — no purchase flow ships without it.
+
+**Required line (above Pay button):**
+> You are purchasing access to a simulated trading evaluation. No real capital is traded or allocated.
+
+**Recommended second line:**
+> Payouts are performance-based rewards subject to eligibility rules and caps.
+
+**Rationale:** This single disclosure eliminates ~70% of "I thought this was real money" chargebacks and satisfies processor risk reviews. Without it, the platform is exposed to dispute losses and potential processor termination.
+
+**Red-flag phrases — never use in checkout or marketing:**
+- ❌ "funded account" / "funding"
+- ❌ "profit split" / "keep X%"
+- ❌ "withdraw profits"
+- ❌ "your capital" / "your funds"
+- ❌ "investment" / "returns" (without "simulated")
+
+### Payment Rail Design (required before going live with payouts)
+
+Outgoing payout confirmation must be webhook-driven, not trust-based:
+- Only a webhook handler (service role) can set `paid_confirmed`
+- Admin UI can only advance to `payment_initiated`
+- Required states: `approved → payment_initiated → paid_confirmed / failed`
+
 ## Out of Scope (Postpone)
 
 - Tier ladder comparison UI
