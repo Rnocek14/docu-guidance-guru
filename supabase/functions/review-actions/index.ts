@@ -72,14 +72,14 @@ async function insertAuditLog(supabase: any, data: any): Promise<{ inserted: boo
   return { inserted: result && result.length > 0 }
 }
 
-// Helper: Idempotent insert for account_events (ignores duplicates on account_id + request_id)
+// Helper: Idempotent insert for account_events (now uses idempotency_key for deduplication)
 // Returns { inserted: boolean } to track if this was a duplicate
 // deno-lint-ignore no-explicit-any
 async function insertAccountEvent(supabase: any, data: any): Promise<{ inserted: boolean }> {
   const { data: result, error } = await supabase
     .from('account_events')
     .upsert(data, { 
-      onConflict: 'account_id,request_id',
+      onConflict: 'idempotency_key',
       ignoreDuplicates: true 
     })
     .select('id')
@@ -201,11 +201,20 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Generate deterministic idempotency key for audit deduplication
-    const requestId = body.idempotency_key || crypto.randomUUID()
-    // Generate deterministic audit key based on action + account + status
-    const auditIdempotencyKey = body.idempotency_key 
-      ?? await generateDeterministicKey(`${body.action}:${body.account_id}:${account.status}:${requestId}`)
+    // Generate FULLY DETERMINISTIC idempotency key
+    // CRITICAL: Never include random UUIDs - retries must produce the same key
+    let effectiveIdempotencyKey: string
+    
+    if (body.idempotency_key) {
+      effectiveIdempotencyKey = body.idempotency_key
+    } else {
+      // Deterministic key from stable inputs: action + account + current_status
+      // Adding current status means same action on same account but different status = different key
+      const keyInput = `${body.action}:${body.account_id}:${account.status}:${body.reason ?? ''}:${body.flag_id ?? ''}`
+      effectiveIdempotencyKey = await generateDeterministicKey(keyInput)
+    }
+    
+    const requestId = effectiveIdempotencyKey
     
     const previousStatus = account.status
     let wasDuplicate = false
@@ -258,7 +267,7 @@ Deno.serve(async (req) => {
           account_id: body.account_id,
           action: auditAction,
           request_id: requestId,
-          idempotency_key: auditIdempotencyKey,
+          idempotency_key: effectiveIdempotencyKey,
           reason: body.reason,
           details: {
             previous_status: previousStatus,
@@ -276,10 +285,14 @@ Deno.serve(async (req) => {
           escalate: `Your account has been escalated for additional review.`,
         }
 
+        // Derive event idempotency key from same stable base (prefixed to avoid collision)
+        const eventIdempotencyKey = `evt:${effectiveIdempotencyKey}`
+        
         const eventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
           event_type: body.action === 'confirm_failure' ? 'failure_confirmed' : 'status_changed',
           request_id: requestId,
+          idempotency_key: eventIdempotencyKey,
           event_data: {
             previous_status: previousStatus,
             new_status: newStatus,
@@ -305,19 +318,20 @@ Deno.serve(async (req) => {
             .is('confirmed_at', null)
         }
 
-        result = { ...result, previous_status: previousStatus, new_status: newStatus, duplicate: wasDuplicate }
+        result = { ...result, previous_status: previousStatus, new_status: newStatus, deduplicated: wasDuplicate, idempotency_key: effectiveIdempotencyKey }
         break
       }
 
       case 'add_note': {
         // Notes are audit-only, no state change (idempotent)
-        // Generate unique key for notes to allow multiple notes
-        const noteIdempotencyKey = await generateDeterministicKey(`add_note:${body.account_id}:${requestId}`)
+        // Use deterministic key from note content to allow retries but not duplicate same note
+        const noteContent = body.notes || body.reason || ''
+        const noteIdempotencyKey = await generateDeterministicKey(`add_note:${body.account_id}:${noteContent}`)
         const noteResult = await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
           action: 'status_changed',
-          request_id: requestId,
+          request_id: effectiveIdempotencyKey,
           idempotency_key: noteIdempotencyKey,
           reason: body.reason || 'Review note added',
           details: {
@@ -326,7 +340,7 @@ Deno.serve(async (req) => {
             actor_role: actorRole,
           },
         })
-        result = { ...result, note_added: true, duplicate: !noteResult.inserted }
+        result = { ...result, note_added: true, deduplicated: !noteResult.inserted, idempotency_key: noteIdempotencyKey }
         break
       }
 
@@ -354,14 +368,13 @@ Deno.serve(async (req) => {
           throw new Error(`Failed to close flag: ${flagError.message}`)
         }
 
-        // Audit the flag closure (idempotent)
-        const flagIdempotencyKey = await generateDeterministicKey(`close_flag:${body.flag_id}:${body.account_id}`)
+        // Audit the flag closure (idempotent) - use effectiveIdempotencyKey from close_flag action
         const flagAuditResult = await insertAuditLog(supabaseAdmin, {
           user_id: userId,
           account_id: body.account_id,
           action: 'flag_cleared',
           request_id: requestId,
-          idempotency_key: flagIdempotencyKey,
+          idempotency_key: effectiveIdempotencyKey,
           reason: body.reason,
           details: {
             flag_id: body.flag_id,
@@ -371,10 +384,12 @@ Deno.serve(async (req) => {
         })
 
         // Create trader-visible event for transparency (idempotent)
+        const flagEventIdempotencyKey = `evt:${effectiveIdempotencyKey}`
         const flagEventResult = await insertAccountEvent(supabaseAdmin, {
           account_id: body.account_id,
           event_type: 'status_changed',
           request_id: requestId,
+          idempotency_key: flagEventIdempotencyKey,
           event_data: {
             action_type: 'flag_cleared',
             flag_id: body.flag_id,
@@ -383,7 +398,7 @@ Deno.serve(async (req) => {
           },
         })
 
-        result = { ...result, flag_id: body.flag_id, flag_closed: true, duplicate: !flagAuditResult.inserted && !flagEventResult.inserted }
+        result = { ...result, flag_id: body.flag_id, flag_closed: true, deduplicated: !flagAuditResult.inserted && !flagEventResult.inserted, idempotency_key: effectiveIdempotencyKey }
         break
       }
     }

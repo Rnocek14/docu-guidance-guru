@@ -21,6 +21,7 @@ export type Database = {
           event_data: Json
           event_type: Database["public"]["Enums"]["account_event_type"]
           id: string
+          idempotency_key: string
           request_id: string | null
         }
         Insert: {
@@ -29,6 +30,7 @@ export type Database = {
           event_data?: Json
           event_type: Database["public"]["Enums"]["account_event_type"]
           id?: string
+          idempotency_key: string
           request_id?: string | null
         }
         Update: {
@@ -37,6 +39,7 @@ export type Database = {
           event_data?: Json
           event_type?: Database["public"]["Enums"]["account_event_type"]
           id?: string
+          idempotency_key?: string
           request_id?: string | null
         }
         Relationships: [
