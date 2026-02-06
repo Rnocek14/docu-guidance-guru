@@ -8,6 +8,7 @@ const corsHeaders = {
 interface AdminActionRequest {
   action: string
   value?: boolean
+  idempotency_key?: string
   [key: string]: unknown
 }
 
@@ -27,17 +28,17 @@ Deno.serve(async (req) => {
       )
     }
 
-    const token = authHeader.replace('Bearer ', '')
+    const jwt = authHeader.replace('Bearer ', '')
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 
-    // Create service role client for privileged operations
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    // FIX 1: Use anon key + JWT for proper token validation (canonical pattern)
+    const supabaseUser = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+    })
 
-    // FIX 2: Use getUser() instead of getClaims() for token validation
-    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token)
-    
+    const { data: userData, error: userError } = await supabaseUser.auth.getUser()
+
     if (userError || !userData?.user) {
       return new Response(
         JSON.stringify({ error: 'Invalid token' }),
@@ -47,15 +48,19 @@ Deno.serve(async (req) => {
 
     const userId = userData.user.id
 
-    // Check if user is admin
-    const { data: roleData } = await supabaseAdmin
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .eq('role', 'admin')
-      .single()
+    // Create service role client for privileged operations (role check + DB writes)
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    )
 
-    if (!roleData) {
+    // Check if user is admin using has_role RPC
+    const { data: isAdmin } = await supabaseAdmin.rpc('has_role', {
+      _user_id: userId,
+      _role: 'admin',
+    })
+
+    if (!isAdmin) {
       return new Response(
         JSON.stringify({ error: 'Forbidden: Admin role required' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -68,13 +73,15 @@ Deno.serve(async (req) => {
 
     if (body.action === 'audit_log') {
       // Generic audit logging for admin actions (cohort updates, etc.)
-      const { audit_action, target_type, target_id, reason, details, account_id } = body as {
+      // This action FAILS if audit insert fails (audit IS the operation)
+      const { audit_action, target_type, target_id, reason, details, account_id, idempotency_key } = body as {
         audit_action: string
         target_type: string
         target_id: string
         reason?: string
         details?: Record<string, unknown>
         account_id?: string
+        idempotency_key?: string
       }
 
       if (!audit_action || !target_type || !target_id) {
@@ -83,6 +90,9 @@ Deno.serve(async (req) => {
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
+
+      // FIX 3: Use client-provided idempotency_key or generate deterministic fallback
+      const effectiveIdempotencyKey = idempotency_key ?? `${audit_action}:${target_type}:${target_id}:${requestId}`
 
       const { error: insertError } = await supabaseAdmin.from('audit_logs').insert({
         user_id: userId,
@@ -96,11 +106,20 @@ Deno.serve(async (req) => {
           ...details,
         },
         request_id: requestId,
+        idempotency_key: effectiveIdempotencyKey,
         ip_address: req.headers.get('x-forwarded-for')?.split(',')[0] || null,
         user_agent: req.headers.get('user-agent') || null,
       })
 
       if (insertError) {
+        // Check if it's a duplicate (unique constraint violation on idempotency_key)
+        if (insertError.code === '23505' && insertError.message?.includes('idempotency_key')) {
+          // Treat duplicate as success (idempotent)
+          return new Response(
+            JSON.stringify({ success: true, request_id: requestId, deduplicated: true }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
         console.error('Audit log insert error:', insertError)
         return new Response(
           JSON.stringify({ error: 'audit_failed', message: insertError.message }),
@@ -140,10 +159,12 @@ Deno.serve(async (req) => {
         throw new Error(`Failed to update setting: ${updateError.message}`)
       }
 
-      // Idempotent audit log with previous and new values
-      const { error: auditError } = await supabaseAdmin
-        .from('audit_logs')
-        .insert({
+      // FIX 4: Best-effort audit log - don't fail the action if audit fails
+      // Use idempotency_key to prevent duplicates on retry
+      const auditIdempotencyKey = body.idempotency_key ?? `toggle_intake:${newValue}:${requestId}`
+      
+      try {
+        await supabaseAdmin.from('audit_logs').insert({
           user_id: userId,
           action: newValue ? 'intake_resumed' : 'intake_paused',
           details: { 
@@ -153,11 +174,11 @@ Deno.serve(async (req) => {
           },
           reason: `Global intake ${newValue ? 'resumed' : 'paused'} by admin`,
           request_id: requestId,
+          idempotency_key: auditIdempotencyKey,
         })
-
-      if (auditError) {
-        console.error('Failed to create audit log:', auditError)
+      } catch (auditErr) {
         // Log but don't fail - the action succeeded
+        console.error('Failed to create audit log (non-blocking):', auditErr)
       }
 
       return new Response(

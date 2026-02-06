@@ -183,6 +183,7 @@ export default function CohortsManagement() {
               target_type: 'cohort',
               target_id: cohortId,
               reason: `Cohort settings updated: ${Object.keys(updates).join(', ')}`,
+              idempotency_key: crypto.randomUUID(), // Prevent duplicate audit entries on retry
               details: {
                 changes: Object.keys(updates).map(key => ({
                   field: key,
