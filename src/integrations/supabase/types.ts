@@ -136,7 +136,7 @@ export type Database = {
           created_at: string
           details: Json
           id: string
-          idempotency_key: string | null
+          idempotency_key: string
           ip_address: string | null
           prev_hash: string
           reason: string | null
@@ -151,7 +151,7 @@ export type Database = {
           created_at?: string
           details?: Json
           id?: string
-          idempotency_key?: string | null
+          idempotency_key: string
           ip_address?: string | null
           prev_hash: string
           reason?: string | null
@@ -166,7 +166,7 @@ export type Database = {
           created_at?: string
           details?: Json
           id?: string
-          idempotency_key?: string | null
+          idempotency_key?: string
           ip_address?: string | null
           prev_hash?: string
           reason?: string | null
