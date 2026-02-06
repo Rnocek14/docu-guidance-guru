@@ -1011,6 +1011,9 @@ export type Database = {
           payouts_frozen: boolean
           payouts_frozen_at: string | null
           payouts_frozen_reason: string | null
+          payouts_hold: boolean
+          payouts_hold_at: string | null
+          payouts_hold_reason: string | null
           updated_at: string
           user_id: string
         }
@@ -1032,6 +1035,9 @@ export type Database = {
           payouts_frozen?: boolean
           payouts_frozen_at?: string | null
           payouts_frozen_reason?: string | null
+          payouts_hold?: boolean
+          payouts_hold_at?: string | null
+          payouts_hold_reason?: string | null
           updated_at?: string
           user_id: string
         }
@@ -1053,6 +1059,9 @@ export type Database = {
           payouts_frozen?: boolean
           payouts_frozen_at?: string | null
           payouts_frozen_reason?: string | null
+          payouts_hold?: boolean
+          payouts_hold_at?: string | null
+          payouts_hold_reason?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -1514,6 +1523,7 @@ export type Database = {
       }
     }
     Functions: {
+      apply_geo_mismatch_hold: { Args: { _user_id: string }; Returns: Json }
       assert_jurisdiction_allowed: { Args: { p_action: string }; Returns: Json }
       bootstrap_first_admin: { Args: { _user_id: string }; Returns: boolean }
       bump_fingerprint_seen: { Args: { _id: string }; Returns: undefined }
@@ -1588,6 +1598,14 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      manual_payout_hold_release: {
+        Args: {
+          _evidence_notes?: string
+          _reason: string
+          _target_user_id: string
+        }
+        Returns: Json
       }
       manual_payout_unfreeze: {
         Args: {
