@@ -223,4 +223,8 @@ export interface PayoutEligibility {
   profit_buffer_remaining?: number;
   profit_buffer_met?: boolean;
   profit_buffer_progress_pct?: number;
+  // Winning trading days fields
+  required_trading_days?: number;
+  winning_days_remaining?: number;
+  winning_days_progress_pct?: number;
 }
