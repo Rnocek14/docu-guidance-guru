@@ -41,6 +41,14 @@ async function constantTimeEqual(a: string, b: string): Promise<boolean> {
   return diff === 0
 }
 
+async function hashString(input: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(input)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16)
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -76,7 +84,6 @@ Deno.serve(async (req) => {
     }
 
     if (incomingCronSecret) {
-      // Path 1: Cron/scheduler with shared secret
       if (!cronSecret || cronSecret.length < 16) {
         console.error('CRON_SECRET env not configured or too short — server misconfiguration')
         return new Response(
@@ -92,7 +99,6 @@ Deno.serve(async (req) => {
       }
       triggeredBy = 'cron'
     } else if (authHeader?.startsWith('Bearer ')) {
-      // Path 2: Admin/risk_officer JWT — cheap-reject garbage before hitting auth server
       const jwt = authHeader.slice('Bearer '.length).trim()
       if (!jwt || jwt.length > 5000 || jwt.split('.').length !== 3) {
         return new Response(
@@ -114,7 +120,6 @@ Deno.serve(async (req) => {
       }
       const userId = userData.user.id
 
-      // Role check — fail-closed: RPC error or insufficient role → 403
       const db = createClient(supabaseUrl, serviceKey)
       const { data: isAdmin, error: adminErr } = await db.rpc('has_role', { _user_id: userId, _role: 'admin' })
       const { data: isRisk, error: riskErr } = await db.rpc('has_role', { _user_id: userId, _role: 'risk_officer' })
@@ -133,7 +138,6 @@ Deno.serve(async (req) => {
       }
       triggeredBy = userId
     } else {
-      // Path 3: No auth at all → hard reject
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -141,7 +145,7 @@ Deno.serve(async (req) => {
     }
 
     // =========================================================================
-    // SNAPSHOT LOGIC (unchanged business logic below)
+    // SNAPSHOT LOGIC
     // =========================================================================
     const db = createClient(supabaseUrl, serviceKey)
     const alarms: Alarm[] = []
@@ -190,7 +194,7 @@ Deno.serve(async (req) => {
       if (simRun) {
         const ageMs = Date.now() - new Date(simRun.created_at).getTime()
         simulationAgeHours = Math.round(ageMs / (60 * 60 * 1000) * 10) / 10
-        simulationStale = ageMs > 7 * 24 * 60 * 60 * 1000 // 7 days
+        simulationStale = ageMs > 7 * 24 * 60 * 60 * 1000
         reserveBreachProb = Number(simRun.reserve_breach_probability) || null
         annualLossProb = Number(simRun.probability_of_loss) || null
         worstMonth = Number(simRun.worst_month) || null
@@ -275,7 +279,56 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 7. Write snapshot
+    // =========================================================================
+    // 7. ECONOMIC SAFETY GATE — read-only verdict (ITEM 6)
+    // =========================================================================
+    let econVerdict: { status: string; reasons: unknown[]; metrics: Record<string, unknown>; recommended_actions: string[] } | null = null
+
+    const { data: econData, error: econError } = await db.rpc('get_econ_guardrail_status', { _window_days: 30 })
+
+    if (econError) {
+      console.error('Econ gate RPC error in snapshot:', econError.message)
+      alarms.push({
+        code: 'ECON_GATE_UNAVAILABLE',
+        level: 'critical',
+        message: `Economic safety gate RPC failed: ${econError.message}`,
+      })
+    } else {
+      econVerdict = econData as typeof econVerdict
+
+      if (econVerdict?.status === 'block') {
+        alarms.push({
+          code: 'ECON_GATE_BLOCK',
+          level: 'critical',
+          message: `Economic safety gate is BLOCK: ${(econVerdict.reasons as Array<{ message: string }>).map(r => r.message).join('; ')}`,
+        })
+      } else if (econVerdict?.status === 'warn') {
+        alarms.push({
+          code: 'ECON_GATE_WARN',
+          level: 'elevated',
+          message: `Economic safety gate is WARN: ${(econVerdict.reasons as Array<{ message: string }>).map(r => r.message).join('; ')}`,
+        })
+      }
+    }
+
+    // =========================================================================
+    // 8. AUTO-TIGHTENING PROPOSALS — only from cron path (ITEM 1)
+    // =========================================================================
+    let proposalResult: { proposals_pending?: number } | null = null
+
+    if (econVerdict && econVerdict.status !== 'ok') {
+      const { data: propData, error: propError } = await db.rpc('propose_econ_auto_tightening', {
+        _econ: econVerdict,
+      })
+
+      if (propError) {
+        console.error('Auto-tightening proposal error:', propError.message)
+      } else {
+        proposalResult = propData as typeof proposalResult
+      }
+    }
+
+    // 9. Write snapshot
     const { data: snapshotId, error: snapshotError } = await db.rpc('create_risk_snapshot', {
       _pass_rate: passRate,
       _pass_rate_alert_level: passRateAlertLevel,
@@ -295,6 +348,9 @@ Deno.serve(async (req) => {
       _metadata: JSON.stringify({
         triggered_by: triggeredBy,
         pending_safety_changes: pendingChanges?.length ?? 0,
+        econ_gate_status: econVerdict?.status ?? 'unavailable',
+        econ_gate_reasons_count: econVerdict?.reasons?.length ?? 0,
+        auto_tightening_proposals_pending: proposalResult?.proposals_pending ?? 0,
       }),
     })
 
@@ -302,12 +358,11 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to create risk snapshot: ${snapshotError.message}`)
     }
 
-    // 8. Idempotent staff notifications for critical/high alarms
+    // 10. Idempotent staff notifications for critical/high alarms
     const criticalAlarms = alarms.filter(a => a.level === 'critical' || a.level === 'high')
     if (criticalAlarms.length > 0) {
       const idempotencyKey = `risk_snapshot:${new Date().toISOString().slice(0, 13)}`
 
-      // Use upsert with ON CONFLICT to prevent duplicate notifications
       await db.from('staff_notifications').upsert(
         {
           notification_type: 'risk_alarm',
@@ -327,6 +382,12 @@ Deno.serve(async (req) => {
         alarms_count: alarms.length,
         alarms,
         triggered_by: triggeredBy,
+        econ_gate: econVerdict ? {
+          status: econVerdict.status,
+          reasons_count: econVerdict.reasons.length,
+          recommended_actions: econVerdict.recommended_actions,
+        } : null,
+        auto_tightening: proposalResult,
         summary: {
           pass_rate: passRate,
           pass_rate_alert_level: passRateAlertLevel,
@@ -349,11 +410,3 @@ Deno.serve(async (req) => {
     )
   }
 })
-
-async function hashString(input: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(input)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16)
-}

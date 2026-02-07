@@ -1578,7 +1578,8 @@ export type Database = {
           current_value_snapshot: Json | null
           id: string
           proposed_at: string
-          proposed_by: string
+          proposed_by: string | null
+          proposed_by_system: boolean
           proposed_value: Json
           reason: string | null
           rejected_at: string | null
@@ -1594,7 +1595,8 @@ export type Database = {
           current_value_snapshot?: Json | null
           id?: string
           proposed_at?: string
-          proposed_by: string
+          proposed_by?: string | null
+          proposed_by_system?: boolean
           proposed_value: Json
           reason?: string | null
           rejected_at?: string | null
@@ -1610,7 +1612,8 @@ export type Database = {
           current_value_snapshot?: Json | null
           id?: string
           proposed_at?: string
-          proposed_by?: string
+          proposed_by?: string | null
+          proposed_by_system?: boolean
           proposed_value?: Json
           reason?: string | null
           rejected_at?: string | null
@@ -2271,6 +2274,7 @@ export type Database = {
         }
         Returns: Json
       }
+      propose_econ_auto_tightening: { Args: { _econ: Json }; Returns: Json }
       propose_safety_setting_change: {
         Args: {
           _proposed_value: Json
