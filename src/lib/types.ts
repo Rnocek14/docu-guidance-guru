@@ -54,6 +54,8 @@ export interface UserRole {
   assigned_at: string;
 }
 
+export type CohortPhase = 'evaluation' | 'verification' | 'performance';
+
 export interface Cohort {
   id: string;
   name: string;
@@ -69,6 +71,8 @@ export interface Cohort {
   created_at: string;
   created_by: string | null;
   is_active: boolean;
+  cohort_phase: CohortPhase;
+  next_cohort_id: string | null;
 }
 
 export interface Account {
@@ -87,6 +91,9 @@ export interface Account {
   updated_at: string;
   passed_at: string | null;
   failed_at: string | null;
+  parent_account_id: string | null;
+  root_account_id: string | null;
+  phase_index: number;
   cohort?: Cohort;
 }
 
