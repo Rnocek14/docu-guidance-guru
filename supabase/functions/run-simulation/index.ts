@@ -268,6 +268,9 @@ interface MonthResult {
   firstPayoutPool: number
   zombieCompletions: number
   resets: number
+  // Revenue/cost breakdown for auditability
+  revenueBreakdown: { entry: number; resets: number; total: number }
+  costBreakdown: { payouts: number; fraud: number; chargebacks: number; variable: number; fixed: number; total: number }
 }
 
 function simulateMonthPerAccount(
@@ -482,7 +485,8 @@ function simulateMonthPerAccount(
   const fixedCosts = assumptions.fixedMonthlyCosts
 
   const totalRevenue = revenue + resetRevenue
-  const netProfit = totalRevenue - payoutDollars - fraudLoss - chargebacks - variableCosts - fixedCosts
+  const totalCosts = payoutDollars + fraudLoss + chargebacks + variableCosts + fixedCosts
+  const netProfit = totalRevenue - totalCosts
 
   // ACCOUNTING INVARIANT: netProfit can never exceed totalRevenue.
   // Violation means costs went negative (silent corruption). Fail loudly.
@@ -506,6 +510,8 @@ function simulateMonthPerAccount(
     capCompletions, capClips, capRejections,
     totalAccounts: aggTotal, eligiblePool: aggEligible, firstPayoutPool: aggFirstPayout,
     zombieCompletions, resets: resetsThisMonth,
+    revenueBreakdown: { entry: revenue, resets: resetRevenue, total: totalRevenue },
+    costBreakdown: { payouts: payoutDollars, fraud: fraudLoss, chargebacks, variable: variableCosts, fixed: fixedCosts, total: totalCosts },
   }
 }
 
@@ -755,6 +761,9 @@ function runSimulation(
   let completedIterations = 0
   let partial = false
   let partialReason: string | null = null
+  // Aggregate revenue/cost breakdown across all iterations
+  let aggEntryRevenue = 0, aggResetRevenue = 0, aggTotalRevenue = 0
+  let aggPayoutCost = 0, aggFraudCost = 0, aggChargebackCost = 0, aggVariableCost = 0, aggFixedCost = 0, aggTotalCost = 0
 
   for (let iter = 0; iter < iterations; iter++) {
     // Runtime budget check EVERY iteration
@@ -791,6 +800,16 @@ function runSimulation(
       totalCapClips += result.capClips
       totalCapRejections += result.capRejections
       cumCapCompletions += result.capCompletions
+      // Accumulate revenue/cost breakdown
+      aggEntryRevenue += result.revenueBreakdown.entry
+      aggResetRevenue += result.revenueBreakdown.resets
+      aggTotalRevenue += result.revenueBreakdown.total
+      aggPayoutCost += result.costBreakdown.payouts
+      aggFraudCost += result.costBreakdown.fraud
+      aggChargebackCost += result.costBreakdown.chargebacks
+      aggVariableCost += result.costBreakdown.variable
+      aggFixedCost += result.costBreakdown.fixed
+      aggTotalCost += result.costBreakdown.total
 
       cohortTotalAcctCols[month].push(result.totalAccounts)
       cohortEligibleCols[month].push(result.eligiblePool)
@@ -926,6 +945,20 @@ function runSimulation(
       // Legacy compat (kept for UI backward compat)
       avgPayoutsPerAccount: totalPayoutCount / safePassedAccounts,
       lifetimeCapHitRate: totalCapCompletions / safePassedAccounts,
+    },
+    // Aggregate revenue/cost breakdown (averaged per iteration for auditability)
+    revenueBreakdown: {
+      entry: aggEntryRevenue / Math.max(1, completedIterations),
+      resets: aggResetRevenue / Math.max(1, completedIterations),
+      total: aggTotalRevenue / Math.max(1, completedIterations),
+    },
+    costBreakdown: {
+      payouts: aggPayoutCost / Math.max(1, completedIterations),
+      fraud: aggFraudCost / Math.max(1, completedIterations),
+      chargebacks: aggChargebackCost / Math.max(1, completedIterations),
+      variable: aggVariableCost / Math.max(1, completedIterations),
+      fixed: aggFixedCost / Math.max(1, completedIterations),
+      total: aggTotalCost / Math.max(1, completedIterations),
     },
   }
 }
