@@ -39,13 +39,25 @@ Deno.test({ name: 'GET → 405 with correct Allow + CORS headers', ...opts, fn: 
   const res = await fetch(FUNCTION_URL, { method: 'GET' })
   await res.text()
   assertEquals(res.status, 405, `Expected 405, got ${res.status}`)
-  assertEquals(res.headers.get('Allow'), 'POST, OPTIONS', 'Allow header must list POST, OPTIONS')
-  const allowMethods = res.headers.get('access-control-allow-methods') ?? ''
-  assertEquals(allowMethods.includes('POST'), true, 'CORS Allow-Methods must include POST')
+
+  // Allow header — tolerant of ordering/spacing
+  const allowParts = (res.headers.get('Allow') ?? '').split(',').map(s => s.trim().toUpperCase())
+  assertEquals(allowParts.includes('POST'), true, 'Allow header must include POST')
+  assertEquals(allowParts.includes('OPTIONS'), true, 'Allow header must include OPTIONS')
+
+  // CORS Allow-Methods — same tolerance
+  const methodParts = (res.headers.get('access-control-allow-methods') ?? '').split(',').map(s => s.trim().toUpperCase())
+  assertEquals(methodParts.includes('POST'), true, 'CORS Allow-Methods must include POST')
+
+  // CORS Allow-Headers
   const allowHeaders = (res.headers.get('access-control-allow-headers') ?? '').toLowerCase()
   assertEquals(allowHeaders.includes('x-cron-secret'), true, 'CORS Allow-Headers must include x-cron-secret')
   assertEquals(allowHeaders.includes('authorization'), true, 'CORS Allow-Headers must include authorization')
   assertEquals(allowHeaders.includes('content-type'), true, 'CORS Allow-Headers must include content-type')
+
+  // CORS Allow-Origin must exist
+  const origin = res.headers.get('access-control-allow-origin')
+  assertEquals(origin !== null && origin.length > 0, true, 'CORS Allow-Origin must be set')
 }})
 
 // =============================================================================
