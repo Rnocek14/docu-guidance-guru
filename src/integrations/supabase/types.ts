@@ -1504,6 +1504,123 @@ export type Database = {
           },
         ]
       }
+      risk_snapshots: {
+        Row: {
+          alarms: Json
+          annual_loss_probability: number | null
+          cohort_config_hash: string | null
+          created_at: string
+          id: string
+          metadata: Json
+          net_buffer: number | null
+          pass_rate: number | null
+          pass_rate_alert_level: string | null
+          passed_accounts_in_window: number | null
+          pending_payouts_amount: number | null
+          pending_payouts_count: number | null
+          reserve_breach_probability: number | null
+          simulation_age_hours: number | null
+          simulation_run_id: string | null
+          simulation_stale: boolean | null
+          snapshot_type: string
+          total_accounts_in_window: number | null
+          worst_month: number | null
+        }
+        Insert: {
+          alarms?: Json
+          annual_loss_probability?: number | null
+          cohort_config_hash?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json
+          net_buffer?: number | null
+          pass_rate?: number | null
+          pass_rate_alert_level?: string | null
+          passed_accounts_in_window?: number | null
+          pending_payouts_amount?: number | null
+          pending_payouts_count?: number | null
+          reserve_breach_probability?: number | null
+          simulation_age_hours?: number | null
+          simulation_run_id?: string | null
+          simulation_stale?: boolean | null
+          snapshot_type?: string
+          total_accounts_in_window?: number | null
+          worst_month?: number | null
+        }
+        Update: {
+          alarms?: Json
+          annual_loss_probability?: number | null
+          cohort_config_hash?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json
+          net_buffer?: number | null
+          pass_rate?: number | null
+          pass_rate_alert_level?: string | null
+          passed_accounts_in_window?: number | null
+          pending_payouts_amount?: number | null
+          pending_payouts_count?: number | null
+          reserve_breach_probability?: number | null
+          simulation_age_hours?: number | null
+          simulation_run_id?: string | null
+          simulation_stale?: boolean | null
+          snapshot_type?: string
+          total_accounts_in_window?: number | null
+          worst_month?: number | null
+        }
+        Relationships: []
+      }
+      safety_setting_changes: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          current_value_snapshot: Json | null
+          id: string
+          proposed_at: string
+          proposed_by: string
+          proposed_value: Json
+          reason: string | null
+          rejected_at: string | null
+          rejected_by: string | null
+          setting_key: string
+          status: string
+          ticket_ref: string | null
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          current_value_snapshot?: Json | null
+          id?: string
+          proposed_at?: string
+          proposed_by: string
+          proposed_value: Json
+          reason?: string | null
+          rejected_at?: string | null
+          rejected_by?: string | null
+          setting_key: string
+          status?: string
+          ticket_ref?: string | null
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          current_value_snapshot?: Json | null
+          id?: string
+          proposed_at?: string
+          proposed_by?: string
+          proposed_value?: Json
+          reason?: string | null
+          rejected_at?: string | null
+          rejected_by?: string | null
+          setting_key?: string
+          status?: string
+          ticket_ref?: string | null
+        }
+        Relationships: []
+      }
       simulation_runs: {
         Row: {
           assumptions: Json
@@ -1930,6 +2047,10 @@ export type Database = {
     }
     Functions: {
       apply_geo_mismatch_hold: { Args: { _user_id: string }; Returns: Json }
+      approve_safety_setting_change: {
+        Args: { _change_id: string; _reason?: string }
+        Returns: Json
+      }
       assert_jurisdiction_allowed: { Args: { p_action: string }; Returns: Json }
       assert_user_jurisdiction_allowed: {
         Args: { _user_id: string; p_action: string }
@@ -1979,6 +2100,27 @@ export type Database = {
           _raw_webhook?: Json
         }
         Returns: Json
+      }
+      create_risk_snapshot: {
+        Args: {
+          _alarms?: Json
+          _annual_loss_prob?: number
+          _cohort_config_hash?: string
+          _metadata?: Json
+          _net_buffer?: number
+          _pass_rate?: number
+          _pass_rate_alert_level?: string
+          _passed_accounts?: number
+          _pending_payouts_amount?: number
+          _pending_payouts_count?: number
+          _reserve_breach_prob?: number
+          _simulation_age_hours?: number
+          _simulation_run_id?: string
+          _simulation_stale?: boolean
+          _total_accounts?: number
+          _worst_month?: number
+        }
+        Returns: string
       }
       detect_cross_instrument_correlations: {
         Args: {
@@ -2125,6 +2267,15 @@ export type Database = {
         }
         Returns: Json
       }
+      propose_safety_setting_change: {
+        Args: {
+          _proposed_value: Json
+          _reason?: string
+          _setting_key: string
+          _ticket_ref?: string
+        }
+        Returns: Json
+      }
       record_geo_signal: {
         Args: {
           _confidence?: number
@@ -2134,6 +2285,10 @@ export type Database = {
           _source?: string
           _user_id: string
         }
+        Returns: Json
+      }
+      reject_safety_setting_change: {
+        Args: { _change_id: string; _reason?: string }
         Returns: Json
       }
       reset_payout_cycle: { Args: { _account_id: string }; Returns: undefined }
