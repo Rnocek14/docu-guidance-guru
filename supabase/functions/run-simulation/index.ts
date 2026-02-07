@@ -532,28 +532,30 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   }
 
-  const anonClient = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
-  )
+  const jwt = authHeader.replace('Bearer ', '')
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+
+  // Use anon key + JWT for proper token validation (canonical pattern)
+  const anonClient = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: `Bearer ${jwt}` } },
+  })
   const serviceClient = createClient(
-    Deno.env.get('SUPABASE_URL')!,
+    supabaseUrl,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   )
 
-  // Verify caller identity
-  const token = authHeader.replace('Bearer ', '')
-  const { data: claimsData, error: claimsError } = await anonClient.auth.getClaims(token)
-  if (claimsError || !claimsData?.claims) {
+  // Verify caller identity via getUser (not getClaims which doesn't exist)
+  const { data: userData, error: userError } = await anonClient.auth.getUser()
+  if (userError || !userData?.user) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   }
-  const userId = claimsData.claims.sub as string
+  const userId = userData.user.id
 
   // Check admin/risk_officer role
-  const { data: roles } = await serviceClient.rpc('get_user_roles', { _user_id: userId })
-  const userRoles = (roles as string[]) ?? []
-  if (!userRoles.some(r => ['admin', 'risk_officer'].includes(r))) {
+  const { data: isAdmin } = await serviceClient.rpc('has_role', { _user_id: userId, _role: 'admin' })
+  const { data: isRisk } = await serviceClient.rpc('has_role', { _user_id: userId, _role: 'risk_officer' })
+  if (isAdmin !== true && isRisk !== true) {
     return new Response(JSON.stringify({ error: 'Forbidden: admin or risk_officer required' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   }
 
