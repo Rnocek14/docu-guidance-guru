@@ -351,6 +351,7 @@ Deno.serve(async (req) => {
         pending_safety_changes: pendingChanges?.length ?? 0,
         econ_gate_status: econVerdict?.status ?? 'unavailable',
         econ_gate_reasons_count: econVerdict?.reasons?.length ?? 0,
+        auto_tightening_attempted: isCron && econVerdict?.status !== 'ok',
         auto_tightening_proposals_pending: proposalResult?.proposals_pending ?? 0,
       }),
     })
