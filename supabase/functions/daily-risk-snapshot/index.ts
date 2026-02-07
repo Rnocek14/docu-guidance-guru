@@ -8,10 +8,12 @@ const corsHeaders = {
 /**
  * Daily Risk Snapshot Edge Function
  * 
- * Collects pass rate, simulation freshness, reserve status, and pending payouts
- * into a single risk_snapshots row. Triggers alarms if thresholds exceeded.
+ * AUTH MODEL (Option B — shared secret + admin/risk JWT):
+ * 1. Cron/scheduler: Must send header `X-Cron-Secret` matching env CRON_SECRET
+ * 2. Manual: Must send a valid JWT for an admin or risk_officer user
+ * 3. All other requests → 401
  * 
- * Designed to be called by pg_cron or manually by admin/risk staff.
+ * The SUPABASE_ANON_KEY is PUBLIC and is NEVER treated as an auth credential.
  */
 
 interface Alarm {
@@ -30,40 +32,68 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+    const cronSecret = Deno.env.get('CRON_SECRET')
 
-    // Auth: allow service-role calls (cron) or admin/risk_officer JWT calls
+    // =========================================================================
+    // AUTH GATE — fail-closed, no bypass
+    // =========================================================================
+    let triggeredBy: string = 'unknown'
+
+    const incomingCronSecret = req.headers.get('X-Cron-Secret')
     const authHeader = req.headers.get('Authorization')
-    let userId: string | null = null
 
-    if (authHeader?.startsWith('Bearer ')) {
-      const jwt = authHeader.replace('Bearer ', '')
-      // Check if it's the anon key (cron call) - skip user auth
-      if (jwt !== anonKey) {
-        const anonClient = createClient(supabaseUrl, anonKey, {
-          global: { headers: { Authorization: `Bearer ${jwt}` } },
-        })
-        const { data: userData, error: userError } = await anonClient.auth.getUser()
-        if (userError || !userData?.user) {
-          return new Response(
-            JSON.stringify({ error: 'Unauthorized' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
+    if (incomingCronSecret) {
+      // Path 1: Cron/scheduler with shared secret
+      // If CRON_SECRET env is not configured, reject with 401 (fail-closed, not 500)
+      if (!cronSecret || cronSecret.length < 16 || incomingCronSecret !== cronSecret) {
+        const reasonCode = (!cronSecret || cronSecret.length < 16) ? 'CRON_SECRET_NOT_CONFIGURED' : 'INVALID_CRON_SECRET'
+        if (!cronSecret || cronSecret.length < 16) {
+          console.error('CRON_SECRET env not configured or too short — rejecting cron auth')
         }
-        userId = userData.user.id
-
-        const serviceClient = createClient(supabaseUrl, serviceKey)
-        const { data: isAdmin } = await serviceClient.rpc('has_role', { _user_id: userId, _role: 'admin' })
-        const { data: isRisk } = await serviceClient.rpc('has_role', { _user_id: userId, _role: 'risk_officer' })
-        if (isAdmin !== true && isRisk !== true) {
-          return new Response(
-            JSON.stringify({ error: 'Forbidden: admin or risk_officer required' }),
-            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized', reason_code: reasonCode }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
       }
+      triggeredBy = 'cron'
+    } else if (authHeader?.startsWith('Bearer ')) {
+      // Path 2: Admin/risk_officer JWT
+      const jwt = authHeader.replace('Bearer ', '')
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+
+      const anonClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: `Bearer ${jwt}` } },
+      })
+      const { data: userData, error: userError } = await anonClient.auth.getUser()
+      if (userError || !userData?.user) {
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized', reason_code: 'INVALID_JWT' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      const userId = userData.user.id
+
+      const db = createClient(supabaseUrl, serviceKey)
+      const { data: isAdmin } = await db.rpc('has_role', { _user_id: userId, _role: 'admin' })
+      const { data: isRisk } = await db.rpc('has_role', { _user_id: userId, _role: 'risk_officer' })
+      if (isAdmin !== true && isRisk !== true) {
+        return new Response(
+          JSON.stringify({ error: 'Forbidden: admin or risk_officer required', reason_code: 'INSUFFICIENT_ROLE' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      triggeredBy = userId
+    } else {
+      // Path 3: No auth at all → hard reject
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized', reason_code: 'NO_AUTH' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
+    // =========================================================================
+    // SNAPSHOT LOGIC (unchanged business logic below)
+    // =========================================================================
     const db = createClient(supabaseUrl, serviceKey)
     const alarms: Alarm[] = []
 
@@ -173,7 +203,6 @@ Deno.serve(async (req) => {
       .eq('is_active', true)
       .order('name')
 
-    // Simple hash: stringify sorted config
     const cohortConfigHash = cohorts
       ? await hashString(JSON.stringify(cohorts))
       : null
@@ -197,7 +226,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 7. Write snapshot via service-role RPC
+    // 7. Write snapshot
     const { data: snapshotId, error: snapshotError } = await db.rpc('create_risk_snapshot', {
       _pass_rate: passRate,
       _pass_rate_alert_level: passRateAlertLevel,
@@ -215,7 +244,7 @@ Deno.serve(async (req) => {
       _pending_payouts_amount: pendingPayoutsAmount,
       _alarms: JSON.stringify(alarms),
       _metadata: JSON.stringify({
-        triggered_by: userId ?? 'cron',
+        triggered_by: triggeredBy,
         pending_safety_changes: pendingChanges?.length ?? 0,
       }),
     })
@@ -224,16 +253,22 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to create risk snapshot: ${snapshotError.message}`)
     }
 
-    // 8. Create staff notifications for critical/high alarms
+    // 8. Idempotent staff notifications for critical/high alarms
     const criticalAlarms = alarms.filter(a => a.level === 'critical' || a.level === 'high')
     if (criticalAlarms.length > 0) {
-      await db.from('staff_notifications').insert({
-        notification_type: 'risk_alarm',
-        title: `Risk Snapshot: ${criticalAlarms.length} alarm(s)`,
-        body: criticalAlarms.map(a => `[${a.level.toUpperCase()}] ${a.message}`).join('\n'),
-        data: { snapshot_id: snapshotId, alarms: criticalAlarms },
-        idempotency_key: `risk_snapshot:${new Date().toISOString().slice(0, 13)}`, // 1 per hour max
-      })
+      const idempotencyKey = `risk_snapshot:${new Date().toISOString().slice(0, 13)}`
+
+      // Use upsert with ON CONFLICT to prevent duplicate notifications
+      await db.from('staff_notifications').upsert(
+        {
+          notification_type: 'risk_alarm',
+          title: `Risk Snapshot: ${criticalAlarms.length} alarm(s)`,
+          body: criticalAlarms.map(a => `[${a.level.toUpperCase()}] ${a.message}`).join('\n'),
+          data: { snapshot_id: snapshotId, alarms: criticalAlarms },
+          idempotency_key: idempotencyKey,
+        },
+        { onConflict: 'idempotency_key', ignoreDuplicates: true }
+      )
     }
 
     return new Response(
@@ -242,6 +277,7 @@ Deno.serve(async (req) => {
         snapshot_id: snapshotId,
         alarms_count: alarms.length,
         alarms,
+        triggered_by: triggeredBy,
         summary: {
           pass_rate: passRate,
           pass_rate_alert_level: passRateAlertLevel,
