@@ -32,6 +32,23 @@ const hasServiceKey = SERVICE_ROLE_KEY.length > 0
 const opts = { sanitizeResources: false, sanitizeOps: false }
 
 // =============================================================================
+// Method & CORS Tests
+// =============================================================================
+
+Deno.test({ name: 'GET → 405 with correct Allow + CORS headers', ...opts, fn: async () => {
+  const res = await fetch(FUNCTION_URL, { method: 'GET' })
+  await res.text()
+  assertEquals(res.status, 405, `Expected 405, got ${res.status}`)
+  assertEquals(res.headers.get('Allow'), 'POST, OPTIONS', 'Allow header must list POST, OPTIONS')
+  const allowMethods = res.headers.get('access-control-allow-methods') ?? ''
+  assertEquals(allowMethods.includes('POST'), true, 'CORS Allow-Methods must include POST')
+  const allowHeaders = (res.headers.get('access-control-allow-headers') ?? '').toLowerCase()
+  assertEquals(allowHeaders.includes('x-cron-secret'), true, 'CORS Allow-Headers must include x-cron-secret')
+  assertEquals(allowHeaders.includes('authorization'), true, 'CORS Allow-Headers must include authorization')
+  assertEquals(allowHeaders.includes('content-type'), true, 'CORS Allow-Headers must include content-type')
+}})
+
+// =============================================================================
 // Auth Gate Tests
 // =============================================================================
 
