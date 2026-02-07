@@ -26,6 +26,7 @@ interface CrossCheckResult {
   annual_loss_prob_delta: number;
   worst_month_delta: number;
   trust: 'high' | 'medium' | 'low';
+  note?: string;
 }
 
 interface ScalingInfo {
@@ -54,7 +55,20 @@ interface ServerSimResult {
     monthlyBands: { p5: number; p50: number; p95: number; mean: number }[];
     cohortBands?: { totalAccounts: number; eligible: number; firstPayout: number; capHits: number }[];
     histogram: { bucket: number; count: number }[];
-    diagnostics: { avgPayoutsPerAccount: number; lifetimeCapHitRate: number };
+    diagnostics: {
+      avgPayoutDollarsPerPassedAccount?: number;
+      avgPayoutCountPerPassedAccount?: number;
+      totalPayoutRequests?: number;
+      capCompletions?: number;
+      capClips?: number;
+      capRejections?: number;
+      capCompletionsPerPassedAccount?: number;
+      capClipsPerPassedAccount?: number;
+      capRejectionsPerPayoutRequest?: number;
+      // Legacy compat
+      avgPayoutsPerAccount: number;
+      lifetimeCapHitRate: number;
+    };
   };
 }
 
@@ -435,11 +449,36 @@ export default function MonteCarloAnalytics() {
                     <CardHeader><CardTitle>Simulation Diagnostics</CardTitle></CardHeader>
                     <CardContent>
                       <div className="space-y-3">
+                        <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Payout Metrics (per passed account)</h4>
                         {[
-                          ['Total Customers Simulated', (overrides.accountsPerMonth * overrides.horizon).toLocaleString()],
+                          ['Avg Payout $ / Passed Account', result.results.diagnostics.avgPayoutDollarsPerPassedAccount != null ? fmt(result.results.diagnostics.avgPayoutDollarsPerPassedAccount) : result.results.diagnostics.avgPayoutsPerAccount.toFixed(3)],
+                          ['Avg Payout Count / Passed Account', result.results.diagnostics.avgPayoutCountPerPassedAccount?.toFixed(3) ?? 'n/a'],
+                          ['Total Payout Requests', result.results.diagnostics.totalPayoutRequests?.toLocaleString() ?? 'n/a'],
+                        ].map(([label, value]) => (
+                          <div key={label} className="flex justify-between border-b pb-2 last:border-0">
+                            <span className="text-muted-foreground">{label}</span>
+                            <span className="font-medium">{value}</span>
+                          </div>
+                        ))}
+
+                        <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mt-4">Cap Metrics (split)</h4>
+                        {[
+                          ['Cap Completions (exhausted)', result.results.diagnostics.capCompletions?.toLocaleString() ?? 'n/a'],
+                          ['Cap Clips (payout trimmed)', result.results.diagnostics.capClips?.toLocaleString() ?? 'n/a'],
+                          ['Cap Rejections (headroom ≤ 0)', result.results.diagnostics.capRejections?.toLocaleString() ?? 'n/a'],
+                          ['Completions / Passed Account', result.results.diagnostics.capCompletionsPerPassedAccount?.toFixed(4) ?? pct(result.results.diagnostics.lifetimeCapHitRate)],
+                          ['Clips / Passed Account', result.results.diagnostics.capClipsPerPassedAccount?.toFixed(4) ?? 'n/a'],
+                          ['Rejections / Payout Request', result.results.diagnostics.capRejectionsPerPayoutRequest != null ? pct(result.results.diagnostics.capRejectionsPerPayoutRequest) : 'n/a'],
+                        ].map(([label, value]) => (
+                          <div key={label} className="flex justify-between border-b pb-2 last:border-0">
+                            <span className="text-muted-foreground">{label}</span>
+                            <span className="font-medium">{value}</span>
+                          </div>
+                        ))}
+
+                        <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mt-4">Risk Tail</h4>
+                        {[
                           ['Peak Eligible Pool', result.results.cohortBands ? Math.max(...result.results.cohortBands.map(b => b.eligible)).toLocaleString() : 'n/a'],
-                          ['Avg Payouts / Account', result.results.diagnostics.avgPayoutsPerAccount.toFixed(3)],
-                          ['Lifetime Cap Hit Rate', pct(result.results.diagnostics.lifetimeCapHitRate)],
                           ['Max Drawdown (tail)', fmt(result.results.risk.maxDrawdown)],
                           ['Consecutive Loss Months', result.results.risk.consecutiveLossMonths.toString()],
                           ['Std Deviation (monthly)', fmt(result.results.profit.stdDev)],
@@ -489,7 +528,9 @@ export default function MonteCarloAnalytics() {
                         Shadow Cross-Check ({result.cross_check.shadow_iterations} iterations)
                       </CardTitle>
                       <CardDescription>
-                        Per-account engine vs legacy cohort-aggregate engine delta. Trust: <strong>{result.cross_check.trust}</strong>
+                        Per-account engine vs legacy cohort-aggregate engine delta (shared macro randomness).
+                        Trust: <strong>{result.cross_check.trust}</strong>
+                        {result.cross_check.note && <> — {result.cross_check.note}</>}
                       </CardDescription>
                     </CardHeader>
                     <CardContent>

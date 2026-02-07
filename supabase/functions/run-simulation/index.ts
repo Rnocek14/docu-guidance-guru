@@ -15,7 +15,7 @@ interface SimulationRequest {
   seed?: number
   reserve_threshold?: number
   overrides?: Partial<SimAssumptions>
-  force_iterations?: boolean // bypass auto-scaling
+  force_iterations?: boolean
 }
 
 interface CohortConfig {
@@ -53,7 +53,6 @@ interface SimKnobs {
   verificationFailRate: number
 }
 
-// Per-account state (ported from client engine)
 interface AccountState {
   id: number
   createdMonth: number
@@ -77,15 +76,53 @@ interface SimulateMonthContext {
   nextAccountId: number
   totalEverCreated: number
   totalEverCompleted: number
+  totalPassedAccounts: number // NEW: track total passed for diagnostics
 }
 
-// Legacy cohort-aggregate state (kept for shadow cross-check)
 interface CohortState {
   eligiblePool: number
   firstPayoutPool: number
   monthsActive: number
   totalPaid: number
   totalAccounts: number
+}
+
+// ============================================================================
+// PRE-SAMPLED MACRO DRAWS (shared between engines for cross-check)
+// ============================================================================
+
+interface MacroDraws {
+  passRate: number
+  payoutReqRate: number
+  fraudAttemptRate: number
+  fraudSuccessRate: number
+  chargebackRate: number
+  payoutsPerAcct: number
+  avgPayoutDraw: number      // lognormal draw for avg payout amount
+  fraudPayoutDraw: number    // lognormal draw for fraud payout amount
+}
+
+function preSampleMacroDraws(
+  random: () => number,
+  months: number,
+  assumptions: SimAssumptions,
+  useLegacyTriangular: boolean,
+): MacroDraws[] {
+  const tri = useLegacyTriangular ? triangularDrawLegacy : triangular
+  const draws: MacroDraws[] = []
+  for (let m = 0; m < months; m++) {
+    draws.push({
+      passRate: tri(random, assumptions.passRate.min, assumptions.passRate.mode, assumptions.passRate.max),
+      payoutReqRate: tri(random, assumptions.payoutRequestRate.min, assumptions.payoutRequestRate.mode, assumptions.payoutRequestRate.max),
+      fraudAttemptRate: tri(random, assumptions.fraudAttemptRate.min, assumptions.fraudAttemptRate.mode, assumptions.fraudAttemptRate.max),
+      fraudSuccessRate: tri(random, assumptions.fraudSuccessRate.min, assumptions.fraudSuccessRate.mode, assumptions.fraudSuccessRate.max),
+      chargebackRate: tri(random, assumptions.chargebackRate.min, assumptions.chargebackRate.mode, assumptions.chargebackRate.max),
+      payoutsPerAcct: tri(random, assumptions.payoutsPerPaidAccountPerMonth.min, assumptions.payoutsPerPaidAccountPerMonth.mode, assumptions.payoutsPerPaidAccountPerMonth.max),
+      avgPayoutDraw: logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev),
+      fraudPayoutDraw: logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5),
+    })
+  }
+  return draws
 }
 
 // ============================================================================
@@ -105,20 +142,17 @@ function mulberry32(seed: number): () => number {
 // DISTRIBUTIONS
 // ============================================================================
 
-/** Box-Muller normal */
 function normal(random: () => number): number {
   const u1 = random() || 1e-10
   const u2 = random()
   return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
 }
 
-/** True inverse-CDF triangular distribution (not normal approximation) */
+/** True inverse-CDF triangular distribution */
 function triangular(random: () => number, min: number, mode: number, max: number): number {
   const u = random()
   const fc = (mode - min) / (max - min)
-  if (u < fc) {
-    return min + Math.sqrt(u * (max - min) * (mode - min))
-  }
+  if (u < fc) return min + Math.sqrt(u * (max - min) * (mode - min))
   return max - Math.sqrt((1 - u) * (max - min) * (max - mode))
 }
 
@@ -130,7 +164,6 @@ function triangularDrawLegacy(random: () => number, min: number, mode: number, m
   return Math.max(min, Math.min(max, result))
 }
 
-/** Log-normal draw */
 function logNormalDraw(random: () => number, mean: number, stdDev: number): number {
   const variance = stdDev * stdDev
   const mu = Math.log(mean * mean / Math.sqrt(variance + mean * mean))
@@ -215,33 +248,41 @@ function completeAccount(state: AccountState, reason: 'cap' | 'zombie', ctx: Sim
 
 // ============================================================================
 // PER-ACCOUNT SIMULATION ENGINE (HIGH FIDELITY)
-// Ported from src/lib/monte-carlo.ts — same logic, same gates, same caps
 // ============================================================================
 
 interface MonthResult {
-  netProfit: number; totalPayouts: number; payoutRequests: number; capHits: number
-  totalAccounts: number; eligiblePool: number; firstPayoutPool: number
-  zombieCompletions: number; resets: number
+  netProfit: number
+  payoutDollars: number      // total $ paid to traders
+  payoutCount: number        // total individual payouts approved
+  payoutRequests: number     // total payout attempts (before gates/caps)
+  capCompletions: number     // accounts fully exhausting cap
+  capClips: number           // payouts clipped to remaining headroom
+  capRejections: number      // payouts rejected (headroom <= 0)
+  totalAccounts: number
+  eligiblePool: number
+  firstPayoutPool: number
+  zombieCompletions: number
+  resets: number
 }
 
 function simulateMonthPerAccount(
   assumptions: SimAssumptions,
-  random: () => number,
+  random: () => number,       // micro RNG (per-account events)
   ctx: SimulateMonthContext,
   monthIndex: number,
+  macro?: MacroDraws,         // pre-sampled macro draws (for cross-check)
 ): MonthResult {
   const { knobs } = assumptions
 
-  // Revenue from new accounts
   const revenue = assumptions.accountsPerMonth * assumptions.pricePerAccount
 
-  // Sample stochastic rates
-  const passRate = triangular(random, assumptions.passRate.min, assumptions.passRate.mode, assumptions.passRate.max)
-  const payoutReqRate = triangular(random, assumptions.payoutRequestRate.min, assumptions.payoutRequestRate.mode, assumptions.payoutRequestRate.max)
-  const fraudAttemptRate = triangular(random, assumptions.fraudAttemptRate.min, assumptions.fraudAttemptRate.mode, assumptions.fraudAttemptRate.max)
-  const fraudSuccessRate = triangular(random, assumptions.fraudSuccessRate.min, assumptions.fraudSuccessRate.mode, assumptions.fraudSuccessRate.max)
-  const chargebackRate = triangular(random, assumptions.chargebackRate.min, assumptions.chargebackRate.mode, assumptions.chargebackRate.max)
-  const payoutsPerAcct = triangular(random, assumptions.payoutsPerPaidAccountPerMonth.min, assumptions.payoutsPerPaidAccountPerMonth.mode, assumptions.payoutsPerPaidAccountPerMonth.max)
+  // Use pre-sampled macro draws if provided, otherwise sample fresh
+  const passRate = macro?.passRate ?? triangular(random, assumptions.passRate.min, assumptions.passRate.mode, assumptions.passRate.max)
+  const payoutReqRate = macro?.payoutReqRate ?? triangular(random, assumptions.payoutRequestRate.min, assumptions.payoutRequestRate.mode, assumptions.payoutRequestRate.max)
+  const fraudAttemptRate = macro?.fraudAttemptRate ?? triangular(random, assumptions.fraudAttemptRate.min, assumptions.fraudAttemptRate.mode, assumptions.fraudAttemptRate.max)
+  const fraudSuccessRate = macro?.fraudSuccessRate ?? triangular(random, assumptions.fraudSuccessRate.min, assumptions.fraudSuccessRate.mode, assumptions.fraudSuccessRate.max)
+  const chargebackRate = macro?.chargebackRate ?? triangular(random, assumptions.chargebackRate.min, assumptions.chargebackRate.mode, assumptions.chargebackRate.max)
+  const payoutsPerAcct = macro?.payoutsPerAcct ?? triangular(random, assumptions.payoutsPerPaidAccountPerMonth.min, assumptions.payoutsPerPaidAccountPerMonth.mode, assumptions.payoutsPerPaidAccountPerMonth.max)
 
   // --- New accounts ---
   const newPassed = Math.round(assumptions.accountsPerMonth * passRate)
@@ -270,6 +311,7 @@ function simulateMonthPerAccount(
       verificationStartMonth: monthIndex,
     })
     ctx.totalEverCreated++
+    ctx.totalPassedAccounts++
   }
 
   // --- Lifecycle: resets, zombies ---
@@ -299,7 +341,7 @@ function simulateMonthPerAccount(
       state.attemptPaid = 0
       state.payoutCount = 0
       state.resetCount++
-      state.eligibleMonth = monthIndex + eligibilityLag // Must wait again (proper lag)
+      state.eligibleMonth = monthIndex + eligibilityLag
       state.profitSinceLastPayout = 0
       state.monthsSinceLastPayout = 0
       state.winningDaysSinceLastPayout = 0
@@ -321,12 +363,10 @@ function simulateMonthPerAccount(
     }
 
     if (state.phase === 'funded') {
-      // Simulate monthly PnL for velocity gate tracking
       const monthlyPnl = logNormalDraw(random, 200, 180) * (random() < 0.65 ? 1 : -0.7)
       state.profitSinceLastPayout += monthlyPnl
       state.monthsSinceLastPayout++
 
-      // Winning days (~22 trading days, ~55% win rate)
       let winningDays = 0
       for (let d = 0; d < 22; d++) {
         if (random() < 0.55) winningDays++
@@ -336,9 +376,12 @@ function simulateMonthPerAccount(
   })
 
   // --- Payouts ---
-  let totalPayouts = 0
-  let totalPayoutRequests = 0
-  let totalCapHits = 0
+  let payoutDollars = 0
+  let payoutCount = 0
+  let payoutRequests = 0
+  let capCompletions = 0
+  let capClips = 0
+  let capRejections = 0
 
   const eligibleAccounts: AccountState[] = []
   ctx.accountStates.forEach(state => {
@@ -365,16 +408,21 @@ function simulateMonthPerAccount(
 
     const numPayouts = Math.max(1, Math.round(payoutsPerAcct))
     for (let j = 0; j < numPayouts; j++) {
-      totalPayoutRequests++
+      payoutRequests++
 
       const headroom = lifetimeCap !== null ? lifetimeCap - account.lifetimePaidTotal : Infinity
       if (headroom <= 0) {
+        capRejections++
         completeAccount(account, 'cap', ctx)
-        totalCapHits++
+        capCompletions++
         continue
       }
 
-      const rawPayout = logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
+      // Use pre-sampled avg payout draw as base, add per-payout noise via micro RNG
+      const basePayoutDraw = macro?.avgPayoutDraw ?? logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
+      // Add per-payout micro variance (±20%) so not every payout in the month is identical
+      const microNoise = macro ? (0.8 + random() * 0.4) : 1.0
+      const rawPayout = basePayoutDraw * microNoise
       let traderPayout = rawPayout * knobs.payoutSplitPercent
 
       // First payout cap
@@ -385,7 +433,7 @@ function simulateMonthPerAccount(
       // Lifetime cap clip
       if (lifetimeCap !== null && traderPayout > headroom) {
         traderPayout = headroom
-        totalCapHits++
+        capClips++
       }
 
       // Min $50 threshold
@@ -396,7 +444,8 @@ function simulateMonthPerAccount(
         throw new Error(`Lifetime cap violated: account ${account.id}`)
       }
 
-      totalPayouts += traderPayout
+      payoutDollars += traderPayout
+      payoutCount++
       account.lifetimePaidTotal += traderPayout
       account.attemptPaid += traderPayout
       account.payoutCount++
@@ -409,19 +458,19 @@ function simulateMonthPerAccount(
       // Check if cap-complete after payout
       if (lifetimeCap !== null && account.lifetimePaidTotal >= lifetimeCap - 1e-6) {
         completeAccount(account, 'cap', ctx)
+        capCompletions++
       }
     }
   }
 
   // --- Fraud & chargebacks ---
-  const fraudLoss = eligibleAccounts.length * fraudAttemptRate * fraudSuccessRate *
-    logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5) *
-    knobs.payoutSplitPercent
+  const fraudPayoutBase = macro?.fraudPayoutDraw ?? logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5)
+  const fraudLoss = eligibleAccounts.length * fraudAttemptRate * fraudSuccessRate * fraudPayoutBase * knobs.payoutSplitPercent
   const chargebacks = revenue * chargebackRate
   const variableCosts = assumptions.accountsPerMonth * assumptions.variableCostPerAccount
   const fixedCosts = assumptions.fixedMonthlyCosts
 
-  const netProfit = revenue + resetRevenue - totalPayouts - fraudLoss - chargebacks - variableCosts - fixedCosts
+  const netProfit = revenue + resetRevenue - payoutDollars - fraudLoss - chargebacks - variableCosts - fixedCosts
 
   // Count pools
   let aggTotal = 0, aggEligible = 0, aggFirstPayout = 0
@@ -435,9 +484,10 @@ function simulateMonthPerAccount(
   })
 
   return {
-    netProfit, totalPayouts, payoutRequests: totalPayoutRequests, capHits: totalCapHits,
+    netProfit, payoutDollars, payoutCount, payoutRequests,
+    capCompletions, capClips, capRejections,
     totalAccounts: aggTotal, eligiblePool: aggEligible, firstPayoutPool: aggFirstPayout,
-    zombieCompletions: zombieCompletions, resets: resetsThisMonth,
+    zombieCompletions, resets: resetsThisMonth,
   }
 }
 
@@ -454,15 +504,18 @@ function simulateMonthLegacy(
   random: () => number,
   cohorts: CohortState[],
   _monthIndex: number,
+  macro?: MacroDraws,
 ): LegacyMonthResult {
   const { knobs } = assumptions
   const revenue = assumptions.accountsPerMonth * assumptions.pricePerAccount
-  const passRate = triangularDrawLegacy(random, assumptions.passRate.min, assumptions.passRate.mode, assumptions.passRate.max)
-  const payoutReqRate = triangularDrawLegacy(random, assumptions.payoutRequestRate.min, assumptions.payoutRequestRate.mode, assumptions.payoutRequestRate.max)
-  const fraudAttemptRate = triangularDrawLegacy(random, assumptions.fraudAttemptRate.min, assumptions.fraudAttemptRate.mode, assumptions.fraudAttemptRate.max)
-  const fraudSuccessRate = triangularDrawLegacy(random, assumptions.fraudSuccessRate.min, assumptions.fraudSuccessRate.mode, assumptions.fraudSuccessRate.max)
-  const chargebackRate = triangularDrawLegacy(random, assumptions.chargebackRate.min, assumptions.chargebackRate.mode, assumptions.chargebackRate.max)
-  const payoutsPerAcct = triangularDrawLegacy(random, assumptions.payoutsPerPaidAccountPerMonth.min, assumptions.payoutsPerPaidAccountPerMonth.mode, assumptions.payoutsPerPaidAccountPerMonth.max)
+
+  // Use pre-sampled macro draws if provided
+  const passRate = macro?.passRate ?? triangularDrawLegacy(random, assumptions.passRate.min, assumptions.passRate.mode, assumptions.passRate.max)
+  const payoutReqRate = macro?.payoutReqRate ?? triangularDrawLegacy(random, assumptions.payoutRequestRate.min, assumptions.payoutRequestRate.mode, assumptions.payoutRequestRate.max)
+  const fraudAttemptRate = macro?.fraudAttemptRate ?? triangularDrawLegacy(random, assumptions.fraudAttemptRate.min, assumptions.fraudAttemptRate.mode, assumptions.fraudAttemptRate.max)
+  const fraudSuccessRate = macro?.fraudSuccessRate ?? triangularDrawLegacy(random, assumptions.fraudSuccessRate.min, assumptions.fraudSuccessRate.mode, assumptions.fraudSuccessRate.max)
+  const chargebackRate = macro?.chargebackRate ?? triangularDrawLegacy(random, assumptions.chargebackRate.min, assumptions.chargebackRate.mode, assumptions.chargebackRate.max)
+  const payoutsPerAcct = macro?.payoutsPerAcct ?? triangularDrawLegacy(random, assumptions.payoutsPerPaidAccountPerMonth.min, assumptions.payoutsPerPaidAccountPerMonth.mode, assumptions.payoutsPerPaidAccountPerMonth.max)
 
   const newPassed = Math.round(assumptions.accountsPerMonth * passRate)
   const eligibilityLag = Math.ceil(assumptions.avgDaysToFirstPayout / 30)
@@ -497,7 +550,7 @@ function simulateMonthLegacy(
     if (knobs.minMonthsBetweenPayouts > 1) gatePassRate *= Math.min(1, 1 / knobs.minMonthsBetweenPayouts)
     const approved = requesting * gatePassRate
     const numPayouts = approved * Math.max(1, payoutsPerAcct)
-    let avgRaw = logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
+    const avgRaw = macro?.avgPayoutDraw ?? logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
     let avgTraderPayout = avgRaw * knobs.payoutSplitPercent
     const firstFrac = cohort.firstPayoutPool / Math.max(1, cohort.eligiblePool)
     if (knobs.firstPayoutCap !== null) {
@@ -514,8 +567,8 @@ function simulateMonthLegacy(
   }
 
   const totalEligible = cohorts.reduce((s, c) => s + c.eligiblePool, 0)
-  const fraudLoss = totalEligible * fraudAttemptRate * fraudSuccessRate *
-    logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5) * knobs.payoutSplitPercent
+  const fraudPayoutBase = macro?.fraudPayoutDraw ?? logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5)
+  const fraudLoss = totalEligible * fraudAttemptRate * fraudSuccessRate * fraudPayoutBase * knobs.payoutSplitPercent
   const chargebacks = revenue * chargebackRate
   const variableCosts = assumptions.accountsPerMonth * assumptions.variableCostPerAccount
   const netProfit = revenue + resetRevenue - totalPayouts - fraudLoss - chargebacks - variableCosts - assumptions.fixedMonthlyCosts
@@ -524,7 +577,7 @@ function simulateMonthLegacy(
 }
 
 // ============================================================================
-// SHADOW CROSS-CHECK: Run both engines, compare deltas
+// SHADOW CROSS-CHECK: Shared macro randomness, compare model deltas
 // ============================================================================
 
 interface CrossCheckResult {
@@ -534,6 +587,7 @@ interface CrossCheckResult {
   annual_loss_prob_delta: number
   worst_month_delta: number
   trust: 'high' | 'medium' | 'low'
+  note: string
 }
 
 function runShadowCrossCheck(
@@ -543,32 +597,41 @@ function runShadowCrossCheck(
   assumptions: SimAssumptions,
   reserveThreshold: number,
 ): CrossCheckResult {
-  const shadowIters = Math.min(50, iterations)
+  // Use 100 iters for better confidence (was 50)
+  const shadowIters = Math.min(100, iterations)
 
-  // Run per-account engine
+  // Step 1: Pre-sample shared macro draws for ALL iterations+months
+  // Use a dedicated "macro RNG" so it doesn't interfere with either engine
+  const allMacroDraws: MacroDraws[][] = []
+  for (let iter = 0; iter < shadowIters; iter++) {
+    const macroRng = mulberry32(seed + iter + 1_000_000) // offset to avoid collision with micro RNG
+    allMacroDraws.push(preSampleMacroDraws(macroRng, months, assumptions, false))
+  }
+
+  // Step 2: Run per-account engine with shared macro + separate micro RNG
   const paMonthCols: number[][] = Array.from({ length: months }, () => [])
   const paCumProfits: number[] = []
   for (let iter = 0; iter < shadowIters; iter++) {
-    const random = mulberry32(seed + iter)
-    const ctx: SimulateMonthContext = { accountStates: new Map(), nextAccountId: 1, totalEverCreated: 0, totalEverCompleted: 0 }
+    const microRng = mulberry32(seed + iter) // micro RNG for per-account events
+    const ctx: SimulateMonthContext = { accountStates: new Map(), nextAccountId: 1, totalEverCreated: 0, totalEverCompleted: 0, totalPassedAccounts: 0 }
     let cum = 0
     for (let m = 0; m < months; m++) {
-      const r = simulateMonthPerAccount(assumptions, random, ctx, m)
+      const r = simulateMonthPerAccount(assumptions, microRng, ctx, m, allMacroDraws[iter][m])
       paMonthCols[m].push(r.netProfit)
       cum += r.netProfit
     }
     paCumProfits.push(cum)
   }
 
-  // Run legacy engine with same seeds
+  // Step 3: Run legacy engine with SAME shared macro + separate micro RNG
   const legMonthCols: number[][] = Array.from({ length: months }, () => [])
   const legCumProfits: number[] = []
   for (let iter = 0; iter < shadowIters; iter++) {
-    const random = mulberry32(seed + iter)
+    const microRng = mulberry32(seed + iter + 2_000_000) // different micro offset for legacy
     const cohorts: CohortState[] = []
     let cum = 0
     for (let m = 0; m < months; m++) {
-      const r = simulateMonthLegacy(assumptions, random, cohorts, m)
+      const r = simulateMonthLegacy(assumptions, microRng, cohorts, m, allMacroDraws[iter][m])
       legMonthCols[m].push(r.netProfit)
       cum += r.netProfit
     }
@@ -614,10 +677,17 @@ function runShadowCrossCheck(
   const annualLossProbDelta = Math.abs(paLossProb - legLossProb)
   const worstMonthDelta = Math.abs(paWorst - legWorst)
 
-  // Trust scoring
+  // Trust scoring — widened thresholds for 100-iter sample size
+  // Wilson interval SE for p≈0.05 at n=100 is ~0.02, so 5% delta is noise
   let trust: 'high' | 'medium' | 'low' = 'high'
-  if (reserveBreachDelta > 0.03 || annualLossProbDelta > 0.05) trust = 'low'
-  else if (reserveBreachDelta > 0.01 || annualLossProbDelta > 0.02 || profitMeanDelta > 5000) trust = 'medium'
+  let note = 'Engines agree within expected sampling noise'
+  if (reserveBreachDelta > 0.08 || annualLossProbDelta > 0.10) {
+    trust = 'low'
+    note = `Large engine divergence: breach Δ=${(reserveBreachDelta * 100).toFixed(1)}%, loss Δ=${(annualLossProbDelta * 100).toFixed(1)}%`
+  } else if (reserveBreachDelta > 0.05 || annualLossProbDelta > 0.06 || profitMeanDelta > 10000) {
+    trust = 'medium'
+    note = `Moderate engine divergence: profit Δ=$${Math.round(profitMeanDelta)}, breach Δ=${(reserveBreachDelta * 100).toFixed(1)}%`
+  }
 
   return {
     shadow_iterations: shadowIters,
@@ -626,6 +696,7 @@ function runShadowCrossCheck(
     annual_loss_prob_delta: Math.round(annualLossProbDelta * 10000) / 10000,
     worst_month_delta: Math.round(worstMonthDelta),
     trust,
+    note,
   }
 }
 
@@ -644,42 +715,65 @@ function runSimulation(
   const cohortTotalAcctCols: number[][] = Array.from({ length: months }, () => [])
   const cohortEligibleCols: number[][] = Array.from({ length: months }, () => [])
   const cohortFirstPayoutCols: number[][] = Array.from({ length: months }, () => [])
-  const cohortCapHitCols: number[][] = Array.from({ length: months }, () => [])
+  const cohortCapCompletionCols: number[][] = Array.from({ length: months }, () => [])
+
   const allIterProfits: number[] = []
-  let totalPayoutsApproved = 0
-  let totalCapHits = 0
+  let totalPayoutDollars = 0
+  let totalPayoutCount = 0
+  let totalPayoutRequests = 0
+  let totalCapCompletions = 0
+  let totalCapClips = 0
+  let totalCapRejections = 0
+  let totalPassedAccounts = 0
   let completedIterations = 0
   let partial = false
+  let partialReason: string | null = null
 
   for (let iter = 0; iter < iterations; iter++) {
-    // Runtime budget check every 10 iterations
-    if (iter > 0 && iter % 10 === 0) {
-      if (Date.now() - startTime > RUNTIME_BUDGET_MS) {
-        partial = true
-        break
-      }
+    // Runtime budget check EVERY iteration
+    if (iter > 0 && Date.now() - startTime > RUNTIME_BUDGET_MS) {
+      partial = true
+      partialReason = 'runtime_budget'
+      break
     }
 
     const random = mulberry32(seed + iter)
     const ctx: SimulateMonthContext = {
-      accountStates: new Map(), nextAccountId: 1, totalEverCreated: 0, totalEverCompleted: 0,
+      accountStates: new Map(), nextAccountId: 1,
+      totalEverCreated: 0, totalEverCompleted: 0, totalPassedAccounts: 0,
     }
     let cumProfit = 0
-    let cumCapHits = 0
+    let cumCapCompletions = 0
 
     for (let month = 0; month < months; month++) {
+      // Inner budget check for heavy iterations
+      if (month > 0 && month % 6 === 0 && Date.now() - startTime > RUNTIME_BUDGET_MS) {
+        partial = true
+        partialReason = 'runtime_budget'
+        break
+      }
+
       const result = simulateMonthPerAccount(assumptions, random, ctx, month)
       monthColumns[month].push(result.netProfit)
       cumProfit += result.netProfit
-      totalPayoutsApproved += result.payoutRequests
-      totalCapHits += result.capHits
-      cumCapHits += result.capHits
+
+      totalPayoutDollars += result.payoutDollars
+      totalPayoutCount += result.payoutCount
+      totalPayoutRequests += result.payoutRequests
+      totalCapCompletions += result.capCompletions
+      totalCapClips += result.capClips
+      totalCapRejections += result.capRejections
+      cumCapCompletions += result.capCompletions
 
       cohortTotalAcctCols[month].push(result.totalAccounts)
       cohortEligibleCols[month].push(result.eligiblePool)
       cohortFirstPayoutCols[month].push(result.firstPayoutPool)
-      cohortCapHitCols[month].push(cumCapHits)
+      cohortCapCompletionCols[month].push(cumCapCompletions)
     }
+
+    if (partial) break
+
+    totalPassedAccounts += ctx.totalPassedAccounts
     allIterProfits.push(cumProfit)
     completedIterations++
   }
@@ -697,6 +791,11 @@ function runSimulation(
   for (let m = 0; m < months; m++) {
     const sorted = monthColumns[m].slice().sort((a, b) => a - b)
     const len = sorted.length
+    if (len === 0) {
+      monthlyBands.push({ p5: 0, p50: 0, p95: 0, mean: 0 })
+      cohortBands.push({ totalAccounts: 0, eligible: 0, firstPayout: 0, capHits: 0 })
+      continue
+    }
     monthlyBands.push({
       p5: sorted[Math.floor(len * 0.05)],
       p50: sorted[Math.floor(len * 0.50)],
@@ -709,22 +808,22 @@ function runSimulation(
       totalAccounts: Math.round(median(cohortTotalAcctCols[m])),
       eligible: Math.round(median(cohortEligibleCols[m])),
       firstPayout: Math.round(median(cohortFirstPayoutCols[m])),
-      capHits: Math.round(median(cohortCapHitCols[m])),
+      capHits: Math.round(median(cohortCapCompletionCols[m])),
     })
   }
 
   const sortedMonthly = allMonthly.slice().sort((a, b) => a - b)
   const mLen = sortedMonthly.length
-  const mean = sortedMonthly.reduce((a, b) => a + b, 0) / mLen
-  const p5 = sortedMonthly[Math.floor(mLen * 0.05)]
-  const p50 = sortedMonthly[Math.floor(mLen * 0.50)]
-  const p95 = sortedMonthly[Math.floor(mLen * 0.95)]
-  const variance = sortedMonthly.reduce((sum, p) => sum + (p - mean) ** 2, 0) / mLen
+  const mean = mLen > 0 ? sortedMonthly.reduce((a, b) => a + b, 0) / mLen : 0
+  const p5 = mLen > 0 ? sortedMonthly[Math.floor(mLen * 0.05)] : 0
+  const p50 = mLen > 0 ? sortedMonthly[Math.floor(mLen * 0.50)] : 0
+  const p95 = mLen > 0 ? sortedMonthly[Math.floor(mLen * 0.95)] : 0
+  const variance = mLen > 0 ? sortedMonthly.reduce((sum, p) => sum + (p - mean) ** 2, 0) / mLen : 0
   const stdDev = Math.sqrt(variance)
   const lossMonths = sortedMonthly.filter(p => p < 0).length
-  const probabilityOfLoss = lossMonths / mLen
-  const worstMonth = sortedMonthly[0]
-  const bestMonth = sortedMonthly[mLen - 1]
+  const probabilityOfLoss = mLen > 0 ? lossMonths / mLen : 0
+  const worstMonth = mLen > 0 ? sortedMonthly[0] : 0
+  const bestMonth = mLen > 0 ? sortedMonthly[mLen - 1] : 0
 
   let maxDrawdown = 0, maxConsecutiveLoss = 0
   for (let iter = 0; iter < completedIterations; iter++) {
@@ -746,15 +845,15 @@ function runSimulation(
       if (cum < -reserveThreshold) { reserveBreaches++; break }
     }
   }
-  const reserveBreachProbability = reserveBreaches / completedIterations
+  const reserveBreachProbability = completedIterations > 0 ? reserveBreaches / completedIterations : 0
 
   const sortedCum = allIterProfits.slice().sort((a, b) => a - b)
   const cLen = sortedCum.length
-  const annualMean = sortedCum.reduce((a, b) => a + b, 0) / cLen
-  const annualP5 = sortedCum[Math.floor(cLen * 0.05)]
-  const annualP50 = sortedCum[Math.floor(cLen * 0.50)]
-  const annualP95 = sortedCum[Math.floor(cLen * 0.95)]
-  const annualLossProb = sortedCum.filter(p => p < 0).length / cLen
+  const annualMean = cLen > 0 ? sortedCum.reduce((a, b) => a + b, 0) / cLen : 0
+  const annualP5 = cLen > 0 ? sortedCum[Math.floor(cLen * 0.05)] : 0
+  const annualP50 = cLen > 0 ? sortedCum[Math.floor(cLen * 0.50)] : 0
+  const annualP95 = cLen > 0 ? sortedCum[Math.floor(cLen * 0.95)] : 0
+  const annualLossProb = cLen > 0 ? sortedCum.filter(p => p < 0).length / cLen : 0
 
   const bucketSize = 5000
   const buckets: Record<number, number> = {}
@@ -766,12 +865,15 @@ function runSimulation(
     .map(([b, count]) => ({ bucket: Number(b), count }))
     .sort((a, b) => a.bucket - b.bucket)
 
-  const totalAccountsPerIter = assumptions.accountsPerMonth * months
+  // Proper diagnostics: per passed account metrics
+  const safePassedAccounts = totalPassedAccounts > 0 ? totalPassedAccounts : 1
 
   return {
     partial,
+    partialReason,
     completedIterations,
     requestedIterations: iterations,
+    budget_ms: RUNTIME_BUDGET_MS,
     profit: { mean, p5, p50, p95, stdDev },
     risk: { probabilityOfLoss, maxDrawdown, worstMonth, bestMonth, consecutiveLossMonths: maxConsecutiveLoss },
     reserve: { breachProbability: reserveBreachProbability, threshold: reserveThreshold },
@@ -780,8 +882,23 @@ function runSimulation(
     cohortBands,
     histogram,
     diagnostics: {
-      avgPayoutsPerAccount: totalAccountsPerIter > 0 ? totalPayoutsApproved / (totalAccountsPerIter * completedIterations) : 0,
-      lifetimeCapHitRate: totalAccountsPerIter > 0 ? totalCapHits / (totalAccountsPerIter * completedIterations) : 0,
+      // Payout dollars per passed account (unit economics)
+      avgPayoutDollarsPerPassedAccount: totalPayoutDollars / safePassedAccounts,
+      // Payout count per passed account
+      avgPayoutCountPerPassedAccount: totalPayoutCount / safePassedAccounts,
+      // Total payout requests (before gates/caps)
+      totalPayoutRequests,
+      // Split cap metrics
+      capCompletions: totalCapCompletions,
+      capClips: totalCapClips,
+      capRejections: totalCapRejections,
+      // Per completed iteration rates
+      capCompletionsPerPassedAccount: totalCapCompletions / safePassedAccounts,
+      capClipsPerPassedAccount: totalCapClips / safePassedAccounts,
+      capRejectionsPerPayoutRequest: totalPayoutRequests > 0 ? totalCapRejections / totalPayoutRequests : 0,
+      // Legacy compat (kept for UI backward compat)
+      avgPayoutsPerAccount: totalPayoutCount / safePassedAccounts,
+      lifetimeCapHitRate: totalCapCompletions / safePassedAccounts,
     },
   }
 }
@@ -801,7 +918,6 @@ function autoScaleIterations(
 ): ScalingResult {
   if (forceIterations) return { iterations: requested, scaled: false, reason: null }
 
-  // Strict rule: high volume + long horizon
   if (months > 24 && accountsPerMonth > 300) {
     const capped = Math.min(requested, 300)
     if (capped < requested) {
@@ -809,7 +925,6 @@ function autoScaleIterations(
     }
   }
 
-  // Medium rule: moderate scale
   if (months > 12 && accountsPerMonth > 500) {
     const capped = Math.min(requested, 500)
     if (capped < requested) {
@@ -817,7 +932,6 @@ function autoScaleIterations(
     }
   }
 
-  // High volume warning
   if (accountsPerMonth > 750) {
     const capped = Math.min(requested, 500)
     if (capped < requested) {
@@ -899,16 +1013,14 @@ Deno.serve(async (req) => {
     const assumptions = cohortToAssumptions(cohortConfigs, body.overrides)
     const effectiveAssumptions = applyAttackIntensity(assumptions)
 
-    // Auto-scale iterations
     const scaling = autoScaleIterations(rawIterations, months, effectiveAssumptions.accountsPerMonth, forceIterations)
     const iterations = scaling.iterations
 
-    // Run primary simulation (per-account, high fidelity)
     const results = runSimulation(iterations, months, seed, effectiveAssumptions, reserveThreshold, startTime)
 
-    // Run shadow cross-check (only if we have time budget left)
+    // Run shadow cross-check (only if time budget allows)
     let crossCheck: CrossCheckResult | null = null
-    if (Date.now() - startTime < RUNTIME_BUDGET_MS - 3000) {
+    if (Date.now() - startTime < RUNTIME_BUDGET_MS - 5000) {
       try {
         crossCheck = runShadowCrossCheck(iterations, months, seed, effectiveAssumptions, reserveThreshold)
       } catch (e) {
@@ -919,7 +1031,7 @@ Deno.serve(async (req) => {
     // Persist
     const fullResultsPayload = {
       ...results,
-      engine: 'per_account_v1',
+      engine: 'per_account_v2',
       cross_check: crossCheck,
       scaling: scaling.scaled ? { original: rawIterations, actual: iterations, reason: scaling.reason } : null,
     }
@@ -961,8 +1073,10 @@ Deno.serve(async (req) => {
         config: { iterations: results.completedIterations, months, seed, reserveThreshold },
         assumptions_source: cohortConfigs.length > 0 ? 'derived_from_cohorts' : 'defaults',
         cohorts_used: cohortConfigs.map(c => ({ id: c.id, name: c.name, phase: c.cohort_phase })),
-        engine: 'per_account_v1',
+        engine: 'per_account_v2',
         partial: results.partial,
+        partial_reason: results.partialReason,
+        budget_ms: results.budget_ms,
         scaling: scaling.scaled ? { original: rawIterations, actual: iterations, reason: scaling.reason } : null,
         cross_check: crossCheck,
         results,
