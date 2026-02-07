@@ -284,6 +284,7 @@ export type Database = {
           min_profit_buffer: number | null
           min_trading_days: number
           min_trading_days_between_payouts: number
+          min_winning_days_between_payouts: number | null
           name: string
           payout_cooldown_days: number
           payout_eligibility_delay_days: number
@@ -309,6 +310,7 @@ export type Database = {
           min_profit_buffer?: number | null
           min_trading_days?: number
           min_trading_days_between_payouts?: number
+          min_winning_days_between_payouts?: number | null
           name: string
           payout_cooldown_days?: number
           payout_eligibility_delay_days?: number
@@ -334,6 +336,7 @@ export type Database = {
           min_profit_buffer?: number | null
           min_trading_days?: number
           min_trading_days_between_payouts?: number
+          min_winning_days_between_payouts?: number | null
           name?: string
           payout_cooldown_days?: number
           payout_eligibility_delay_days?: number
