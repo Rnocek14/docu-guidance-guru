@@ -1,82 +1,116 @@
 
+# Full Risk Visibility: Configurable Simulation Dashboard
 
-# Wire Winning-Days Gate into Production UI
-
-## What Already Exists
-The `min_trading_days_between_payouts` gate is already enforced in the `calculate_payout_eligibility` RPC. When a trader hasn't accumulated enough trading days since their last payout, the RPC returns `reason_code: 'MIN_TRADING_DAYS'` with `trading_days_since_payout` and `required_trading_days`. However, there's no dedicated UI card showing this progress -- traders just see a generic "Not Eligible" alert.
-
-## What We're Building
-A self-explaining "Winning Trading Days" card (like the Profit Buffer card) that shows traders exactly how many more trading days they need before their next payout unlocks.
-
----
+## Goal
+Expose all economically meaningful parameters in the Monte Carlo UI so you can model realistic scenarios — from lean bootstrap to scaled operations — and see full tail risk.
 
 ## Changes
 
-### 1. RPC Enhancement: Add progress fields to MIN_TRADING_DAYS denial AND eligible response
+### 1. New UI Controls (MonteCarloAnalytics.tsx)
 
-Update the `calculate_payout_eligibility` function to return:
-- `winning_days_progress_pct` -- server-computed progress (with divide-by-zero guard)
-- `winning_days_remaining` -- days still needed
-- Include `trading_days_since_payout` and `required_trading_days` in the ELIGIBLE response too (so the card can render even when eligible, showing "requirement met")
+Add sliders and presets to the Simulation Parameters card:
 
-### 2. New Component: `PayoutWinningDaysCard`
+- **Accounts per Month** slider (25 - 1,000, default 150)
+- **Fixed Monthly Costs** slider ($2,000 - $30,000, default $6,000)
+- **Entry Fee** slider ($99 - $299, default $149)
+- **Reset Fee** slider ($49 - $149, default $99)
+- **Simulation Horizon** slider (6 - 36 months, default 12)
+- **Attack Intensity** slider (0 - 1.0, default 0) — models coordinated fraud
+- **Scenario Presets** buttons:
+  - "Bootstrap" — 50 accts/mo, $5k costs
+  - "Growth" — 200 accts/mo, $12k costs
+  - "Scale" — 500 accts/mo, $18k costs
 
-A new component at `src/components/trader/PayoutWinningDaysCard.tsx` that:
-- Shows a progress bar (days completed / days required)
-- Displays "X of Y winning trading days completed"
-- Uses the same visual pattern as `PayoutProfitBufferCard` (warning style when unmet, success when met)
-- Only renders when the cohort has `min_trading_days_between_payouts > 0` AND the trader has a prior paid payout
+### 2. Pass Overrides to Edge Function
 
-### 3. TypeScript Types Update
+The `run-simulation` edge function already accepts an `overrides` parameter. The UI will send:
 
-Add to `PayoutEligibility`:
-- `required_trading_days?: number`
-- `winning_days_remaining?: number`
-- `winning_days_progress_pct?: number`
+```text
+POST /run-simulation
+{
+  iterations: 2000,
+  months: 24,            // from horizon slider
+  reserve_threshold: 16000,
+  overrides: {
+    accountsPerMonth: 150,
+    fixedMonthlyCosts: 6000,
+    pricePerAccount: 149,
+    knobs: {
+      resetPrice: 99,
+      attackIntensity: 0.3
+    }
+  }
+}
+```
 
-### 4. PayoutRequest Page Updates
+No edge function changes needed — the override merge logic already exists on line 135.
 
-- Render `PayoutWinningDaysCard` alongside the Profit Buffer card when applicable
-- Add `'MIN_TRADING_DAYS'` to the `isProfitGate`-style suppression so the generic denial card is hidden when the dedicated card handles it
-- Rename the suppression variable to something broader like `isDedicatedGate`
+### 3. New Risk Summary Section
 
----
+Add a "Risk Report" tab alongside the existing Bands/Histogram/Diagnostics tabs showing:
+
+- **Breakeven Analysis**: minimum accounts/month needed at current cost structure
+- **Months to Insolvency**: at P5 (worst case), how many consecutive months before reserve is depleted
+- **Steady-State Month**: which month the P50 band crosses zero (margin compression point)
+- **Cumulative P&L waterfall**: Revenue vs Payouts vs Fraud vs Costs breakdown
+
+### 4. Comparison Mode
+
+After a run completes, a "Compare" button saves the current result. Running again overlays the new result against the saved one — so you can visually compare "Bootstrap vs Growth" scenarios side by side.
 
 ## Technical Details
 
-### RPC SQL changes (migration)
-
-In the MIN_TRADING_DAYS denial block, add computed fields:
-
-```text
-winning_days_remaining = required - actual
-winning_days_progress_pct = CASE WHEN required <= 0 THEN 100
-  ELSE LEAST(100, GREATEST(0, (actual / required) * 100)) END
-```
-
-In the ELIGIBLE response, include `required_trading_days` and `winning_days_progress_pct: 100` so the UI can optionally show "requirement met."
-
-### Component structure
-
-The card will accept props:
-- `tradingDaysSincePayout: number`
-- `requiredTradingDays: number`
-- `winningDaysRemaining: number`
-- `progressPct: number`
-- `isMet: boolean`
-
-### Files changed
+### Files Modified
 
 | File | Change |
 |------|--------|
-| New migration SQL | Update `calculate_payout_eligibility` with progress fields |
-| `src/lib/types.ts` | Add `required_trading_days`, `winning_days_remaining`, `winning_days_progress_pct` to `PayoutEligibility` |
-| `src/components/trader/PayoutWinningDaysCard.tsx` | New component: progress card for winning days gate |
-| `src/pages/trader/PayoutRequest.tsx` | Render the new card, suppress generic denial for `MIN_TRADING_DAYS` |
+| `src/pages/admin/MonteCarloAnalytics.tsx` | Add override sliders, presets, risk report tab, comparison state |
 
-### What this does NOT change
-- No new database columns (gate already uses existing `min_trading_days_between_payouts` on cohorts)
-- No edge function changes
-- No changes to `validate_payout_request`
-- All existing gates continue to work unchanged
+### No Backend Changes Required
+The edge function's `overrides` parameter already supports all of these fields. The UI simply needs to pass them through.
 
+### Computed Risk Metrics (client-side from existing result data)
+
+```text
+breakeven = fixedMonthlyCosts / (pricePerAccount - variableCostPerAccount)
+                                  adjusted for passRate and payout drain
+
+monthsToInsolvency = reserveThreshold / abs(monthlyBands[last].p5)
+
+steadyStateMonth = first month index where p50 < 0
+```
+
+### UI Layout
+
+```text
++--------------------------------------------------+
+| Simulation Parameters                             |
+| [Bootstrap] [Growth] [Scale]                      |
+|                                                   |
+| Accounts/mo  [====|====] 150                      |
+| Fixed Costs  [==|======] $6,000                   |
+| Entry Fee    [=====|===] $149                     |
+| Reset Fee    [===|=====] $99                      |
+| Horizon      [====|====] 24 months                |
+| Attack       [|========] 0.0                      |
+|                                                   |
+| [Run Simulation]              [Compare Previous]  |
++--------------------------------------------------+
+
++--------------------------------------------------+
+| Verdict Banner: PROFITABLE / MARGINAL / etc.      |
++--------------------------------------------------+
+
+| 12-Mo Profit | Monthly | Loss Prob | Reserve | Worst |
+|   $XX,XXX    |  $X,XXX |   XX.X%   |  XX.X%  | -$XX  |
+
++--------------------------------------------------+
+| [Bands] [Distribution] [Risk Report] [Diagnostics]|
+|                                                   |
+| Risk Report tab:                                  |
+|  - Breakeven: 120 accts/mo                        |
+|  - Months to insolvency (P5): 8                   |
+|  - Margin compression month: 5                    |
+|  - Cumulative waterfall chart                     |
++--------------------------------------------------+
+```
