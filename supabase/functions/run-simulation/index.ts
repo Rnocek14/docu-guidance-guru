@@ -585,7 +585,12 @@ function simulateMonthLegacy(
 }
 
 // ============================================================================
-// SHADOW CROSS-CHECK: Shared macro randomness, compare model deltas
+// SHADOW CROSS-CHECK: Compares ENGINE ACCOUNTING LOGIC only (per-account vs
+// aggregate), using identical macro-rate draws (true triangular) for both
+// engines. Dollar amounts (payout/fraud) are drawn per-payout inside each
+// engine to preserve fat tails. This is intentionally NOT a distribution-shape
+// comparison — it isolates structural differences in how the two engines
+// model account lifecycles, cap clips, and reserve drawdowns.
 // ============================================================================
 
 interface CrossCheckResult {
@@ -928,14 +933,20 @@ function autoScaleIterations(
 
   // Estimate peak active accounts (passRate ~12% * accountsPerMonth, accumulates over months minus churn)
   const estimatedPeakActive = Math.round(accountsPerMonth * 0.12 * Math.min(months, 10))
-  // Each active account costs ~15 RNG calls/month (normal, lognormal, reset, verification, payout loops)
+
+  // Account for real compute: RNG + branching + per-account loops.
+  // Tune with telemetry; 15 is conservative estimate.
   const OPS_PER_ACCOUNT_MONTH = 15
-  const workScore = requested * months * Math.max(estimatedPeakActive, 10) * OPS_PER_ACCOUNT_MONTH
-  // Edge Function CPU budget ~10s → cap at 200M effective ops
+
+  // Target CPU budget — keep conservative (200M) until telemetry proves headroom
   const MAX_WORK = 200_000_000
 
+  // Use a single `denom` for both score and cap to prevent drift
+  const denom = months * Math.max(estimatedPeakActive, 10) * OPS_PER_ACCOUNT_MONTH
+  const workScore = requested * denom
+
   if (workScore > MAX_WORK) {
-    const safeCap = Math.max(50, Math.floor(MAX_WORK / (months * Math.max(estimatedPeakActive, 10) * OPS_PER_ACCOUNT_MONTH)))
+    const safeCap = Math.max(50, Math.floor(MAX_WORK / denom))
     const capped = Math.min(requested, safeCap)
     if (capped < requested) {
       return {
@@ -1024,15 +1035,22 @@ Deno.serve(async (req) => {
 
     const results = runSimulation(iterations, months, seed, effectiveAssumptions, reserveThreshold, startTime)
 
-    // Run shadow cross-check only if plenty of time remains AND scale is manageable
+    // Shadow cross-check: compares engine accounting logic only (see block comment above).
+    // Require ≥65% of runtime budget remaining AND low volume to avoid burning last seconds.
     let crossCheck: CrossCheckResult | null = null
     const elapsed = Date.now() - startTime
     const remainingBudget = RUNTIME_BUDGET_MS - elapsed
-    // Shadow runs 100 iters of BOTH engines — need at least 50% budget remaining and low volume
-    const shadowSafe = remainingBudget > 10000 && effectiveAssumptions.accountsPerMonth <= 400
+    const remainingPct = remainingBudget / RUNTIME_BUDGET_MS
+    const shadowSafe =
+      remainingPct >= 0.65 &&
+      remainingBudget >= 10_000 &&
+      effectiveAssumptions.accountsPerMonth <= 400
     if (shadowSafe) {
       try {
-        crossCheck = runShadowCrossCheck(Math.min(100, iterations), months, seed, effectiveAssumptions, reserveThreshold)
+        crossCheck = runShadowCrossCheck(
+          Math.min(100, iterations), // hard cap shadow iterations
+          months, seed, effectiveAssumptions, reserveThreshold,
+        )
       } catch (e) {
         console.error('Shadow cross-check failed:', e)
       }
