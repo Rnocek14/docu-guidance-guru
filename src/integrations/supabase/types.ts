@@ -2177,6 +2177,10 @@ export type Database = {
           total_accounts: number
         }[]
       }
+      get_econ_guardrail_status: {
+        Args: { _window_days?: number }
+        Returns: Json
+      }
       get_liability_buffer_settings: { Args: never; Returns: Json }
       get_liability_snapshot: {
         Args: {

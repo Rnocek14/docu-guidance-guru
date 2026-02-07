@@ -706,6 +706,55 @@ Deno.serve(async (req) => {
     }
 
     // =============================================
+    // ECONOMIC SAFETY GATE (fail-closed)
+    // =============================================
+    // Must pass before any approval. Aggregates pass rate, simulation,
+    // reserve, payout volume, reset rate signals into a single verdict.
+    
+    let econGateResult: { status: string; reasons: unknown[]; metrics: Record<string, unknown>; recommended_actions: string[] } | null = null
+    
+    if (body.action === 'approve') {
+      const { data: econData, error: econError } = await supabaseAdmin
+        .rpc('get_econ_guardrail_status', { _window_days: 30 })
+      
+      if (econError) {
+        console.error('Econ guardrail RPC error:', econError)
+        // Fail-closed: if we can't check economics, block
+        return new Response(
+          JSON.stringify({
+            error: 'Payout blocked: Economic safety gate unavailable',
+            reason_code: 'ECON_GATE_UNAVAILABLE',
+            hint: 'The get_econ_guardrail_status RPC failed. This is a fail-closed gate — payout approvals are blocked until it succeeds.',
+            details: econError.message,
+          }),
+          { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      econGateResult = econData as typeof econGateResult
+      
+      if (econGateResult?.status === 'block') {
+        return new Response(
+          JSON.stringify({
+            error: 'Payout blocked: Economic safety gate',
+            reason_code: 'ECON_GATE_BLOCK',
+            econ_status: econGateResult.status,
+            reasons: econGateResult.reasons,
+            metrics: econGateResult.metrics,
+            recommended_actions: econGateResult.recommended_actions,
+            hint: 'Platform economics are out of spec. Resolve the listed issues before approving payouts.',
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // WARN: log but allow (staff can see warning in response)
+      if (econGateResult?.status === 'warn') {
+        console.warn('Econ guardrail WARN:', JSON.stringify(econGateResult.reasons))
+      }
+    }
+
+    // =============================================
     // RESERVE-AWARE APPROVAL GATE (feature-flagged)
     // =============================================
     
@@ -1099,6 +1148,8 @@ Deno.serve(async (req) => {
           correlations_found: correlations?.has_correlations || false,
           fraud_review_created: !!fraudReviewId,
           skip_fraud_check: body.skip_fraud_check || false,
+          econ_gate_status: econGateResult?.status ?? 'not_checked',
+          econ_gate_warnings: econGateResult?.status === 'warn' ? econGateResult.reasons : undefined,
         } : undefined,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
