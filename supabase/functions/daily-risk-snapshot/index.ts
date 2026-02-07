@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
     } else if (authHeader?.startsWith('Bearer ')) {
       // Path 2: Admin/risk_officer JWT — cheap-reject garbage before hitting auth server
       const jwt = authHeader.slice('Bearer '.length).trim()
-      if (jwt.length > 5000 || jwt.split('.').length !== 3) {
+      if (!jwt || jwt.length > 5000 || jwt.split('.').length !== 3) {
         return new Response(
           JSON.stringify({ error: 'Unauthorized' }),
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -102,18 +102,21 @@ Deno.serve(async (req) => {
       }
       const userId = userData.user.id
 
-      // Role check — fail-closed: if RPC errors, deny access
+      // Role check — fail-closed: RPC error or insufficient role → 403
       const db = createClient(supabaseUrl, serviceKey)
       const { data: isAdmin, error: adminErr } = await db.rpc('has_role', { _user_id: userId, _role: 'admin' })
       const { data: isRisk, error: riskErr } = await db.rpc('has_role', { _user_id: userId, _role: 'risk_officer' })
-      if (adminErr || riskErr || (isAdmin !== true && isRisk !== true)) {
-        const status = (adminErr || riskErr) ? 500 : 403
-        if (adminErr || riskErr) {
-          console.error('Role check RPC failed:', adminErr?.message ?? riskErr?.message)
-        }
+      if (adminErr || riskErr) {
+        console.error('Role check RPC failed:', adminErr?.message ?? riskErr?.message)
         return new Response(
-          JSON.stringify({ error: status === 500 ? 'Internal server error' : 'Forbidden' }),
-          { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ error: 'Forbidden' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      if (isAdmin !== true && isRisk !== true) {
+        return new Response(
+          JSON.stringify({ error: 'Forbidden' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
       triggeredBy = userId
