@@ -718,6 +718,30 @@ export type Database = {
         }
         Relationships: []
       }
+      instrument_correlation_groups: {
+        Row: {
+          created_at: string
+          group_name: string
+          id: string
+          is_active: boolean
+          symbols: string[]
+        }
+        Insert: {
+          created_at?: string
+          group_name: string
+          id?: string
+          is_active?: boolean
+          symbols: string[]
+        }
+        Update: {
+          created_at?: string
+          group_name?: string
+          id?: string
+          is_active?: boolean
+          symbols?: string[]
+        }
+        Relationships: []
+      }
       jurisdiction_rules: {
         Row: {
           allow_evaluation: boolean
@@ -835,6 +859,39 @@ export type Database = {
           cash_reserve?: number
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      pass_rate_monitors: {
+        Row: {
+          created_at: string
+          id: string
+          pass_rate: number
+          passed_accounts: number
+          total_accounts: number
+          triggered_action: string | null
+          window_end: string
+          window_start: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          pass_rate?: number
+          passed_accounts?: number
+          total_accounts?: number
+          triggered_action?: string | null
+          window_end: string
+          window_start: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          pass_rate?: number
+          passed_accounts?: number
+          total_accounts?: number
+          triggered_action?: string | null
+          window_end?: string
+          window_start?: string
         }
         Relationships: []
       }
@@ -1923,6 +1980,14 @@ export type Database = {
         }
         Returns: Json
       }
+      detect_cross_instrument_correlations: {
+        Args: {
+          _account_id: string
+          _min_match_count?: number
+          _time_window_seconds?: number
+        }
+        Returns: Json
+      }
       detect_trade_correlations:
         | {
             Args: {
@@ -1979,6 +2044,7 @@ export type Database = {
         }
         Returns: Json
       }
+      get_rolling_pass_rate: { Args: { _window_days?: number }; Returns: Json }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
