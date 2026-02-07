@@ -80,14 +80,7 @@ Deno.test({ name: 'Two-key: propose RPC exists', ...opts, ignore: !hasServiceKey
   assertExists(data, 'RPC should return a response')
 }})
 
-Deno.test({ name: 'Two-key: approve RPC exists', ...opts, ignore: !hasServiceKey, fn: async () => {
-  const db = await getClient(SERVICE_ROLE_KEY)
-  const { data } = await db.rpc('approve_safety_setting_change', {
-    _change_id: '00000000-0000-0000-0000-000000000000',
-  })
-  // service_role is now revoked from approve — expect an error
-  assertExists(data === null || data, 'RPC should return a response or error')
-}})
+// (approve RPC service_role test moved to "Econ gate: approve_safety_setting_change blocked for service_role" below)
 
 // =============================================================================
 // Infrastructure Tables
@@ -261,19 +254,21 @@ Deno.test({ name: 'Partial unique index: only one pending row per setting_key', 
       })
     assertEquals(err1, null, `first insert should succeed: ${err1?.message}`)
     
-    // Insert second pending row with same setting_key — should be silently ignored (conflict)
+    // Second insert with same setting_key — upsert with ignoreDuplicates for deterministic behavior
     const { error: err2 } = await db
       .from('safety_setting_changes')
-      .insert({
-        setting_key: testKey,
-        proposed_by: null,
-        proposed_by_system: true,
-        proposed_value: { test: 2 },
-        reason: 'behavioral test row 2',
-        status: 'pending',
-      })
-    // Supabase may return a conflict error or silently fail; either way, only one row should exist
-    // (Note: without .onConflict(), supabase-js will return a 409 error)
+      .upsert(
+        {
+          setting_key: testKey,
+          proposed_by: null,
+          proposed_by_system: true,
+          proposed_value: { test: 2 },
+          reason: 'behavioral test row 2',
+          status: 'pending',
+        },
+        { onConflict: 'setting_key', ignoreDuplicates: true }
+      )
+    assertEquals(err2, null, `second upsert should not error: ${err2?.message}`)
     
     // Count rows with this key in pending status
     const { count } = await db
