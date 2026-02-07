@@ -55,12 +55,16 @@ Deno.serve(async (req) => {
     // =========================================================================
     let triggeredBy: string = 'unknown'
 
-    const incomingCronSecret = req.headers.get('X-Cron-Secret')
+    const incomingCronSecret = (req.headers.get('X-Cron-Secret') ?? '').trim()
     const authHeader = req.headers.get('Authorization')
 
-    // Warn internally if both auth methods are provided (misconfigured scheduler)
+    // Reject dual-auth outright — prevents header smuggling / proxy misconfigs
     if (incomingCronSecret && authHeader) {
-      console.warn('daily-risk-snapshot: both X-Cron-Secret and Authorization provided; using cron path')
+      console.warn('daily-risk-snapshot: both X-Cron-Secret and Authorization provided; rejecting')
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     if (incomingCronSecret) {
