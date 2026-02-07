@@ -98,28 +98,30 @@ interface MacroDraws {
   fraudSuccessRate: number
   chargebackRate: number
   payoutsPerAcct: number
-  avgPayoutDraw: number      // lognormal draw for avg payout amount
-  fraudPayoutDraw: number    // lognormal draw for fraud payout amount
+  // NOTE: payout amounts are NOT shared at macro level.
+  // Each engine draws its own per-payout lognormal to preserve fat tails.
+  // Only rates are shared to isolate accounting-logic differences in cross-check.
 }
 
+/** Pre-sample ONLY macro rates (shared between engines for cross-check).
+ *  Payout/fraud dollar amounts are NOT pre-sampled — each engine draws its own
+ *  per-payout lognormal to preserve fat-tail behavior. */
 function preSampleMacroDraws(
   random: () => number,
   months: number,
   assumptions: SimAssumptions,
-  useLegacyTriangular: boolean,
 ): MacroDraws[] {
-  const tri = useLegacyTriangular ? triangularDrawLegacy : triangular
   const draws: MacroDraws[] = []
   for (let m = 0; m < months; m++) {
+    // Always use true triangular for both engines.
+    // Cross-check compares accounting logic, not distribution shape.
     draws.push({
-      passRate: tri(random, assumptions.passRate.min, assumptions.passRate.mode, assumptions.passRate.max),
-      payoutReqRate: tri(random, assumptions.payoutRequestRate.min, assumptions.payoutRequestRate.mode, assumptions.payoutRequestRate.max),
-      fraudAttemptRate: tri(random, assumptions.fraudAttemptRate.min, assumptions.fraudAttemptRate.mode, assumptions.fraudAttemptRate.max),
-      fraudSuccessRate: tri(random, assumptions.fraudSuccessRate.min, assumptions.fraudSuccessRate.mode, assumptions.fraudSuccessRate.max),
-      chargebackRate: tri(random, assumptions.chargebackRate.min, assumptions.chargebackRate.mode, assumptions.chargebackRate.max),
-      payoutsPerAcct: tri(random, assumptions.payoutsPerPaidAccountPerMonth.min, assumptions.payoutsPerPaidAccountPerMonth.mode, assumptions.payoutsPerPaidAccountPerMonth.max),
-      avgPayoutDraw: logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev),
-      fraudPayoutDraw: logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5),
+      passRate: triangular(random, assumptions.passRate.min, assumptions.passRate.mode, assumptions.passRate.max),
+      payoutReqRate: triangular(random, assumptions.payoutRequestRate.min, assumptions.payoutRequestRate.mode, assumptions.payoutRequestRate.max),
+      fraudAttemptRate: triangular(random, assumptions.fraudAttemptRate.min, assumptions.fraudAttemptRate.mode, assumptions.fraudAttemptRate.max),
+      fraudSuccessRate: triangular(random, assumptions.fraudSuccessRate.min, assumptions.fraudSuccessRate.mode, assumptions.fraudSuccessRate.max),
+      chargebackRate: triangular(random, assumptions.chargebackRate.min, assumptions.chargebackRate.mode, assumptions.chargebackRate.max),
+      payoutsPerAcct: triangular(random, assumptions.payoutsPerPaidAccountPerMonth.min, assumptions.payoutsPerPaidAccountPerMonth.mode, assumptions.payoutsPerPaidAccountPerMonth.max),
     })
   }
   return draws
@@ -426,11 +428,8 @@ function simulateMonthPerAccount(
         continue
       }
 
-      // Use pre-sampled avg payout draw as base, add per-payout noise via micro RNG
-      const basePayoutDraw = macro?.avgPayoutDraw ?? logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
-      // Add per-payout micro variance (±20%) so not every payout in the month is identical
-      const microNoise = macro ? (0.8 + random() * 0.4) : 1.0
-      const rawPayout = basePayoutDraw * microNoise
+      // Always draw per-payout lognormal from micro RNG to preserve fat tails
+      const rawPayout = logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
       let traderPayout = rawPayout * knobs.payoutSplitPercent
 
       // First payout cap
@@ -472,7 +471,8 @@ function simulateMonthPerAccount(
   }
 
   // --- Fraud & chargebacks ---
-  const fraudPayoutBase = macro?.fraudPayoutDraw ?? logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5)
+  // Fraud payout always drawn from micro RNG (not macro-shared)
+  const fraudPayoutBase = logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5)
   const fraudLoss = eligibleAccounts.length * fraudAttemptRate * fraudSuccessRate * fraudPayoutBase * knobs.payoutSplitPercent
   const chargebacks = revenue * chargebackRate
   const variableCosts = assumptions.accountsPerMonth * assumptions.variableCostPerAccount
@@ -558,7 +558,7 @@ function simulateMonthLegacy(
     if (knobs.minMonthsBetweenPayouts > 1) gatePassRate *= Math.min(1, 1 / knobs.minMonthsBetweenPayouts)
     const approved = requesting * gatePassRate
     const numPayouts = approved * Math.max(1, payoutsPerAcct)
-    const avgRaw = macro?.avgPayoutDraw ?? logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
+    const avgRaw = logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
     let avgTraderPayout = avgRaw * knobs.payoutSplitPercent
     const firstFrac = cohort.firstPayoutPool / Math.max(1, cohort.eligiblePool)
     if (knobs.firstPayoutCap !== null) {
@@ -575,7 +575,7 @@ function simulateMonthLegacy(
   }
 
   const totalEligible = cohorts.reduce((s, c) => s + c.eligiblePool, 0)
-  const fraudPayoutBase = macro?.fraudPayoutDraw ?? logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5)
+  const fraudPayoutBase = logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5)
   const fraudLoss = totalEligible * fraudAttemptRate * fraudSuccessRate * fraudPayoutBase * knobs.payoutSplitPercent
   const chargebacks = revenue * chargebackRate
   const variableCosts = assumptions.accountsPerMonth * assumptions.variableCostPerAccount
@@ -613,7 +613,7 @@ function runShadowCrossCheck(
   const allMacroDraws: MacroDraws[][] = []
   for (let iter = 0; iter < shadowIters; iter++) {
     const macroRng = mulberry32(seed + iter + 1_000_000) // offset to avoid collision with micro RNG
-    allMacroDraws.push(preSampleMacroDraws(macroRng, months, assumptions, false))
+    allMacroDraws.push(preSampleMacroDraws(macroRng, months, assumptions))
   }
 
   // Step 2: Run per-account engine with shared macro + separate micro RNG
