@@ -330,7 +330,7 @@ async function checkPassEligibility(
     }
   }
   
-  // ===== CONSISTENCY RULES CHECK =====
+  // ===== CONSISTENCY RULES CHECK (fail-closed: errors block pass) =====
   try {
     const { data: consistency, error: consistencyError } = await supabase.rpc(
       'check_consistency_rules',
@@ -338,9 +338,15 @@ async function checkPassEligibility(
     )
     
     if (consistencyError) {
-      console.error('Consistency check error:', consistencyError)
-      // Non-fatal: allow pass if consistency check fails (fail-open for this gate)
-    } else if (consistency && !consistency.all_consistency_met) {
+      console.error('Consistency check error (fail-closed):', consistencyError)
+      return {
+        eligible: false,
+        reason: 'Consistency check failed — pass blocked until resolved',
+        metrics: { ...baseMetrics, unconfirmed_violations: 0, pending_flags: 0 }
+      }
+    }
+    
+    if (consistency && !consistency.all_consistency_met) {
       const reasons: string[] = []
       if (!consistency.best_day_cap_met) {
         reasons.push(`Best day (${consistency.best_day_pct_of_target}%) exceeds ${consistency.max_daily_profit_cap_percent}% cap`)
@@ -360,7 +366,12 @@ async function checkPassEligibility(
       }
     }
   } catch (err) {
-    console.error('Consistency check exception:', err)
+    console.error('Consistency check exception (fail-closed):', err)
+    return {
+      eligible: false,
+      reason: 'Consistency check threw exception — pass blocked until resolved',
+      metrics: { ...baseMetrics, unconfirmed_violations: 0, pending_flags: 0 }
+    }
   }
   
   // All criteria met!
