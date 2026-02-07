@@ -38,6 +38,17 @@ interface BreachResult {
   threshold?: number
 }
 
+interface ConsistencyResult {
+  best_day_pnl: number
+  best_day_pct_of_target: number
+  max_daily_profit_cap_percent: number | null
+  best_day_cap_met: boolean
+  profitable_days: number
+  min_profitable_days: number
+  profitable_days_met: boolean
+  all_consistency_met: boolean
+}
+
 interface PassEligibilityResult {
   eligible: boolean
   reason: string
@@ -48,6 +59,7 @@ interface PassEligibilityResult {
     min_trading_days: number
     unconfirmed_violations: number
     pending_flags: number
+    consistency?: ConsistencyResult
   }
 }
 
@@ -241,53 +253,38 @@ async function checkPassEligibility(
   // Calculate profit percentage
   const profitPct = ((newBalance - startBalance) / startBalance) * 100
   
-  // Check basic criteria
-  const profitTargetMet = profitPct >= rules.profit_target_percent
-  const tradingDaysMet = account.trading_days_count >= rules.min_trading_days
+  const baseMetrics = {
+    profit_pct: profitPct,
+    profit_target_pct: rules.profit_target_percent,
+    trading_days: account.trading_days_count,
+    min_trading_days: rules.min_trading_days,
+    unconfirmed_violations: -1,
+    pending_flags: -1
+  }
   
   // Only consider pass if account is currently active
   if (account.status !== 'active') {
     return {
       eligible: false,
       reason: `Account status is '${account.status}', not 'active'`,
-      metrics: {
-        profit_pct: profitPct,
-        profit_target_pct: rules.profit_target_percent,
-        trading_days: account.trading_days_count,
-        min_trading_days: rules.min_trading_days,
-        unconfirmed_violations: -1,
-        pending_flags: -1
-      }
+      metrics: baseMetrics
     }
   }
   
-  if (!profitTargetMet) {
+  // Check basic criteria
+  if (profitPct < rules.profit_target_percent) {
     return {
       eligible: false,
       reason: `Profit target not met: ${profitPct.toFixed(2)}% < ${rules.profit_target_percent}%`,
-      metrics: {
-        profit_pct: profitPct,
-        profit_target_pct: rules.profit_target_percent,
-        trading_days: account.trading_days_count,
-        min_trading_days: rules.min_trading_days,
-        unconfirmed_violations: -1,
-        pending_flags: -1
-      }
+      metrics: baseMetrics
     }
   }
   
-  if (!tradingDaysMet) {
+  if (account.trading_days_count < rules.min_trading_days) {
     return {
       eligible: false,
       reason: `Trading days not met: ${account.trading_days_count} < ${rules.min_trading_days}`,
-      metrics: {
-        profit_pct: profitPct,
-        profit_target_pct: rules.profit_target_percent,
-        trading_days: account.trading_days_count,
-        min_trading_days: rules.min_trading_days,
-        unconfirmed_violations: -1,
-        pending_flags: -1
-      }
+      metrics: baseMetrics
     }
   }
   
@@ -300,18 +297,7 @@ async function checkPassEligibility(
   
   if (violationError) {
     console.error('Error checking violations:', violationError)
-    return {
-      eligible: false,
-      reason: 'Failed to check violations',
-      metrics: {
-        profit_pct: profitPct,
-        profit_target_pct: rules.profit_target_percent,
-        trading_days: account.trading_days_count,
-        min_trading_days: rules.min_trading_days,
-        unconfirmed_violations: -1,
-        pending_flags: -1
-      }
-    }
+    return { eligible: false, reason: 'Failed to check violations', metrics: baseMetrics }
   }
   
   const unconfirmedViolations = violationCount ?? 0
@@ -319,14 +305,7 @@ async function checkPassEligibility(
     return {
       eligible: false,
       reason: `Has ${unconfirmedViolations} unconfirmed violation(s)`,
-      metrics: {
-        profit_pct: profitPct,
-        profit_target_pct: rules.profit_target_percent,
-        trading_days: account.trading_days_count,
-        min_trading_days: rules.min_trading_days,
-        unconfirmed_violations: unconfirmedViolations,
-        pending_flags: -1
-      }
+      metrics: { ...baseMetrics, unconfirmed_violations: unconfirmedViolations }
     }
   }
   
@@ -339,18 +318,7 @@ async function checkPassEligibility(
   
   if (flagError) {
     console.error('Error checking flags:', flagError)
-    return {
-      eligible: false,
-      reason: 'Failed to check flags',
-      metrics: {
-        profit_pct: profitPct,
-        profit_target_pct: rules.profit_target_percent,
-        trading_days: account.trading_days_count,
-        min_trading_days: rules.min_trading_days,
-        unconfirmed_violations: 0,
-        pending_flags: -1
-      }
-    }
+    return { eligible: false, reason: 'Failed to check flags', metrics: { ...baseMetrics, unconfirmed_violations: 0 } }
   }
   
   const pendingFlags = flagCount ?? 0
@@ -358,15 +326,41 @@ async function checkPassEligibility(
     return {
       eligible: false,
       reason: `Has ${pendingFlags} pending flag(s)`,
-      metrics: {
-        profit_pct: profitPct,
-        profit_target_pct: rules.profit_target_percent,
-        trading_days: account.trading_days_count,
-        min_trading_days: rules.min_trading_days,
-        unconfirmed_violations: 0,
-        pending_flags: pendingFlags
+      metrics: { ...baseMetrics, unconfirmed_violations: 0, pending_flags: pendingFlags }
+    }
+  }
+  
+  // ===== CONSISTENCY RULES CHECK =====
+  try {
+    const { data: consistency, error: consistencyError } = await supabase.rpc(
+      'check_consistency_rules',
+      { _account_id: accountId }
+    )
+    
+    if (consistencyError) {
+      console.error('Consistency check error:', consistencyError)
+      // Non-fatal: allow pass if consistency check fails (fail-open for this gate)
+    } else if (consistency && !consistency.all_consistency_met) {
+      const reasons: string[] = []
+      if (!consistency.best_day_cap_met) {
+        reasons.push(`Best day (${consistency.best_day_pct_of_target}%) exceeds ${consistency.max_daily_profit_cap_percent}% cap`)
+      }
+      if (!consistency.profitable_days_met) {
+        reasons.push(`Only ${consistency.profitable_days} profitable days (need ${consistency.min_profitable_days})`)
+      }
+      return {
+        eligible: false,
+        reason: `Consistency rules not met: ${reasons.join('; ')}`,
+        metrics: {
+          ...baseMetrics,
+          unconfirmed_violations: 0,
+          pending_flags: 0,
+          consistency: consistency as ConsistencyResult
+        }
       }
     }
+  } catch (err) {
+    console.error('Consistency check exception:', err)
   }
   
   // All criteria met!
@@ -574,6 +568,20 @@ Deno.serve(async (req) => {
         reason: 'Trade insertion failed'
       })
       throw new Error(`Failed to insert trade: ${tradeError.message}`)
+    }
+
+    // --- UPSERT DAILY STATS (idempotent, powers consistency checks) ---
+    const tradingDay = getTradingDayKeyET(new Date(payload.filled_at), 17)
+    try {
+      await supabase.rpc('upsert_daily_stat', {
+        _account_id: accountId,
+        _trading_day: tradingDay,
+        _pnl: netPnl,
+        _commission: commission,
+      })
+    } catch (dailyStatErr) {
+      // Non-fatal: log but don't fail trade ingestion
+      console.error('upsert_daily_stat error:', dailyStatErr)
     }
 
     // --- METRICS UPDATE (only after successful trade insert) ---
