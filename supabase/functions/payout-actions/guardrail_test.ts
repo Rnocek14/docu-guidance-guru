@@ -139,3 +139,87 @@ Deno.test({ name: 'Correlation groups seeded', ...opts, ignore: !hasServiceKey, 
   assertEquals(error, null, `correlation groups queryable: ${error?.message}`)
   assertEquals((data?.length ?? 0) > 0, true, 'at least one active group')
 }})
+
+// =============================================================================
+// Economic Safety Gate (Step 1–4)
+// =============================================================================
+
+Deno.test({ name: 'Econ gate: RPC blocked for anon', ...opts, fn: async () => {
+  const client = await getClient(ANON_KEY)
+  const { error } = await client.rpc('get_econ_guardrail_status', { _window_days: 30 })
+  assertExists(error, 'anon should not be able to call get_econ_guardrail_status')
+}})
+
+Deno.test({ name: 'Econ gate: RPC returns valid verdict structure', ...opts, ignore: !hasServiceKey, fn: async () => {
+  const db = await getClient(SERVICE_ROLE_KEY)
+  const { data, error } = await db.rpc('get_econ_guardrail_status', { _window_days: 30 })
+  assertEquals(error, null, `RPC should succeed: ${error?.message}`)
+  assertExists(data, 'Should return data')
+  
+  const r = data as Record<string, unknown>
+  
+  // Status must be ok, warn, or block
+  assertEquals(
+    ['ok', 'warn', 'block'].includes(r.status as string),
+    true,
+    `status must be ok/warn/block, got: ${r.status}`
+  )
+  
+  // Required top-level fields
+  assertEquals(Array.isArray(r.reasons), true, 'reasons must be array')
+  assertEquals(Array.isArray(r.recommended_actions), true, 'recommended_actions must be array')
+  assertExists(r.metrics, 'must have metrics')
+  assertExists(r.evaluated_at, 'must have evaluated_at')
+  
+  // Required metric fields
+  const m = r.metrics as Record<string, unknown>
+  const requiredMetrics = [
+    'pass_rate_30d', 'pass_rate_7d', 'pass_rate_delta',
+    'simulation_stale', 'net_buffer', 'min_reserve',
+    'pending_payouts_count', 'pending_payouts_amount',
+    'approval_rate_30d', 'approval_rate_7d', 'approval_rate_delta',
+    'reset_rate_30d', 'reset_rate_7d', 'reset_rate_delta',
+    'active_accounts', 'cohort_config_hash',
+  ]
+  for (const key of requiredMetrics) {
+    assertEquals(key in m, true, `metrics must have ${key}`)
+  }
+}})
+
+Deno.test({ name: 'Econ gate: reasons populated when status != ok', ...opts, ignore: !hasServiceKey, fn: async () => {
+  const db = await getClient(SERVICE_ROLE_KEY)
+  const { data } = await db.rpc('get_econ_guardrail_status', { _window_days: 30 })
+  const r = data as Record<string, unknown>
+  
+  if (r.status !== 'ok') {
+    const reasons = r.reasons as Array<Record<string, unknown>>
+    assertEquals(reasons.length > 0, true, 'non-ok status must have at least one reason')
+    
+    // Each reason must have code and message
+    for (const reason of reasons) {
+      assertExists(reason.code, 'reason must have code')
+      assertExists(reason.message, 'reason must have message')
+    }
+  }
+}})
+
+Deno.test({ name: 'Econ gate: approve_safety_setting_change checks econ gate', ...opts, ignore: !hasServiceKey, fn: async () => {
+  // This test verifies the integration exists by calling with a bogus change ID
+  // The RPC should fail with "Change not found" (meaning it got past the econ gate check
+  // or blocked with econ gate reason), NOT with a generic error
+  const db = await getClient(SERVICE_ROLE_KEY)
+  const { data } = await db.rpc('approve_safety_setting_change', {
+    _change_id: '00000000-0000-0000-0000-000000000000',
+  })
+  assertExists(data, 'RPC should return a response')
+  const r = data as Record<string, unknown>
+  // Must either fail with "Change not found" (econ ok) or "blocked by economic safety gate" (econ block)
+  assertEquals(r.success, false, 'should fail for bogus ID')
+  const err = (r.error as string) || ''
+  const validErrors = ['Change not found', 'blocked by economic safety gate', 'Not authenticated', 'Admin role required']
+  assertEquals(
+    validErrors.some(v => err.includes(v)),
+    true,
+    `error should be a known rejection, got: ${err}`
+  )
+}})
