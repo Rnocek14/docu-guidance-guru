@@ -44,14 +44,18 @@ Deno.serve(async (req) => {
 
     if (incomingCronSecret) {
       // Path 1: Cron/scheduler with shared secret
-      // If CRON_SECRET env is not configured, reject with 401 (fail-closed, not 500)
-      if (!cronSecret || cronSecret.length < 16 || incomingCronSecret !== cronSecret) {
-        const reasonCode = (!cronSecret || cronSecret.length < 16) ? 'CRON_SECRET_NOT_CONFIGURED' : 'INVALID_CRON_SECRET'
-        if (!cronSecret || cronSecret.length < 16) {
-          console.error('CRON_SECRET env not configured or too short — rejecting cron auth')
-        }
+      if (!cronSecret || cronSecret.length < 16) {
+        // Operator error: env not configured. Log internally, return 503.
+        console.error('CRON_SECRET env not configured or too short — server misconfiguration')
         return new Response(
-          JSON.stringify({ error: 'Unauthorized', reason_code: reasonCode }),
+          JSON.stringify({ error: 'Service unavailable' }),
+          { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      if (incomingCronSecret !== cronSecret) {
+        // Attacker or typo: wrong secret. Generic 401, no info leak.
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized' }),
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
