@@ -585,13 +585,17 @@ function simulateMonthLegacy(
 }
 
 // ============================================================================
-// SHADOW CROSS-CHECK: Compares ENGINE ACCOUNTING LOGIC only (per-account vs
-// aggregate), using identical macro-rate draws (true triangular) for both
-// engines. Dollar amounts (payout/fraud) are drawn per-payout inside each
-// engine to preserve fat tails. This is intentionally NOT a distribution-shape
-// comparison — it isolates structural differences in how the two engines
-// model account lifecycles, cap clips, and reserve drawdowns.
+// SHADOW CROSS-CHECK
 // ============================================================================
+/**
+ * SHADOW CROSS-CHECK SEMANTICS
+ * - Compares engine ACCOUNTING LOGIC only (per-account vs cohort-aggregate).
+ * - Uses shared macro-rate draws (true triangular) for pass/payout/fraud/chargeback rates.
+ * - Dollar amounts (payouts + fraud losses) are drawn inside each engine per payout/event
+ *   to preserve fat-tail behavior and avoid anchoring both engines to identical $ draws.
+ * - Therefore: cross-check deltas reflect modeling/accounting differences, not distribution-shape differences.
+ * - DO NOT reintroduce shared dollar draws (avgPayoutDraw, fraudPayoutDraw) — that kills right tails.
+ */
 
 interface CrossCheckResult {
   shadow_iterations: number
@@ -931,18 +935,19 @@ function autoScaleIterations(
 ): ScalingResult {
   if (forceIterations) return { iterations: requested, scaled: false, reason: null }
 
-  // Estimate peak active accounts (passRate ~12% * accountsPerMonth, accumulates over months minus churn)
-  const estimatedPeakActive = Math.round(accountsPerMonth * 0.12 * Math.min(months, 10))
+  // Estimate peak active accounts: passRate ~12%, accumulates up to 12 months, 1.2× safety margin
+  // for resets/longer tails keeping accounts alive. Tune if partial runs persist at high volume.
+  const estimatedPeakActive = Math.round(accountsPerMonth * 0.12 * Math.min(months, 12) * 1.2)
 
-  // Account for real compute: RNG + branching + per-account loops.
+  // Real compute cost: RNG + branching + per-account payout loops.
   // Tune with telemetry; 15 is conservative estimate.
   const OPS_PER_ACCOUNT_MONTH = 15
 
   // Target CPU budget — keep conservative (200M) until telemetry proves headroom
   const MAX_WORK = 200_000_000
 
-  // Use a single `denom` for both score and cap to prevent drift
-  const denom = months * Math.max(estimatedPeakActive, 10) * OPS_PER_ACCOUNT_MONTH
+  // Use a single `denom` for both score and cap to prevent drift; floor at 1 to avoid div-by-zero
+  const denom = Math.max(1, months * Math.max(estimatedPeakActive, 10) * OPS_PER_ACCOUNT_MONTH)
   const workScore = requested * denom
 
   if (workScore > MAX_WORK) {
