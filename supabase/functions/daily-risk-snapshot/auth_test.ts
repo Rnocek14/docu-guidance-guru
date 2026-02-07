@@ -18,10 +18,16 @@ const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? 'eyJhbGciOiJIUzI1NiIsInR5c
 const CRON_SECRET = Deno.env.get('CRON_SECRET') ?? ''
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 
+// Fail fast if test env is broken
+if (!SUPABASE_URL || !ANON_KEY) {
+  throw new Error('Missing SUPABASE_URL or SUPABASE_ANON_KEY in test env')
+}
+
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/daily-risk-snapshot`
 
 // Mirror the function's own min-length requirement (16 chars)
 const hasCronSecret = CRON_SECRET.length >= 16
+const cronExistsButTooShort = CRON_SECRET.length > 0 && CRON_SECRET.length < 16
 const hasServiceKey = SERVICE_ROLE_KEY.length > 0
 const opts = { sanitizeResources: false, sanitizeOps: false }
 
@@ -87,7 +93,7 @@ Deno.test({
 Deno.test({
   name: 'cron secret env too short (< 16 chars) → 503 operator misconfig',
   ...opts,
-  ignore: true, // only meaningful when CRON_SECRET is intentionally set short in CI
+  ignore: !cronExistsButTooShort,
   fn: async () => {
     const res = await fetch(FUNCTION_URL, {
       method: 'POST',
