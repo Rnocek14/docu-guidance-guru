@@ -556,6 +556,45 @@ Deno.serve(async (req) => {
         }
       }
       
+      // 3b. CHECK CROSS-INSTRUMENT HEDGING (ES vs NQ, CL vs BZ, etc.)
+      // Catches adversarial hedging across related instruments that same-symbol detection misses
+      const { data: crossInstrumentData, error: crossInstrumentError } = await supabaseAdmin
+        .rpc('detect_cross_instrument_correlations', {
+          _account_id: payout.account_id,
+          _time_window_seconds: 120,
+          _min_match_count: 2
+        })
+      
+      if (crossInstrumentError) {
+        console.error('Cross-instrument correlation check error:', crossInstrumentError)
+      } else if (crossInstrumentData?.has_correlations && !body.skip_fraud_check) {
+        fraudReviewId = await createFraudReview(supabaseAdmin, {
+          entity_type: 'payout',
+          entity_id: body.payout_id,
+          review_type: 'cross_instrument_hedge',
+          severity: crossInstrumentData.correlation_count >= 3 ? 'critical' : 'high',
+          auto_block: true,
+          details: {
+            correlations: crossInstrumentData.correlations,
+            submitted_amount: submittedAmount,
+            account_id: payout.account_id,
+            triggered_at: new Date().toISOString()
+          },
+          request_id: requestId
+        })
+        
+        return new Response(
+          JSON.stringify({
+            error: 'Payout blocked: Cross-instrument hedging detected',
+            fraud_review_id: fraudReviewId,
+            correlation_count: crossInstrumentData.correlation_count,
+            hint: 'Opposing positions on correlated instruments (e.g., ES vs NQ) detected across accounts. Manual review required.',
+            correlations: crossInstrumentData.correlations
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
       // 4. CHECK FOR DEVICE FINGERPRINT MATCHES (if available)
       // FIX: Two-step query - Supabase JS doesn't support subqueries
       const { data: userFingerprints } = await supabaseAdmin
@@ -684,7 +723,32 @@ Deno.serve(async (req) => {
         last_simulation_run_id?: string | null
       } | null
       
-      if (config?.enabled) {
+      // FAIL-CLOSED: Missing config or disabled gate blocks approvals.
+      // This is intentional — a misconfiguration must never silently bypass
+      // the reserve safety gate. Support pain > insolvency.
+      if (!config) {
+        return new Response(
+          JSON.stringify({
+            error: 'Payout blocked: Reserve gate configuration missing',
+            reason_code: 'RESERVE_CONFIG_MISSING',
+            hint: 'Add a "reserve_aware_approval" row to system_settings with enabled=true, min_reserve_after_approval, and block_if_simulated_loss_prob_above.',
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      if (config.enabled !== true) {
+        return new Response(
+          JSON.stringify({
+            error: 'Payout blocked: Reserve safety gate is disabled',
+            reason_code: 'RESERVE_GATE_DISABLED',
+            hint: 'Set enabled=true in system_settings.reserve_aware_approval to allow payout approvals.',
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      {
         // Check 1: Current liability snapshot vs reserve threshold
         const { data: liabilitySnapshot } = await supabaseAdmin.rpc('get_liability_snapshot', {})
         if (liabilitySnapshot) {

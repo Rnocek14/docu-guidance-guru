@@ -220,8 +220,11 @@ function cohortToAssumptions(cohorts: CohortConfig[], overrides?: Partial<SimAss
       payoutSplitPercent: (perfCohort?.payout_split_percent ?? 80) / 100,
       maxPayoutPercent: (perfCohort?.max_payout_percent ?? 80) / 100,
       resetPrice: 99,
+      // HARD FLOOR: Lifetime cap can never exceed 7× entry fee, even if cohort
+      // config is misconfigured or a "promo" experiment sets it higher.
+      // Lower caps are fine. This prevents marketing-driven insolvency.
       lifetimeCapPerUser: perfCohort?.lifetime_cap_multiple != null
-        ? entryFee * perfCohort.lifetime_cap_multiple
+        ? Math.min(entryFee * perfCohort.lifetime_cap_multiple, entryFee * 7)
         : null,
       attackIntensity: 0,
       minWinningDaysPerPayout: perfCohort?.min_winning_days_between_payouts ?? 0,
@@ -478,7 +481,14 @@ function simulateMonthPerAccount(
   const variableCosts = assumptions.accountsPerMonth * assumptions.variableCostPerAccount
   const fixedCosts = assumptions.fixedMonthlyCosts
 
-  const netProfit = revenue + resetRevenue - payoutDollars - fraudLoss - chargebacks - variableCosts - fixedCosts
+  const totalRevenue = revenue + resetRevenue
+  const netProfit = totalRevenue - payoutDollars - fraudLoss - chargebacks - variableCosts - fixedCosts
+
+  // ACCOUNTING INVARIANT: netProfit can never exceed totalRevenue.
+  // Violation means costs went negative (silent corruption). Fail loudly.
+  if (netProfit > totalRevenue + 1e-6) {
+    throw new Error(`ACCOUNTING_INVARIANT_VIOLATION: netProfit (${netProfit.toFixed(2)}) > totalRevenue (${totalRevenue.toFixed(2)}) in month ${monthIndex}`)
+  }
 
   // Count pools
   let aggTotal = 0, aggEligible = 0, aggFirstPayout = 0
