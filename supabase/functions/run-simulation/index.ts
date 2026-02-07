@@ -15,6 +15,7 @@ interface SimulationRequest {
   seed?: number
   reserve_threshold?: number
   overrides?: Partial<SimAssumptions>
+  force_iterations?: boolean // bypass auto-scaling
 }
 
 interface CohortConfig {
@@ -52,6 +53,41 @@ interface SimKnobs {
   verificationFailRate: number
 }
 
+// Per-account state (ported from client engine)
+interface AccountState {
+  id: number
+  createdMonth: number
+  eligibleMonth: number
+  lifetimePaidTotal: number
+  attemptPaid: number
+  payoutCount: number
+  resetCount: number
+  isCompleted: boolean
+  isActive: boolean
+  completedByCapHit: boolean
+  profitSinceLastPayout: number
+  monthsSinceLastPayout: number
+  winningDaysSinceLastPayout: number
+  phase: 'verification' | 'funded'
+  verificationStartMonth: number
+}
+
+interface SimulateMonthContext {
+  accountStates: Map<number, AccountState>
+  nextAccountId: number
+  totalEverCreated: number
+  totalEverCompleted: number
+}
+
+// Legacy cohort-aggregate state (kept for shadow cross-check)
+interface CohortState {
+  eligiblePool: number
+  firstPayoutPool: number
+  monthsActive: number
+  totalPaid: number
+  totalAccounts: number
+}
+
 // ============================================================================
 // SEEDED PRNG (Mulberry32)
 // ============================================================================
@@ -66,7 +102,7 @@ function mulberry32(seed: number): () => number {
 }
 
 // ============================================================================
-// FAST DISTRIBUTIONS (no rejection sampling)
+// DISTRIBUTIONS
 // ============================================================================
 
 /** Box-Muller normal */
@@ -76,8 +112,18 @@ function normal(random: () => number): number {
   return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
 }
 
-/** Triangular draw approximated via normal with matching mean/variance — O(1) */
-function triangularDraw(random: () => number, min: number, mode: number, max: number): number {
+/** True inverse-CDF triangular distribution (not normal approximation) */
+function triangular(random: () => number, min: number, mode: number, max: number): number {
+  const u = random()
+  const fc = (mode - min) / (max - min)
+  if (u < fc) {
+    return min + Math.sqrt(u * (max - min) * (mode - min))
+  }
+  return max - Math.sqrt((1 - u) * (max - min) * (max - mode))
+}
+
+/** Normal-approximated triangular (LEGACY — only used in shadow cross-check) */
+function triangularDrawLegacy(random: () => number, min: number, mode: number, max: number): number {
   const mean = (min + mode + max) / 3
   const variance = (min * min + mode * mode + max * max - min * mode - min * max - mode * max) / 18
   const result = mean + Math.sqrt(variance) * normal(random)
@@ -90,6 +136,25 @@ function logNormalDraw(random: () => number, mean: number, stdDev: number): numb
   const mu = Math.log(mean * mean / Math.sqrt(variance + mean * mean))
   const sigma = Math.sqrt(Math.log(1 + variance / (mean * mean)))
   return Math.exp(mu + sigma * normal(random))
+}
+
+// ============================================================================
+// ATTACK INTENSITY MODIFIERS
+// ============================================================================
+
+function applyAttackIntensity(assumptions: SimAssumptions): SimAssumptions {
+  const intensity = assumptions.knobs.attackIntensity
+  if (intensity <= 0) return assumptions
+
+  const m = JSON.parse(JSON.stringify(assumptions)) as SimAssumptions
+  const s = (base: number, mult: number, cap: number) => Math.min(base * (1 + mult * intensity), cap)
+
+  m.passRate = { min: s(m.passRate.min, 0.5, 0.35), mode: s(m.passRate.mode, 0.5, 0.40), max: s(m.passRate.max, 0.5, 0.50) }
+  m.fraudAttemptRate = { min: s(m.fraudAttemptRate.min, 1.0, 0.40), mode: s(m.fraudAttemptRate.mode, 1.0, 0.50), max: s(m.fraudAttemptRate.max, 1.0, 0.60) }
+  m.fraudSuccessRate = { min: s(m.fraudSuccessRate.min, 0.5, 0.08), mode: s(m.fraudSuccessRate.mode, 0.5, 0.10), max: s(m.fraudSuccessRate.max, 0.5, 0.15) }
+  m.chargebackRate = { min: s(m.chargebackRate.min, 0.6, 0.08), mode: s(m.chargebackRate.mode, 0.6, 0.10), max: s(m.chargebackRate.max, 0.6, 0.12) }
+  m.avgPayoutAmount = { mean: m.avgPayoutAmount.mean * (1 + 0.3 * intensity), stdDev: m.avgPayoutAmount.stdDev * (1 + 0.3 * intensity) }
+  return m
 }
 
 // ============================================================================
@@ -137,152 +202,219 @@ function cohortToAssumptions(cohorts: CohortConfig[], overrides?: Partial<SimAss
 }
 
 // ============================================================================
-// COHORT-AGGREGATE SIMULATION ENGINE
-// ============================================================================
-// Instead of tracking individual accounts (O(iterations × months × accounts)),
-// we model cohort-level flows using expected-value math with stochastic draws
-// for rates. This is O(iterations × months) — ~1000x faster.
-//
-// Each month we track:
-//   - eligiblePool: # of accounts eligible for payouts
-//   - firstPayoutPool: subset that haven't had a payout yet
-//   - lifetimePaidPool: cumulative $ paid to the cohort (for cap modeling)
+// ACCOUNT COMPLETION HELPER
 // ============================================================================
 
-interface CohortState {
-  eligiblePool: number
-  firstPayoutPool: number       // accounts that haven't had their first payout
-  monthsActive: number          // months since this cohort entered
-  totalPaid: number             // lifetime total paid to this cohort batch
-  totalAccounts: number         // total accounts in this batch (for cap math)
+function completeAccount(state: AccountState, reason: 'cap' | 'zombie', ctx: SimulateMonthContext): void {
+  if (state.isCompleted) return
+  state.isCompleted = true
+  state.isActive = false
+  state.completedByCapHit = reason === 'cap'
+  ctx.totalEverCompleted++
 }
+
+// ============================================================================
+// PER-ACCOUNT SIMULATION ENGINE (HIGH FIDELITY)
+// Ported from src/lib/monte-carlo.ts — same logic, same gates, same caps
+// ============================================================================
 
 interface MonthResult {
-  netProfit: number; totalPayouts: number; payoutRequests: number; capHits: number;
-  totalAccounts: number; eligiblePool: number; firstPayoutPool: number;
+  netProfit: number; totalPayouts: number; payoutRequests: number; capHits: number
+  totalAccounts: number; eligiblePool: number; firstPayoutPool: number
+  zombieCompletions: number; resets: number
 }
 
-function simulateMonthAggregate(
+function simulateMonthPerAccount(
   assumptions: SimAssumptions,
   random: () => number,
-  cohorts: CohortState[],
+  ctx: SimulateMonthContext,
   monthIndex: number,
 ): MonthResult {
   const { knobs } = assumptions
 
-  // --- Revenue ---
+  // Revenue from new accounts
   const revenue = assumptions.accountsPerMonth * assumptions.pricePerAccount
 
-  // --- Draw stochastic rates for this month ---
-  const passRate = triangularDraw(random, assumptions.passRate.min, assumptions.passRate.mode, assumptions.passRate.max)
-  const payoutReqRate = triangularDraw(random, assumptions.payoutRequestRate.min, assumptions.payoutRequestRate.mode, assumptions.payoutRequestRate.max)
-  const fraudAttemptRate = triangularDraw(random, assumptions.fraudAttemptRate.min, assumptions.fraudAttemptRate.mode, assumptions.fraudAttemptRate.max)
-  const fraudSuccessRate = triangularDraw(random, assumptions.fraudSuccessRate.min, assumptions.fraudSuccessRate.mode, assumptions.fraudSuccessRate.max)
-  const chargebackRate = triangularDraw(random, assumptions.chargebackRate.min, assumptions.chargebackRate.mode, assumptions.chargebackRate.max)
-  const payoutsPerAcct = triangularDraw(random, assumptions.payoutsPerPaidAccountPerMonth.min, assumptions.payoutsPerPaidAccountPerMonth.mode, assumptions.payoutsPerPaidAccountPerMonth.max)
+  // Sample stochastic rates
+  const passRate = triangular(random, assumptions.passRate.min, assumptions.passRate.mode, assumptions.passRate.max)
+  const payoutReqRate = triangular(random, assumptions.payoutRequestRate.min, assumptions.payoutRequestRate.mode, assumptions.payoutRequestRate.max)
+  const fraudAttemptRate = triangular(random, assumptions.fraudAttemptRate.min, assumptions.fraudAttemptRate.mode, assumptions.fraudAttemptRate.max)
+  const fraudSuccessRate = triangular(random, assumptions.fraudSuccessRate.min, assumptions.fraudSuccessRate.mode, assumptions.fraudSuccessRate.max)
+  const chargebackRate = triangular(random, assumptions.chargebackRate.min, assumptions.chargebackRate.mode, assumptions.chargebackRate.max)
+  const payoutsPerAcct = triangular(random, assumptions.payoutsPerPaidAccountPerMonth.min, assumptions.payoutsPerPaidAccountPerMonth.mode, assumptions.payoutsPerPaidAccountPerMonth.max)
 
-  // --- New accounts passing this month ---
+  // --- New accounts ---
   const newPassed = Math.round(assumptions.accountsPerMonth * passRate)
   const eligibilityLag = Math.ceil(assumptions.avgDaysToFirstPayout / 30)
-  const effectiveLag = eligibilityLag + knobs.verificationMonths
+  const useVerification = knobs.verificationMonths > 0
 
-  // Add new cohort batch (will become eligible after lag)
-  cohorts.push({
-    eligiblePool: 0,
-    firstPayoutPool: newPassed,
-    monthsActive: 0,
-    totalPaid: 0,
-    totalAccounts: newPassed,
-  })
+  for (let i = 0; i < newPassed; i++) {
+    const id = ctx.nextAccountId++
+    ctx.accountStates.set(id, {
+      id,
+      createdMonth: monthIndex,
+      eligibleMonth: useVerification
+        ? monthIndex + eligibilityLag + knobs.verificationMonths
+        : monthIndex + eligibilityLag,
+      lifetimePaidTotal: 0,
+      attemptPaid: 0,
+      payoutCount: 0,
+      resetCount: 0,
+      isCompleted: false,
+      isActive: true,
+      completedByCapHit: false,
+      profitSinceLastPayout: 0,
+      monthsSinceLastPayout: 0,
+      winningDaysSinceLastPayout: 0,
+      phase: useVerification ? 'verification' : 'funded',
+      verificationStartMonth: monthIndex,
+    })
+    ctx.totalEverCreated++
+  }
 
-  // --- Process existing cohorts ---
-  let totalPayouts = 0
-  let totalPayoutRequests = 0
-  let totalCapHits = 0
+  // --- Lifecycle: resets, zombies ---
+  const lifetimeCap = knobs.lifetimeCapPerUser
+  const monthlyResetProb = 1 - Math.pow(1 - assumptions.resetRate, 1 / 12)
+  let resetsThisMonth = 0
   let resetRevenue = 0
-  const monthlyResetFrac = 1 - Math.pow(1 - assumptions.resetRate, 1 / 12)
+  let zombieCompletions = 0
 
-  for (const cohort of cohorts) {
-    cohort.monthsActive++
+  ctx.accountStates.forEach(state => {
+    if (!state.isActive || state.isCompleted) return
 
-    // Verification failure
-    if (cohort.monthsActive <= knobs.verificationMonths && knobs.verificationFailRate > 0) {
-      const failedCount = cohort.firstPayoutPool * knobs.verificationFailRate
-      cohort.firstPayoutPool -= failedCount
-      cohort.totalAccounts -= failedCount
-    }
-
-    // Promote to eligible after lag
-    if (cohort.monthsActive === effectiveLag + 1 && cohort.firstPayoutPool > 0) {
-      cohort.eligiblePool += cohort.firstPayoutPool
-    }
-
-    if (cohort.eligiblePool <= 0) continue
-
-    // Resets
-    const resets = cohort.eligiblePool * monthlyResetFrac
-    cohort.eligiblePool -= resets
-    resetRevenue += resets * knobs.resetPrice
-    // Some resets come back as first-payout eligible later (simplified: immediate)
-    cohort.eligiblePool += resets * 0.5  // ~50% retry
-    cohort.firstPayoutPool += resets * 0.5
-
-    // Lifetime cap check
-    const lifetimeCap = knobs.lifetimeCapPerUser
-    if (lifetimeCap !== null && cohort.totalAccounts > 0) {
-      const avgPaidPerAccount = cohort.totalPaid / cohort.totalAccounts
-      if (avgPaidPerAccount >= lifetimeCap) {
-        totalCapHits += cohort.eligiblePool
-        cohort.eligiblePool = 0
-        continue
+    // Zombie check: headroom < $50
+    if (lifetimeCap !== null) {
+      const headroom = lifetimeCap - state.lifetimePaidTotal
+      if (headroom > 0 && headroom < 50) {
+        completeAccount(state, 'zombie', ctx)
+        zombieCompletions++
+        return
       }
     }
 
-    // Payout requests
-    const requesting = cohort.eligiblePool * payoutReqRate
+    // Reset hazard
+    if (random() < monthlyResetProb) {
+      resetsThisMonth++
+      resetRevenue += knobs.resetPrice
+      state.attemptPaid = 0
+      state.payoutCount = 0
+      state.resetCount++
+      state.eligibleMonth = monthIndex + eligibilityLag // Must wait again (proper lag)
+      state.profitSinceLastPayout = 0
+      state.monthsSinceLastPayout = 0
+      state.winningDaysSinceLastPayout = 0
+    }
+  })
 
-    // Velocity gate attrition (approximate fraction that pass gates)
-    let gatePassRate = 1.0
-    if (knobs.minMonthsBetweenPayouts > 1) {
-      gatePassRate *= Math.min(1, 1 / knobs.minMonthsBetweenPayouts)
+  // --- Verification + PnL accumulation ---
+  ctx.accountStates.forEach(state => {
+    if (!state.isActive || state.isCompleted) return
+
+    if (state.phase === 'verification' && knobs.verificationMonths > 0) {
+      if (knobs.verificationFailRate > 0 && random() < knobs.verificationFailRate) {
+        state.isActive = false
+        return
+      }
+      if (monthIndex - state.verificationStartMonth >= knobs.verificationMonths) {
+        state.phase = 'funded'
+      }
     }
 
-    const approved = requesting * gatePassRate
-    totalPayoutRequests += approved
+    if (state.phase === 'funded') {
+      // Simulate monthly PnL for velocity gate tracking
+      const monthlyPnl = logNormalDraw(random, 200, 180) * (random() < 0.65 ? 1 : -0.7)
+      state.profitSinceLastPayout += monthlyPnl
+      state.monthsSinceLastPayout++
 
-    // Payout amounts
-    const numPayouts = approved * Math.max(1, payoutsPerAcct)
-    let monthPayout = 0
+      // Winning days (~22 trading days, ~55% win rate)
+      let winningDays = 0
+      for (let d = 0; d < 22; d++) {
+        if (random() < 0.55) winningDays++
+      }
+      state.winningDaysSinceLastPayout += winningDays
+    }
+  })
 
-    // Batch payout: draw average payout size, apply caps
-    const avgRaw = logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
-    let avgTraderPayout = avgRaw * knobs.payoutSplitPercent
+  // --- Payouts ---
+  let totalPayouts = 0
+  let totalPayoutRequests = 0
+  let totalCapHits = 0
 
-    // First-payout cap: fraction of payouts that are first payouts
-    const firstPayoutFrac = cohort.firstPayoutPool / Math.max(1, cohort.eligiblePool)
-    if (knobs.firstPayoutCap !== null) {
-      const cappedPayout = Math.min(avgTraderPayout, knobs.firstPayoutCap)
-      avgTraderPayout = avgTraderPayout * (1 - firstPayoutFrac) + cappedPayout * firstPayoutFrac
+  const eligibleAccounts: AccountState[] = []
+  ctx.accountStates.forEach(state => {
+    if (state.isActive && !state.isCompleted && state.phase === 'funded' && monthIndex >= state.eligibleMonth) {
+      eligibleAccounts.push(state)
+    }
+  })
+
+  for (const account of eligibleAccounts) {
+    if (random() > payoutReqRate) continue
+
+    // Velocity gate 1: winning days
+    if (knobs.minWinningDaysPerPayout > 0 && account.payoutCount > 0) {
+      if (account.winningDaysSinceLastPayout < knobs.minWinningDaysPerPayout) continue
+    }
+    // Velocity gate 2: profit since last payout
+    if (knobs.minProfitSinceLastPayout > 0 && account.payoutCount > 0) {
+      if (account.profitSinceLastPayout < knobs.minProfitSinceLastPayout) continue
+    }
+    // Velocity gate 3: months between payouts
+    if (knobs.minMonthsBetweenPayouts > 0 && account.payoutCount > 0) {
+      if (account.monthsSinceLastPayout < knobs.minMonthsBetweenPayouts) continue
     }
 
-    // Lifetime cap headroom
-    if (lifetimeCap !== null && cohort.totalAccounts > 0) {
-      const avgHeadroom = lifetimeCap - (cohort.totalPaid / cohort.totalAccounts)
-      avgTraderPayout = Math.min(avgTraderPayout, Math.max(0, avgHeadroom))
+    const numPayouts = Math.max(1, Math.round(payoutsPerAcct))
+    for (let j = 0; j < numPayouts; j++) {
+      totalPayoutRequests++
+
+      const headroom = lifetimeCap !== null ? lifetimeCap - account.lifetimePaidTotal : Infinity
+      if (headroom <= 0) {
+        completeAccount(account, 'cap', ctx)
+        totalCapHits++
+        continue
+      }
+
+      const rawPayout = logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
+      let traderPayout = rawPayout * knobs.payoutSplitPercent
+
+      // First payout cap
+      if (account.payoutCount === 0 && knobs.firstPayoutCap !== null) {
+        traderPayout = Math.min(traderPayout, knobs.firstPayoutCap)
+      }
+
+      // Lifetime cap clip
+      if (lifetimeCap !== null && traderPayout > headroom) {
+        traderPayout = headroom
+        totalCapHits++
+      }
+
+      // Min $50 threshold
+      if (traderPayout < 50) continue
+
+      // Hard guard
+      if (lifetimeCap !== null && account.lifetimePaidTotal + traderPayout > lifetimeCap + 1e-6) {
+        throw new Error(`Lifetime cap violated: account ${account.id}`)
+      }
+
+      totalPayouts += traderPayout
+      account.lifetimePaidTotal += traderPayout
+      account.attemptPaid += traderPayout
+      account.payoutCount++
+
+      // Reset velocity counters
+      account.profitSinceLastPayout = 0
+      account.monthsSinceLastPayout = 0
+      account.winningDaysSinceLastPayout = 0
+
+      // Check if cap-complete after payout
+      if (lifetimeCap !== null && account.lifetimePaidTotal >= lifetimeCap - 1e-6) {
+        completeAccount(account, 'cap', ctx)
+      }
     }
-
-    monthPayout = numPayouts * avgTraderPayout
-    totalPayouts += monthPayout
-    cohort.totalPaid += monthPayout
-
-    // Move first-payout accounts to repeat pool
-    const firstPayoutsThisMonth = cohort.firstPayoutPool * payoutReqRate * gatePassRate
-    cohort.firstPayoutPool = Math.max(0, cohort.firstPayoutPool - firstPayoutsThisMonth)
   }
 
   // --- Fraud & chargebacks ---
-  const totalEligible = cohorts.reduce((sum, c) => sum + c.eligiblePool, 0)
-  const fraudLoss = totalEligible * fraudAttemptRate * fraudSuccessRate *
+  const fraudLoss = eligibleAccounts.length * fraudAttemptRate * fraudSuccessRate *
     logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5) *
     knobs.payoutSplitPercent
   const chargebacks = revenue * chargebackRate
@@ -291,20 +423,222 @@ function simulateMonthAggregate(
 
   const netProfit = revenue + resetRevenue - totalPayouts - fraudLoss - chargebacks - variableCosts - fixedCosts
 
-  // Aggregate pool counters across all cohort batches
-  const aggTotalAccounts = cohorts.reduce((s, c) => s + c.totalAccounts, 0)
-  const aggEligiblePool = cohorts.reduce((s, c) => s + c.eligiblePool, 0)
-  const aggFirstPayoutPool = cohorts.reduce((s, c) => s + c.firstPayoutPool, 0)
+  // Count pools
+  let aggTotal = 0, aggEligible = 0, aggFirstPayout = 0
+  ctx.accountStates.forEach(state => {
+    if (!state.isActive || state.isCompleted) return
+    aggTotal++
+    if (monthIndex >= state.eligibleMonth && state.phase === 'funded') {
+      aggEligible++
+      if (state.payoutCount === 0) aggFirstPayout++
+    }
+  })
 
   return {
     netProfit, totalPayouts, payoutRequests: totalPayoutRequests, capHits: totalCapHits,
-    totalAccounts: aggTotalAccounts, eligiblePool: aggEligiblePool, firstPayoutPool: aggFirstPayoutPool,
+    totalAccounts: aggTotal, eligiblePool: aggEligible, firstPayoutPool: aggFirstPayout,
+    zombieCompletions: zombieCompletions, resets: resetsThisMonth,
   }
 }
+
+// ============================================================================
+// LEGACY COHORT-AGGREGATE ENGINE (kept for shadow cross-check only)
+// ============================================================================
+
+interface LegacyMonthResult {
+  netProfit: number; totalPayouts: number; capHits: number
+}
+
+function simulateMonthLegacy(
+  assumptions: SimAssumptions,
+  random: () => number,
+  cohorts: CohortState[],
+  _monthIndex: number,
+): LegacyMonthResult {
+  const { knobs } = assumptions
+  const revenue = assumptions.accountsPerMonth * assumptions.pricePerAccount
+  const passRate = triangularDrawLegacy(random, assumptions.passRate.min, assumptions.passRate.mode, assumptions.passRate.max)
+  const payoutReqRate = triangularDrawLegacy(random, assumptions.payoutRequestRate.min, assumptions.payoutRequestRate.mode, assumptions.payoutRequestRate.max)
+  const fraudAttemptRate = triangularDrawLegacy(random, assumptions.fraudAttemptRate.min, assumptions.fraudAttemptRate.mode, assumptions.fraudAttemptRate.max)
+  const fraudSuccessRate = triangularDrawLegacy(random, assumptions.fraudSuccessRate.min, assumptions.fraudSuccessRate.mode, assumptions.fraudSuccessRate.max)
+  const chargebackRate = triangularDrawLegacy(random, assumptions.chargebackRate.min, assumptions.chargebackRate.mode, assumptions.chargebackRate.max)
+  const payoutsPerAcct = triangularDrawLegacy(random, assumptions.payoutsPerPaidAccountPerMonth.min, assumptions.payoutsPerPaidAccountPerMonth.mode, assumptions.payoutsPerPaidAccountPerMonth.max)
+
+  const newPassed = Math.round(assumptions.accountsPerMonth * passRate)
+  const eligibilityLag = Math.ceil(assumptions.avgDaysToFirstPayout / 30)
+  const effectiveLag = eligibilityLag + knobs.verificationMonths
+  cohorts.push({ eligiblePool: 0, firstPayoutPool: newPassed, monthsActive: 0, totalPaid: 0, totalAccounts: newPassed })
+
+  let totalPayouts = 0, totalCapHits = 0, resetRevenue = 0
+  const monthlyResetFrac = 1 - Math.pow(1 - assumptions.resetRate, 1 / 12)
+
+  for (const cohort of cohorts) {
+    cohort.monthsActive++
+    if (cohort.monthsActive <= knobs.verificationMonths && knobs.verificationFailRate > 0) {
+      const failed = cohort.firstPayoutPool * knobs.verificationFailRate
+      cohort.firstPayoutPool -= failed; cohort.totalAccounts -= failed
+    }
+    if (cohort.monthsActive === effectiveLag + 1 && cohort.firstPayoutPool > 0) {
+      cohort.eligiblePool += cohort.firstPayoutPool
+    }
+    if (cohort.eligiblePool <= 0) continue
+    const resets = cohort.eligiblePool * monthlyResetFrac
+    cohort.eligiblePool -= resets; resetRevenue += resets * knobs.resetPrice
+    cohort.eligiblePool += resets * 0.5; cohort.firstPayoutPool += resets * 0.5
+
+    const lifetimeCap = knobs.lifetimeCapPerUser
+    if (lifetimeCap !== null && cohort.totalAccounts > 0) {
+      if (cohort.totalPaid / cohort.totalAccounts >= lifetimeCap) {
+        totalCapHits += cohort.eligiblePool; cohort.eligiblePool = 0; continue
+      }
+    }
+    const requesting = cohort.eligiblePool * payoutReqRate
+    let gatePassRate = 1.0
+    if (knobs.minMonthsBetweenPayouts > 1) gatePassRate *= Math.min(1, 1 / knobs.minMonthsBetweenPayouts)
+    const approved = requesting * gatePassRate
+    const numPayouts = approved * Math.max(1, payoutsPerAcct)
+    let avgRaw = logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
+    let avgTraderPayout = avgRaw * knobs.payoutSplitPercent
+    const firstFrac = cohort.firstPayoutPool / Math.max(1, cohort.eligiblePool)
+    if (knobs.firstPayoutCap !== null) {
+      avgTraderPayout = avgTraderPayout * (1 - firstFrac) + Math.min(avgTraderPayout, knobs.firstPayoutCap) * firstFrac
+    }
+    if (lifetimeCap !== null && cohort.totalAccounts > 0) {
+      const avgHeadroom = lifetimeCap - (cohort.totalPaid / cohort.totalAccounts)
+      avgTraderPayout = Math.min(avgTraderPayout, Math.max(0, avgHeadroom))
+    }
+    const monthPayout = numPayouts * avgTraderPayout
+    totalPayouts += monthPayout; cohort.totalPaid += monthPayout
+    const firstPayoutsThisMonth = cohort.firstPayoutPool * payoutReqRate * gatePassRate
+    cohort.firstPayoutPool = Math.max(0, cohort.firstPayoutPool - firstPayoutsThisMonth)
+  }
+
+  const totalEligible = cohorts.reduce((s, c) => s + c.eligiblePool, 0)
+  const fraudLoss = totalEligible * fraudAttemptRate * fraudSuccessRate *
+    logNormalDraw(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5) * knobs.payoutSplitPercent
+  const chargebacks = revenue * chargebackRate
+  const variableCosts = assumptions.accountsPerMonth * assumptions.variableCostPerAccount
+  const netProfit = revenue + resetRevenue - totalPayouts - fraudLoss - chargebacks - variableCosts - assumptions.fixedMonthlyCosts
+
+  return { netProfit, totalPayouts, capHits: totalCapHits }
+}
+
+// ============================================================================
+// SHADOW CROSS-CHECK: Run both engines, compare deltas
+// ============================================================================
+
+interface CrossCheckResult {
+  shadow_iterations: number
+  profit_mean_delta: number
+  reserve_breach_delta: number
+  annual_loss_prob_delta: number
+  worst_month_delta: number
+  trust: 'high' | 'medium' | 'low'
+}
+
+function runShadowCrossCheck(
+  iterations: number,
+  months: number,
+  seed: number,
+  assumptions: SimAssumptions,
+  reserveThreshold: number,
+): CrossCheckResult {
+  const shadowIters = Math.min(50, iterations)
+
+  // Run per-account engine
+  const paMonthCols: number[][] = Array.from({ length: months }, () => [])
+  const paCumProfits: number[] = []
+  for (let iter = 0; iter < shadowIters; iter++) {
+    const random = mulberry32(seed + iter)
+    const ctx: SimulateMonthContext = { accountStates: new Map(), nextAccountId: 1, totalEverCreated: 0, totalEverCompleted: 0 }
+    let cum = 0
+    for (let m = 0; m < months; m++) {
+      const r = simulateMonthPerAccount(assumptions, random, ctx, m)
+      paMonthCols[m].push(r.netProfit)
+      cum += r.netProfit
+    }
+    paCumProfits.push(cum)
+  }
+
+  // Run legacy engine with same seeds
+  const legMonthCols: number[][] = Array.from({ length: months }, () => [])
+  const legCumProfits: number[] = []
+  for (let iter = 0; iter < shadowIters; iter++) {
+    const random = mulberry32(seed + iter)
+    const cohorts: CohortState[] = []
+    let cum = 0
+    for (let m = 0; m < months; m++) {
+      const r = simulateMonthLegacy(assumptions, random, cohorts, m)
+      legMonthCols[m].push(r.netProfit)
+      cum += r.netProfit
+    }
+    legCumProfits.push(cum)
+  }
+
+  const mean = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length
+
+  const paMean = mean(paCumProfits)
+  const legMean = mean(legCumProfits)
+
+  // Reserve breach
+  const breach = (monthCols: number[][], iters: number) => {
+    let breaches = 0
+    for (let i = 0; i < iters; i++) {
+      let cum = 0
+      for (let m = 0; m < months; m++) {
+        cum += monthCols[m][i]
+        if (cum < -reserveThreshold) { breaches++; break }
+      }
+    }
+    return breaches / iters
+  }
+  const paBreachProb = breach(paMonthCols, shadowIters)
+  const legBreachProb = breach(legMonthCols, shadowIters)
+
+  // Annual loss prob
+  const lossProb = (cumProfits: number[]) => cumProfits.filter(p => p < 0).length / cumProfits.length
+  const paLossProb = lossProb(paCumProfits)
+  const legLossProb = lossProb(legCumProfits)
+
+  // Worst month
+  const worst = (monthCols: number[][]) => {
+    let w = Infinity
+    for (const col of monthCols) for (const v of col) w = Math.min(w, v)
+    return w
+  }
+  const paWorst = worst(paMonthCols)
+  const legWorst = worst(legMonthCols)
+
+  const profitMeanDelta = Math.abs(paMean - legMean)
+  const reserveBreachDelta = Math.abs(paBreachProb - legBreachProb)
+  const annualLossProbDelta = Math.abs(paLossProb - legLossProb)
+  const worstMonthDelta = Math.abs(paWorst - legWorst)
+
+  // Trust scoring
+  let trust: 'high' | 'medium' | 'low' = 'high'
+  if (reserveBreachDelta > 0.03 || annualLossProbDelta > 0.05) trust = 'low'
+  else if (reserveBreachDelta > 0.01 || annualLossProbDelta > 0.02 || profitMeanDelta > 5000) trust = 'medium'
+
+  return {
+    shadow_iterations: shadowIters,
+    profit_mean_delta: Math.round(profitMeanDelta),
+    reserve_breach_delta: Math.round(reserveBreachDelta * 10000) / 10000,
+    annual_loss_prob_delta: Math.round(annualLossProbDelta * 10000) / 10000,
+    worst_month_delta: Math.round(worstMonthDelta),
+    trust,
+  }
+}
+
+// ============================================================================
+// MAIN SIMULATION (per-account with runtime budget)
+// ============================================================================
+
+const RUNTIME_BUDGET_MS = 20_000
 
 function runSimulation(
   iterations: number, months: number, seed: number,
   assumptions: SimAssumptions, reserveThreshold: number,
+  startTime: number,
 ) {
   const monthColumns: number[][] = Array.from({ length: months }, () => [])
   const cohortTotalAcctCols: number[][] = Array.from({ length: months }, () => [])
@@ -314,16 +648,27 @@ function runSimulation(
   const allIterProfits: number[] = []
   let totalPayoutsApproved = 0
   let totalCapHits = 0
-  const totalAccountsPerIter = assumptions.accountsPerMonth * months
+  let completedIterations = 0
+  let partial = false
 
   for (let iter = 0; iter < iterations; iter++) {
+    // Runtime budget check every 10 iterations
+    if (iter > 0 && iter % 10 === 0) {
+      if (Date.now() - startTime > RUNTIME_BUDGET_MS) {
+        partial = true
+        break
+      }
+    }
+
     const random = mulberry32(seed + iter)
-    const cohorts: CohortState[] = []
+    const ctx: SimulateMonthContext = {
+      accountStates: new Map(), nextAccountId: 1, totalEverCreated: 0, totalEverCompleted: 0,
+    }
     let cumProfit = 0
     let cumCapHits = 0
 
     for (let month = 0; month < months; month++) {
-      const result = simulateMonthAggregate(assumptions, random, cohorts, month)
+      const result = simulateMonthPerAccount(assumptions, random, ctx, month)
       monthColumns[month].push(result.netProfit)
       cumProfit += result.netProfit
       totalPayoutsApproved += result.payoutRequests
@@ -336,10 +681,10 @@ function runSimulation(
       cohortCapHitCols[month].push(cumCapHits)
     }
     allIterProfits.push(cumProfit)
+    completedIterations++
   }
 
   // --- Compute stats ---
-  // Monthly stats (flatten all month data)
   const allMonthly: number[] = []
   const monthlyBands: { p5: number; p50: number; p95: number; mean: number }[] = []
   const cohortBands: { totalAccounts: number; eligible: number; firstPayout: number; capHits: number }[] = []
@@ -381,34 +726,28 @@ function runSimulation(
   const worstMonth = sortedMonthly[0]
   const bestMonth = sortedMonthly[mLen - 1]
 
-  // Max drawdown & consecutive loss (per iteration approximation from monthly bands)
   let maxDrawdown = 0, maxConsecutiveLoss = 0
-  // Use per-iteration cumulative profits to compute drawdown
-  // Reconstruct per-iteration month arrays from monthColumns
-  for (let iter = 0; iter < iterations; iter++) {
+  for (let iter = 0; iter < completedIterations; iter++) {
     let cum = 0, peak = 0, consLoss = 0
     for (let m = 0; m < months; m++) {
       const profit = monthColumns[m][iter]
-      cum += profit
-      peak = Math.max(peak, cum)
+      cum += profit; peak = Math.max(peak, cum)
       maxDrawdown = Math.max(maxDrawdown, peak - cum)
       if (profit < 0) { consLoss++; maxConsecutiveLoss = Math.max(maxConsecutiveLoss, consLoss) }
       else consLoss = 0
     }
   }
 
-  // Reserve breach
   let reserveBreaches = 0
-  for (let iter = 0; iter < iterations; iter++) {
+  for (let iter = 0; iter < completedIterations; iter++) {
     let cum = 0
     for (let m = 0; m < months; m++) {
       cum += monthColumns[m][iter]
       if (cum < -reserveThreshold) { reserveBreaches++; break }
     }
   }
-  const reserveBreachProbability = reserveBreaches / iterations
+  const reserveBreachProbability = reserveBreaches / completedIterations
 
-  // Annual cumulative
   const sortedCum = allIterProfits.slice().sort((a, b) => a - b)
   const cLen = sortedCum.length
   const annualMean = sortedCum.reduce((a, b) => a + b, 0) / cLen
@@ -417,7 +756,6 @@ function runSimulation(
   const annualP95 = sortedCum[Math.floor(cLen * 0.95)]
   const annualLossProb = sortedCum.filter(p => p < 0).length / cLen
 
-  // Histogram
   const bucketSize = 5000
   const buckets: Record<number, number> = {}
   for (const cp of allIterProfits) {
@@ -428,7 +766,12 @@ function runSimulation(
     .map(([b, count]) => ({ bucket: Number(b), count }))
     .sort((a, b) => a.bucket - b.bucket)
 
+  const totalAccountsPerIter = assumptions.accountsPerMonth * months
+
   return {
+    partial,
+    completedIterations,
+    requestedIterations: iterations,
     profit: { mean, p5, p50, p95, stdDev },
     risk: { probabilityOfLoss, maxDrawdown, worstMonth, bestMonth, consecutiveLossMonths: maxConsecutiveLoss },
     reserve: { breachProbability: reserveBreachProbability, threshold: reserveThreshold },
@@ -437,10 +780,52 @@ function runSimulation(
     cohortBands,
     histogram,
     diagnostics: {
-      avgPayoutsPerAccount: totalAccountsPerIter > 0 ? totalPayoutsApproved / (totalAccountsPerIter * iterations) : 0,
-      lifetimeCapHitRate: totalAccountsPerIter > 0 ? totalCapHits / (totalAccountsPerIter * iterations) : 0,
+      avgPayoutsPerAccount: totalAccountsPerIter > 0 ? totalPayoutsApproved / (totalAccountsPerIter * completedIterations) : 0,
+      lifetimeCapHitRate: totalAccountsPerIter > 0 ? totalCapHits / (totalAccountsPerIter * completedIterations) : 0,
     },
   }
+}
+
+// ============================================================================
+// AUTO-SCALING RULES
+// ============================================================================
+
+interface ScalingResult {
+  iterations: number
+  scaled: boolean
+  reason: string | null
+}
+
+function autoScaleIterations(
+  requested: number, months: number, accountsPerMonth: number, forceIterations: boolean,
+): ScalingResult {
+  if (forceIterations) return { iterations: requested, scaled: false, reason: null }
+
+  // Strict rule: high volume + long horizon
+  if (months > 24 && accountsPerMonth > 300) {
+    const capped = Math.min(requested, 300)
+    if (capped < requested) {
+      return { iterations: capped, scaled: true, reason: `Auto-scaled from ${requested} to ${capped}: ${accountsPerMonth} accounts/mo × ${months} months exceeds safe budget` }
+    }
+  }
+
+  // Medium rule: moderate scale
+  if (months > 12 && accountsPerMonth > 500) {
+    const capped = Math.min(requested, 500)
+    if (capped < requested) {
+      return { iterations: capped, scaled: true, reason: `Auto-scaled from ${requested} to ${capped}: ${accountsPerMonth} accounts/mo × ${months} months` }
+    }
+  }
+
+  // High volume warning
+  if (accountsPerMonth > 750) {
+    const capped = Math.min(requested, 500)
+    if (capped < requested) {
+      return { iterations: capped, scaled: true, reason: `Auto-scaled from ${requested} to ${capped}: ${accountsPerMonth} accounts/mo is high volume` }
+    }
+  }
+
+  return { iterations: requested, scaled: false, reason: null }
 }
 
 // ============================================================================
@@ -481,10 +866,11 @@ Deno.serve(async (req) => {
 
   try {
     const body: SimulationRequest = await req.json().catch(() => ({}))
-    const iterations = Math.min(body.iterations ?? 2000, 5000)
+    const rawIterations = Math.min(body.iterations ?? 2000, 5000)
     const months = Math.min(body.months ?? 12, 36)
     const seed = body.seed ?? 42
     const reserveThreshold = body.reserve_threshold ?? 16000
+    const forceIterations = body.force_iterations === true
 
     const { data: cohorts, error: cohortError } = await serviceClient
       .from('cohorts').select('*').eq('is_active', true).order('cohort_phase')
@@ -511,12 +897,37 @@ Deno.serve(async (req) => {
     }))
 
     const assumptions = cohortToAssumptions(cohortConfigs, body.overrides)
-    const results = runSimulation(iterations, months, seed, assumptions, reserveThreshold)
+    const effectiveAssumptions = applyAttackIntensity(assumptions)
+
+    // Auto-scale iterations
+    const scaling = autoScaleIterations(rawIterations, months, effectiveAssumptions.accountsPerMonth, forceIterations)
+    const iterations = scaling.iterations
+
+    // Run primary simulation (per-account, high fidelity)
+    const results = runSimulation(iterations, months, seed, effectiveAssumptions, reserveThreshold, startTime)
+
+    // Run shadow cross-check (only if we have time budget left)
+    let crossCheck: CrossCheckResult | null = null
+    if (Date.now() - startTime < RUNTIME_BUDGET_MS - 3000) {
+      try {
+        crossCheck = runShadowCrossCheck(iterations, months, seed, effectiveAssumptions, reserveThreshold)
+      } catch (e) {
+        console.error('Shadow cross-check failed:', e)
+      }
+    }
+
+    // Persist
+    const fullResultsPayload = {
+      ...results,
+      engine: 'per_account_v1',
+      cross_check: crossCheck,
+      scaling: scaling.scaled ? { original: rawIterations, actual: iterations, reason: scaling.reason } : null,
+    }
 
     const { data: inserted, error: insertError } = await serviceClient
       .from('simulation_runs')
       .insert({
-        seed, iterations, months_per_iteration: months,
+        seed, iterations: results.completedIterations, months_per_iteration: months,
         assumptions: assumptions as unknown, cohort_configs: cohortConfigs as unknown,
         profit_mean: results.profit.mean, profit_p5: results.profit.p5,
         profit_p50: results.profit.p50, profit_p95: results.profit.p95,
@@ -527,7 +938,7 @@ Deno.serve(async (req) => {
         consecutive_loss_months: results.risk.consecutiveLossMonths,
         reserve_breach_probability: results.reserve.breachProbability,
         reserve_threshold: reserveThreshold,
-        full_results: results as unknown, triggered_by: userId,
+        full_results: fullResultsPayload as unknown, triggered_by: userId,
         duration_ms: Date.now() - startTime,
       })
       .select('id').single()
@@ -547,9 +958,13 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true, run_id: inserted?.id ?? null, duration_ms: Date.now() - startTime,
-        config: { iterations, months, seed, reserveThreshold },
+        config: { iterations: results.completedIterations, months, seed, reserveThreshold },
         assumptions_source: cohortConfigs.length > 0 ? 'derived_from_cohorts' : 'defaults',
         cohorts_used: cohortConfigs.map(c => ({ id: c.id, name: c.name, phase: c.cohort_phase })),
+        engine: 'per_account_v1',
+        partial: results.partial,
+        scaling: scaling.scaled ? { original: rawIterations, actual: iterations, reason: scaling.reason } : null,
+        cross_check: crossCheck,
         results,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },

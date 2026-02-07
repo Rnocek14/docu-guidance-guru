@@ -9,7 +9,7 @@ import {
 } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from '@/components/ui/chart';
 import {
-  TrendingUp, TrendingDown, AlertTriangle, Shield, Zap, Info, Play,
+  TrendingUp, TrendingDown, AlertTriangle, Shield, Zap, Info, Play, ShieldCheck, ShieldAlert, Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
@@ -19,12 +19,34 @@ import { CustomerGrowthTab } from '@/components/admin/CustomerGrowthTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface CrossCheckResult {
+  shadow_iterations: number;
+  profit_mean_delta: number;
+  reserve_breach_delta: number;
+  annual_loss_prob_delta: number;
+  worst_month_delta: number;
+  trust: 'high' | 'medium' | 'low';
+}
+
+interface ScalingInfo {
+  original: number;
+  actual: number;
+  reason: string;
+}
+
 interface ServerSimResult {
   run_id: string | null;
   duration_ms: number;
   assumptions_source: string;
+  engine: string;
+  partial: boolean;
+  scaling: ScalingInfo | null;
+  cross_check: CrossCheckResult | null;
   cohorts_used: { id: string; name: string; phase: string }[];
   results: {
+    completedIterations: number;
+    requestedIterations: number;
+    partial: boolean;
     profit: { mean: number; p5: number; p50: number; p95: number; stdDev: number };
     risk: { probabilityOfLoss: number; maxDrawdown: number; worstMonth: number; bestMonth: number; consecutiveLossMonths: number };
     reserve: { breachProbability: number; threshold: number };
@@ -236,9 +258,10 @@ export default function MonteCarloAnalytics() {
                         {verdict && verdict.score >= 75 ? 'PROFITABLE' : verdict && verdict.score >= 50 ? 'MARGINAL' : 'UNPROFITABLE'}
                       </h3>
                       <p className="text-sm text-muted-foreground">
-                        {overrides.iterations.toLocaleString()} iterations × {overrides.horizon} months
+                        {result.results.completedIterations.toLocaleString()}
+                        {result.results.partial ? ` of ${result.results.requestedIterations.toLocaleString()}` : ''} iterations × {overrides.horizon} months
                         {' | '}{(overrides.accountsPerMonth * overrides.horizon).toLocaleString()} customers ({overrides.accountsPerMonth}/mo)
-                        {' | '}live cohort rules
+                        {' | '}Engine: {result.engine ?? 'per_account_v1'}
                       </p>
                     </div>
                   </div>
@@ -249,6 +272,36 @@ export default function MonteCarloAnalytics() {
                       </Badge>
                     ))}
                   </div>
+                </div>
+
+                {/* Engine indicators row */}
+                <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-muted">
+                  {result.results.partial && (
+                    <Badge variant="destructive" className="gap-1">
+                      <Clock className="h-3 w-3" /> Partial: {result.results.completedIterations}/{result.results.requestedIterations} iterations (timeout)
+                    </Badge>
+                  )}
+                  {result.scaling && (
+                    <Badge variant="secondary" className="gap-1">
+                      ⚡ Auto-scaled: {result.scaling.actual} iterations
+                    </Badge>
+                  )}
+                  {result.cross_check && (
+                    <Badge
+                      variant="outline"
+                      className={
+                        result.cross_check.trust === 'high' ? 'border-success/50 text-success gap-1' :
+                        result.cross_check.trust === 'medium' ? 'border-warning/50 text-warning gap-1' :
+                        'border-destructive/50 text-destructive gap-1'
+                      }
+                    >
+                      {result.cross_check.trust === 'high' ? <ShieldCheck className="h-3 w-3" /> : <ShieldAlert className="h-3 w-3" />}
+                      Cross-check: {result.cross_check.trust}
+                    </Badge>
+                  )}
+                  <Badge variant="outline" className="text-muted-foreground">
+                    Engine: per-account (high fidelity)
+                  </Badge>
                 </div>
               </CardContent>
             </Card>
@@ -427,11 +480,41 @@ export default function MonteCarloAnalytics() {
                   </Card>
                 </div>
 
+                {/* Cross-check results */}
+                {result.cross_check && (
+                  <Card className="mt-4">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        {result.cross_check.trust === 'high' ? <ShieldCheck className="h-5 w-5 text-success" /> : <ShieldAlert className="h-5 w-5 text-warning" />}
+                        Shadow Cross-Check ({result.cross_check.shadow_iterations} iterations)
+                      </CardTitle>
+                      <CardDescription>
+                        Per-account engine vs legacy cohort-aggregate engine delta. Trust: <strong>{result.cross_check.trust}</strong>
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        {[
+                          ['Profit Mean Delta', fmt(result.cross_check.profit_mean_delta), result.cross_check.profit_mean_delta > 5000],
+                          ['Reserve Breach Delta', pct(result.cross_check.reserve_breach_delta), result.cross_check.reserve_breach_delta > 0.03],
+                          ['Annual Loss Prob Delta', pct(result.cross_check.annual_loss_prob_delta), result.cross_check.annual_loss_prob_delta > 0.05],
+                          ['Worst Month Delta', fmt(result.cross_check.worst_month_delta), result.cross_check.worst_month_delta > 10000],
+                        ].map(([label, value, isHigh]) => (
+                          <div key={label as string} className="flex justify-between border-b pb-2 last:border-0">
+                            <span className="text-muted-foreground">{label as string}</span>
+                            <span className={`font-medium ${isHigh ? 'text-destructive' : 'text-success'}`}>{value as string}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 <div className="mt-4 flex items-start gap-2 rounded-lg border border-muted bg-muted/30 p-4 text-sm text-muted-foreground">
                   <Info className="mt-0.5 h-4 w-4 shrink-0" />
                   <div>
                     <strong>Note on Max Drawdown:</strong> The {fmt(result.results.risk.maxDrawdown)} figure is the worst
-                    cumulative peak-to-trough across all {overrides.iterations.toLocaleString()} iterations — a statistical tail extreme,
+                    cumulative peak-to-trough across all {result.results.completedIterations.toLocaleString()} iterations — a statistical tail extreme,
                     not a realistic single-month loss. The operationally relevant risk metric is <strong>Worst Month ({fmt(result.results.risk.worstMonth)})</strong>.
                   </div>
                 </div>
