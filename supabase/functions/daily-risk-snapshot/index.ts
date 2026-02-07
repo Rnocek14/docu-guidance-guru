@@ -24,6 +24,22 @@ interface Alarm {
   threshold?: number
 }
 
+/**
+ * Constant-time secret comparison via SHA-256 digest.
+ * Prevents timing side-channels on the cron secret.
+ */
+async function constantTimeEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder()
+  const [ah, bh] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(a)).then(buf => new Uint8Array(buf)),
+    crypto.subtle.digest('SHA-256', enc.encode(b)).then(buf => new Uint8Array(buf)),
+  ])
+  if (ah.length !== bh.length) return false
+  let diff = 0
+  for (let i = 0; i < ah.length; i++) diff |= ah[i] ^ bh[i]
+  return diff === 0
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -35,25 +51,28 @@ Deno.serve(async (req) => {
     const cronSecret = Deno.env.get('CRON_SECRET')
 
     // =========================================================================
-    // AUTH GATE — fail-closed, no bypass
+    // AUTH GATE — fail-closed, no bypass, no env-state leakage
     // =========================================================================
     let triggeredBy: string = 'unknown'
 
     const incomingCronSecret = req.headers.get('X-Cron-Secret')
     const authHeader = req.headers.get('Authorization')
 
+    // Warn internally if both auth methods are provided (misconfigured scheduler)
+    if (incomingCronSecret && authHeader) {
+      console.warn('daily-risk-snapshot: both X-Cron-Secret and Authorization provided; using cron path')
+    }
+
     if (incomingCronSecret) {
       // Path 1: Cron/scheduler with shared secret
       if (!cronSecret || cronSecret.length < 16) {
-        // Operator error: env not configured. Log internally, return 503.
         console.error('CRON_SECRET env not configured or too short — server misconfiguration')
         return new Response(
           JSON.stringify({ error: 'Service unavailable' }),
           { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-      if (incomingCronSecret !== cronSecret) {
-        // Attacker or typo: wrong secret. Generic 401, no info leak.
+      if (!(await constantTimeEqual(incomingCronSecret, cronSecret))) {
         return new Response(
           JSON.stringify({ error: 'Unauthorized' }),
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -61,36 +80,47 @@ Deno.serve(async (req) => {
       }
       triggeredBy = 'cron'
     } else if (authHeader?.startsWith('Bearer ')) {
-      // Path 2: Admin/risk_officer JWT
-      const jwt = authHeader.replace('Bearer ', '')
-      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+      // Path 2: Admin/risk_officer JWT — cheap-reject garbage before hitting auth server
+      const jwt = authHeader.slice('Bearer '.length).trim()
+      if (jwt.length > 5000 || jwt.split('.').length !== 3) {
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
 
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
       const anonClient = createClient(supabaseUrl, anonKey, {
         global: { headers: { Authorization: `Bearer ${jwt}` } },
       })
       const { data: userData, error: userError } = await anonClient.auth.getUser()
       if (userError || !userData?.user) {
         return new Response(
-          JSON.stringify({ error: 'Unauthorized', reason_code: 'INVALID_JWT' }),
+          JSON.stringify({ error: 'Unauthorized' }),
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
       const userId = userData.user.id
 
+      // Role check — fail-closed: if RPC errors, deny access
       const db = createClient(supabaseUrl, serviceKey)
-      const { data: isAdmin } = await db.rpc('has_role', { _user_id: userId, _role: 'admin' })
-      const { data: isRisk } = await db.rpc('has_role', { _user_id: userId, _role: 'risk_officer' })
-      if (isAdmin !== true && isRisk !== true) {
+      const { data: isAdmin, error: adminErr } = await db.rpc('has_role', { _user_id: userId, _role: 'admin' })
+      const { data: isRisk, error: riskErr } = await db.rpc('has_role', { _user_id: userId, _role: 'risk_officer' })
+      if (adminErr || riskErr || (isAdmin !== true && isRisk !== true)) {
+        const status = (adminErr || riskErr) ? 500 : 403
+        if (adminErr || riskErr) {
+          console.error('Role check RPC failed:', adminErr?.message ?? riskErr?.message)
+        }
         return new Response(
-          JSON.stringify({ error: 'Forbidden: admin or risk_officer required', reason_code: 'INSUFFICIENT_ROLE' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ error: status === 500 ? 'Internal server error' : 'Forbidden' }),
+          { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
       triggeredBy = userId
     } else {
       // Path 3: No auth at all → hard reject
       return new Response(
-        JSON.stringify({ error: 'Unauthorized', reason_code: 'NO_AUTH' }),
+        JSON.stringify({ error: 'Unauthorized' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
