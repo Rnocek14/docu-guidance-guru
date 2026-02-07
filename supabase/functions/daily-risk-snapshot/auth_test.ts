@@ -20,7 +20,8 @@ const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/daily-risk-snapshot`
 
-const hasCronSecret = CRON_SECRET.length > 0
+// Mirror the function's own min-length requirement (16 chars)
+const hasCronSecret = CRON_SECRET.length >= 16
 const hasServiceKey = SERVICE_ROLE_KEY.length > 0
 const opts = { sanitizeResources: false, sanitizeOps: false }
 
@@ -80,6 +81,23 @@ Deno.test({
     })
     const body = await res.text()
     assertEquals(res.status, 503, `Expected 503 (server misconfig), got ${res.status}: ${body}`)
+  },
+})
+
+Deno.test({
+  name: 'cron secret env too short (< 16 chars) → 503 operator misconfig',
+  ...opts,
+  ignore: true, // only meaningful when CRON_SECRET is intentionally set short in CI
+  fn: async () => {
+    const res = await fetch(FUNCTION_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Cron-Secret': 'any-value',
+      },
+    })
+    const body = await res.text()
+    assertEquals(res.status, 503, `Expected 503 (env too short), got ${res.status}: ${body}`)
   },
 })
 
