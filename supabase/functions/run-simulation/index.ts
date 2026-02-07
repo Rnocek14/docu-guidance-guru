@@ -926,21 +926,21 @@ function autoScaleIterations(
 ): ScalingResult {
   if (forceIterations) return { iterations: requested, scaled: false, reason: null }
 
-  // Estimate peak active accounts (rough: passRate.mode * accountsPerMonth * months, minus churn)
+  // Estimate peak active accounts (passRate ~12% * accountsPerMonth, accumulates over months minus churn)
   const estimatedPeakActive = Math.round(accountsPerMonth * 0.12 * Math.min(months, 10))
-  // Compute a "work score" = iterations * months * peakActive
-  // Edge Function CPU budget ~= 10s of compute, target <500M ops
-  const workScore = requested * months * Math.max(estimatedPeakActive, 10)
-  const MAX_WORK = 300_000_000
+  // Each active account costs ~15 RNG calls/month (normal, lognormal, reset, verification, payout loops)
+  const OPS_PER_ACCOUNT_MONTH = 15
+  const workScore = requested * months * Math.max(estimatedPeakActive, 10) * OPS_PER_ACCOUNT_MONTH
+  // Edge Function CPU budget ~10s → cap at 200M effective ops
+  const MAX_WORK = 200_000_000
 
   if (workScore > MAX_WORK) {
-    // Scale iterations down to fit budget
-    const safeCap = Math.max(100, Math.floor(MAX_WORK / (months * Math.max(estimatedPeakActive, 10))))
+    const safeCap = Math.max(50, Math.floor(MAX_WORK / (months * Math.max(estimatedPeakActive, 10) * OPS_PER_ACCOUNT_MONTH)))
     const capped = Math.min(requested, safeCap)
     if (capped < requested) {
       return {
         iterations: capped, scaled: true,
-        reason: `Auto-scaled from ${requested} to ${capped}: ~${estimatedPeakActive} peak accounts × ${months} months (work score ${(workScore / 1e6).toFixed(0)}M > ${(MAX_WORK / 1e6).toFixed(0)}M limit)`,
+        reason: `Auto-scaled from ${requested} to ${capped}: ~${estimatedPeakActive} peak active × ${months}mo × ${OPS_PER_ACCOUNT_MONTH} ops/acct (score ${(workScore / 1e6).toFixed(0)}M > ${(MAX_WORK / 1e6).toFixed(0)}M limit)`,
       }
     }
   }
@@ -1028,10 +1028,11 @@ Deno.serve(async (req) => {
     let crossCheck: CrossCheckResult | null = null
     const elapsed = Date.now() - startTime
     const remainingBudget = RUNTIME_BUDGET_MS - elapsed
-    const shadowSafe = remainingBudget > 8000 && effectiveAssumptions.accountsPerMonth <= 500
+    // Shadow runs 100 iters of BOTH engines — need at least 50% budget remaining and low volume
+    const shadowSafe = remainingBudget > 10000 && effectiveAssumptions.accountsPerMonth <= 400
     if (shadowSafe) {
       try {
-        crossCheck = runShadowCrossCheck(iterations, months, seed, effectiveAssumptions, reserveThreshold)
+        crossCheck = runShadowCrossCheck(Math.min(100, iterations), months, seed, effectiveAssumptions, reserveThreshold)
       } catch (e) {
         console.error('Shadow cross-check failed:', e)
       }
