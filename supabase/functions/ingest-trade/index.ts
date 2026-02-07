@@ -758,6 +758,13 @@ Deno.serve(async (req) => {
         if (!passError) {
           accountPassed = true
           
+          // Determine phase-aware messaging
+          const cohortPhase = (account.rule_snapshot as RuleSnapshot & { cohort_phase?: string })?.cohort_phase || 'evaluation'
+          const phaseLabel = cohortPhase === 'evaluation' ? 'evaluation' : cohortPhase === 'verification' ? 'verification' : 'performance'
+          const nextStepMsg = cohortPhase === 'performance' 
+            ? 'You can now request a payout'
+            : `You'll be automatically enrolled in the next phase`
+
           // Write trader-visible event (idempotent via request_id)
           await supabase.from('account_events').upsert(
             {
@@ -770,10 +777,11 @@ Deno.serve(async (req) => {
                 trading_days: passEligibility.metrics.trading_days,
                 min_trading_days: passEligibility.metrics.min_trading_days,
                 final_balance: newBalance,
-                explanation: `Congratulations! You've successfully completed your evaluation. ` +
+                phase: phaseLabel,
+                explanation: `Congratulations! You've successfully completed your ${phaseLabel}. ` +
                   `Profit: ${passEligibility.metrics.profit_pct.toFixed(2)}% (target: ${passEligibility.metrics.profit_target_pct}%). ` +
                   `Trading days: ${passEligibility.metrics.trading_days} (minimum: ${passEligibility.metrics.min_trading_days}).`,
-                next_step: 'You can now request a payout'
+                next_step: nextStepMsg
               }
             },
             {
@@ -792,15 +800,35 @@ Deno.serve(async (req) => {
                 type: 'auto_pass',
                 previous_status: 'active',
                 new_status: 'passed',
+                phase: phaseLabel,
                 eligibility: passEligibility.metrics
               },
-              reason: 'Account automatically passed evaluation criteria'
+              reason: `Account automatically passed ${phaseLabel} criteria`
             },
             {
               onConflict: 'account_id,request_id',
               ignoreDuplicates: true
             }
           )
+
+          // Auto-spawn next phase account (idempotent via transition table)
+          try {
+            const { data: spawnResult, error: spawnError } = await supabase.rpc(
+              'spawn_next_phase_account',
+              { _from_account_id: accountId, _request_id: requestId }
+            )
+            if (spawnError) {
+              console.error('spawn_next_phase_account error:', spawnError)
+            } else if (spawnResult?.spawned) {
+              console.log(
+                `Phase transition: ${accountId} -> ${spawnResult.to_account_id}` +
+                ` (already_existed: ${spawnResult.already_existed})`
+              )
+            }
+          } catch (spawnErr) {
+            // Non-fatal: log but don't fail the trade ingestion
+            console.error('spawn_next_phase_account exception:', spawnErr)
+          }
         } else {
           console.error('Failed to update account to passed:', passError)
         }

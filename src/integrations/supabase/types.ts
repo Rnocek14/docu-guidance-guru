@@ -52,6 +52,62 @@ export type Database = {
           },
         ]
       }
+      account_phase_transitions: {
+        Row: {
+          created_at: string
+          from_account_id: string
+          from_cohort_id: string
+          id: string
+          to_account_id: string
+          to_cohort_id: string
+        }
+        Insert: {
+          created_at?: string
+          from_account_id: string
+          from_cohort_id: string
+          id?: string
+          to_account_id: string
+          to_cohort_id: string
+        }
+        Update: {
+          created_at?: string
+          from_account_id?: string
+          from_cohort_id?: string
+          id?: string
+          to_account_id?: string
+          to_cohort_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_phase_transitions_from_account_id_fkey"
+            columns: ["from_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "account_phase_transitions_from_cohort_id_fkey"
+            columns: ["from_cohort_id"]
+            isOneToOne: false
+            referencedRelation: "cohorts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "account_phase_transitions_to_account_id_fkey"
+            columns: ["to_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "account_phase_transitions_to_cohort_id_fkey"
+            columns: ["to_cohort_id"]
+            isOneToOne: false
+            referencedRelation: "cohorts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       accounts: {
         Row: {
           account_number: string
@@ -65,9 +121,12 @@ export type Database = {
           highest_balance: number
           id: string
           last_trade_at: string | null
+          parent_account_id: string | null
           passed_at: string | null
           payout_cycle_start_balance: number | null
           payout_cycle_started_at: string | null
+          phase_index: number
+          root_account_id: string | null
           rule_snapshot: Json | null
           starting_balance: number
           status: Database["public"]["Enums"]["account_status"]
@@ -88,9 +147,12 @@ export type Database = {
           highest_balance?: number
           id?: string
           last_trade_at?: string | null
+          parent_account_id?: string | null
           passed_at?: string | null
           payout_cycle_start_balance?: number | null
           payout_cycle_started_at?: string | null
+          phase_index?: number
+          root_account_id?: string | null
           rule_snapshot?: Json | null
           starting_balance?: number
           status?: Database["public"]["Enums"]["account_status"]
@@ -111,9 +173,12 @@ export type Database = {
           highest_balance?: number
           id?: string
           last_trade_at?: string | null
+          parent_account_id?: string | null
           passed_at?: string | null
           payout_cycle_start_balance?: number | null
           payout_cycle_started_at?: string | null
+          phase_index?: number
+          root_account_id?: string | null
           rule_snapshot?: Json | null
           starting_balance?: number
           status?: Database["public"]["Enums"]["account_status"]
@@ -128,6 +193,20 @@ export type Database = {
             columns: ["cohort_id"]
             isOneToOne: false
             referencedRelation: "cohorts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accounts_parent_account_id_fkey"
+            columns: ["parent_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accounts_root_account_id_fkey"
+            columns: ["root_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
             referencedColumns: ["id"]
           },
         ]
@@ -267,6 +346,7 @@ export type Database = {
       }
       cohorts: {
         Row: {
+          cohort_phase: string
           created_at: string
           created_by: string | null
           description: string | null
@@ -286,6 +366,7 @@ export type Database = {
           min_trading_days_between_payouts: number
           min_winning_days_between_payouts: number | null
           name: string
+          next_cohort_id: string | null
           payout_cooldown_days: number
           payout_eligibility_delay_days: number
           payout_split_percent: number
@@ -293,6 +374,7 @@ export type Database = {
           version: number
         }
         Insert: {
+          cohort_phase?: string
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -312,6 +394,7 @@ export type Database = {
           min_trading_days_between_payouts?: number
           min_winning_days_between_payouts?: number | null
           name: string
+          next_cohort_id?: string | null
           payout_cooldown_days?: number
           payout_eligibility_delay_days?: number
           payout_split_percent?: number
@@ -319,6 +402,7 @@ export type Database = {
           version?: number
         }
         Update: {
+          cohort_phase?: string
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -338,13 +422,22 @@ export type Database = {
           min_trading_days_between_payouts?: number
           min_winning_days_between_payouts?: number | null
           name?: string
+          next_cohort_id?: string | null
           payout_cooldown_days?: number
           payout_eligibility_delay_days?: number
           payout_split_percent?: number
           profit_target_percent?: number
           version?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "cohorts_next_cohort_id_fkey"
+            columns: ["next_cohort_id"]
+            isOneToOne: false
+            referencedRelation: "cohorts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       device_fingerprints: {
         Row: {
@@ -1874,6 +1967,10 @@ export type Database = {
               reason: string
             }[]
           }
+      spawn_next_phase_account: {
+        Args: { _from_account_id: string; _request_id?: string }
+        Returns: Json
+      }
       toggle_payment_system: {
         Args: {
           _actor_user_id: string
