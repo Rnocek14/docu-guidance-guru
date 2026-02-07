@@ -1,116 +1,126 @@
 
-# Full Risk Visibility: Configurable Simulation Dashboard
 
-## Goal
-Expose all economically meaningful parameters in the Monte Carlo UI so you can model realistic scenarios — from lean bootstrap to scaled operations — and see full tail risk.
+# Show Customer Volume and Growth in Simulation Results
 
-## Changes
+## Problem
+The simulation runs on `accountsPerMonth` from the slider but never shows:
+- How many total customers are being simulated
+- Monthly cumulative customer growth (new signups, eligible, capped out, churned)
+- The funnel breakdown that drives the financial results
 
-### 1. New UI Controls (MonteCarloAnalytics.tsx)
+This makes the financial numbers feel disconnected from the actual customer base.
 
-Add sliders and presets to the Simulation Parameters card:
+## Solution
 
-- **Accounts per Month** slider (25 - 1,000, default 150)
-- **Fixed Monthly Costs** slider ($2,000 - $30,000, default $6,000)
-- **Entry Fee** slider ($99 - $299, default $149)
-- **Reset Fee** slider ($49 - $149, default $99)
-- **Simulation Horizon** slider (6 - 36 months, default 12)
-- **Attack Intensity** slider (0 - 1.0, default 0) — models coordinated fraud
-- **Scenario Presets** buttons:
-  - "Bootstrap" — 50 accts/mo, $5k costs
-  - "Growth" — 200 accts/mo, $12k costs
-  - "Scale" — 500 accts/mo, $18k costs
+### 1. Edge Function: Return monthly cohort counters
 
-### 2. Pass Overrides to Edge Function
+Modify `simulateMonthAggregate()` to also return pool sizes, and collect them as monthly bands (P50) across iterations.
 
-The `run-simulation` edge function already accepts an `overrides` parameter. The UI will send:
+New fields added to the return object:
 
 ```text
-POST /run-simulation
-{
-  iterations: 2000,
-  months: 24,            // from horizon slider
-  reserve_threshold: 16000,
-  overrides: {
-    accountsPerMonth: 150,
-    fixedMonthlyCosts: 6000,
-    pricePerAccount: 149,
-    knobs: {
-      resetPrice: 99,
-      attackIntensity: 0.3
-    }
-  }
-}
+cohortBands: [
+  { month: 1, totalAccounts: 150, eligible: 18, firstPayout: 18, capHits: 0, churned: 12 },
+  { month: 2, totalAccounts: 300, eligible: 36, firstPayout: 15, capHits: 0, churned: 25 },
+  ...
+]
 ```
 
-No edge function changes needed — the override merge logic already exists on line 135.
+**Changes to `supabase/functions/run-simulation/index.ts`:**
+- Have `simulateMonthAggregate()` return additional fields: `totalAccounts`, `eligiblePool`, `firstPayoutPool`, `capHits`
+- In `runSimulation()`, collect these per-month per-iteration into columns (like `monthColumns` for profit)
+- Compute P50 (median) of each counter per month
+- Add `cohortBands` array to the results object alongside `monthlyBands`
 
-### 3. New Risk Summary Section
+### 2. UI: Add "Customer Growth" tab and summary cards
 
-Add a "Risk Report" tab alongside the existing Bands/Histogram/Diagnostics tabs showing:
+**Changes to `src/pages/admin/MonteCarloAnalytics.tsx`:**
 
-- **Breakeven Analysis**: minimum accounts/month needed at current cost structure
-- **Months to Insolvency**: at P5 (worst case), how many consecutive months before reserve is depleted
-- **Steady-State Month**: which month the P50 band crosses zero (margin compression point)
-- **Cumulative P&L waterfall**: Revenue vs Payouts vs Fraud vs Costs breakdown
+Add two new elements:
 
-### 4. Comparison Mode
+**a) Summary banner** — Show total customers simulated prominently in the verdict section:
+- "Simulating **1,800 total customers** over 12 months (150/mo)"
+- "Peak eligible pool: **216 funded accounts**"
 
-After a run completes, a "Compare" button saves the current result. Running again overlays the new result against the saved one — so you can visually compare "Bootstrap vs Growth" scenarios side by side.
+**b) New "Customers" tab** alongside Bands / Distribution / Risk / Diagnostics:
+- Stacked area chart showing monthly cumulative counts:
+  - Total signups (cumulative)
+  - Eligible (funded, active)
+  - First-payout pending
+  - Cap-hit / churned
+- This directly answers "how many customers is this modeling?"
+
+### 3. Diagnostics enhancement
+
+Add to the existing diagnostics panel:
+- Total accounts simulated: `accountsPerMonth x horizon`
+- Peak eligible pool (median)
+- Churn rate (cap-hit + reset-out as % of total)
+- Customer lifetime (avg months before cap or churn)
 
 ## Technical Details
 
-### Files Modified
+### Edge function changes (`supabase/functions/run-simulation/index.ts`)
+
+The `simulateMonthAggregate` function (line 160) already computes `totalEligible` on line 279. We need to:
+
+1. Return it from the function along with other pool counters
+2. Collect per-month arrays similar to `monthColumns` for profit
+3. Compute medians and add to results
+
+New return type from `simulateMonthAggregate`:
+```text
+{
+  netProfit, totalPayouts, payoutRequests, capHits,
+  totalAccounts,     // sum of all cohort.totalAccounts
+  eligiblePool,      // sum of all cohort.eligiblePool
+  firstPayoutPool,   // sum of all cohort.firstPayoutPool
+}
+```
+
+New field in simulation results:
+```text
+cohortBands: Array<{
+  totalAccounts: number   // cumulative signups
+  eligible: number        // funded & active (median across iterations)
+  firstPayout: number     // awaiting first payout
+  capHits: number         // cumulative cap-hit accounts
+}>
+```
+
+### Frontend changes
 
 | File | Change |
 |------|--------|
-| `src/pages/admin/MonteCarloAnalytics.tsx` | Add override sliders, presets, risk report tab, comparison state |
+| `supabase/functions/run-simulation/index.ts` | Return cohort pool counters per month |
+| `src/pages/admin/MonteCarloAnalytics.tsx` | Add customer summary to verdict, new "Customers" tab with stacked area chart, enhance diagnostics |
 
-### No Backend Changes Required
-The edge function's `overrides` parameter already supports all of these fields. The UI simply needs to pass them through.
-
-### Computed Risk Metrics (client-side from existing result data)
-
-```text
-breakeven = fixedMonthlyCosts / (pricePerAccount - variableCostPerAccount)
-                                  adjusted for passRate and payout drain
-
-monthsToInsolvency = reserveThreshold / abs(monthlyBands[last].p5)
-
-steadyStateMonth = first month index where p50 < 0
-```
-
-### UI Layout
+### UI Layout for Customers tab
 
 ```text
 +--------------------------------------------------+
-| Simulation Parameters                             |
-| [Bootstrap] [Growth] [Scale]                      |
+| Customer Growth (Median Across Iterations)        |
 |                                                   |
-| Accounts/mo  [====|====] 150                      |
-| Fixed Costs  [==|======] $6,000                   |
-| Entry Fee    [=====|===] $149                     |
-| Reset Fee    [===|=====] $99                      |
-| Horizon      [====|====] 24 months                |
-| Attack       [|========] 0.0                      |
+|  [Stacked Area Chart]                             |
+|  - Blue area: Cumulative signups                  |
+|  - Green area: Eligible (funded)                  |
+|  - Orange area: First-payout pending              |
+|  - Red line: Cumulative cap-hits                  |
 |                                                   |
-| [Run Simulation]              [Compare Previous]  |
+|  M1    M3    M6    M9    M12                      |
 +--------------------------------------------------+
-
-+--------------------------------------------------+
-| Verdict Banner: PROFITABLE / MARGINAL / etc.      |
-+--------------------------------------------------+
-
-| 12-Mo Profit | Monthly | Loss Prob | Reserve | Worst |
-|   $XX,XXX    |  $X,XXX |   XX.X%   |  XX.X%  | -$XX  |
-
-+--------------------------------------------------+
-| [Bands] [Distribution] [Risk Report] [Diagnostics]|
-|                                                   |
-| Risk Report tab:                                  |
-|  - Breakeven: 120 accts/mo                        |
-|  - Months to insolvency (P5): 8                   |
-|  - Margin compression month: 5                    |
-|  - Cumulative waterfall chart                     |
+| Key Stats:                                        |
+| Total Customers: 1,800 | Peak Eligible: 216       |
+| Avg Lifetime: 4.2 mo   | Cap-Hit Rate: 8.3%       |
 +--------------------------------------------------+
 ```
+
+### Verdict banner addition
+
+The existing verdict banner (line 236) will be enhanced to show:
+```text
+"2,000 iterations x 12 months using live cohort rules"
+→
+"2,000 iterations x 12 months | 1,800 customers (150/mo) | live cohort rules"
+```
+
