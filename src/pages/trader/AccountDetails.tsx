@@ -6,6 +6,8 @@ import { RuleSnapshotCard } from '@/components/trader/RuleSnapshotCard';
 import { AccountTimeline } from '@/components/trader/AccountTimeline';
 import { ProgressGauges } from '@/components/trader/ProgressGauges';
 import { BreachExplainer } from '@/components/trader/BreachExplainer';
+import { ConsistencyBestDayCard } from '@/components/trader/ConsistencyBestDayCard';
+import { ConsistencyProfitableDaysCard } from '@/components/trader/ConsistencyProfitableDaysCard';
 import { ReconciliationHistory } from '@/components/risk/ReconciliationHistory';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -90,6 +92,26 @@ export default function AccountDetails() {
       return roles.some(r => ['risk_officer', 'support', 'admin'].includes(r));
     },
     enabled: !!user?.id,
+  });
+
+  // Fetch consistency rules (for active accounts)
+  const { data: consistency } = useQuery({
+    queryKey: ['account-consistency', id],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('check_consistency_rules', { _account_id: id! });
+      if (error) throw error;
+      return data as {
+        best_day_pnl: number;
+        best_day_pct_of_target: number;
+        max_daily_profit_cap_percent: number | null;
+        best_day_cap_met: boolean;
+        profitable_days: number;
+        min_profitable_days: number;
+        profitable_days_met: boolean;
+        all_consistency_met: boolean;
+      };
+    },
+    enabled: !!id && account?.status === 'active',
   });
 
   const ruleSnapshot = account?.rule_snapshot as RuleSnapshot | null;
@@ -184,6 +206,27 @@ export default function AccountDetails() {
             tradingDaysCount={account.trading_days_count}
             ruleSnapshot={ruleSnapshot}
           />
+        )}
+
+        {/* Consistency Rules (active accounts) */}
+        {consistency && account.status === 'active' && (
+          <div className="grid gap-4 md:grid-cols-2">
+            {consistency.max_daily_profit_cap_percent != null && (
+              <ConsistencyBestDayCard
+                bestDayPnl={consistency.best_day_pnl}
+                bestDayPctOfTarget={consistency.best_day_pct_of_target}
+                maxCapPercent={consistency.max_daily_profit_cap_percent}
+                isMet={consistency.best_day_cap_met}
+              />
+            )}
+            {consistency.min_profitable_days > 0 && (
+              <ConsistencyProfitableDaysCard
+                profitableDays={consistency.profitable_days}
+                minRequired={consistency.min_profitable_days}
+                isMet={consistency.profitable_days_met}
+              />
+            )}
+          </div>
         )}
 
         {/* Account Timeline */}

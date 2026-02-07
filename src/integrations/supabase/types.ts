@@ -14,6 +14,59 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_daily_stats: {
+        Row: {
+          account_id: string
+          commissions: number
+          created_at: string
+          gross_pnl: number
+          id: string
+          is_winning_day: boolean
+          losing_trades: number
+          net_pnl: number
+          trade_count: number
+          trading_day: string
+          updated_at: string
+          winning_trades: number
+        }
+        Insert: {
+          account_id: string
+          commissions?: number
+          created_at?: string
+          gross_pnl?: number
+          id?: string
+          is_winning_day?: boolean
+          losing_trades?: number
+          net_pnl?: number
+          trade_count?: number
+          trading_day: string
+          updated_at?: string
+          winning_trades?: number
+        }
+        Update: {
+          account_id?: string
+          commissions?: number
+          created_at?: string
+          gross_pnl?: number
+          id?: string
+          is_winning_day?: boolean
+          losing_trades?: number
+          net_pnl?: number
+          trade_count?: number
+          trading_day?: string
+          updated_at?: string
+          winning_trades?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_daily_stats_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       account_events: {
         Row: {
           account_id: string
@@ -357,11 +410,13 @@ export type Database = {
           is_active: boolean
           lifetime_cap_multiple: number | null
           max_daily_loss_percent: number
+          max_daily_profit_cap_percent: number | null
           max_payout_absolute: number | null
           max_payout_percent: number
           max_position_size_percent: number
           max_total_drawdown_percent: number
           min_profit_buffer: number | null
+          min_profitable_days: number
           min_trading_days: number
           min_trading_days_between_payouts: number
           min_winning_days_between_payouts: number | null
@@ -385,11 +440,13 @@ export type Database = {
           is_active?: boolean
           lifetime_cap_multiple?: number | null
           max_daily_loss_percent?: number
+          max_daily_profit_cap_percent?: number | null
           max_payout_absolute?: number | null
           max_payout_percent?: number
           max_position_size_percent?: number
           max_total_drawdown_percent?: number
           min_profit_buffer?: number | null
+          min_profitable_days?: number
           min_trading_days?: number
           min_trading_days_between_payouts?: number
           min_winning_days_between_payouts?: number | null
@@ -413,11 +470,13 @@ export type Database = {
           is_active?: boolean
           lifetime_cap_multiple?: number | null
           max_daily_loss_percent?: number
+          max_daily_profit_cap_percent?: number | null
           max_payout_absolute?: number | null
           max_payout_percent?: number
           max_position_size_percent?: number
           max_total_drawdown_percent?: number
           min_profit_buffer?: number | null
+          min_profitable_days?: number
           min_trading_days?: number
           min_trading_days_between_payouts?: number
           min_winning_days_between_payouts?: number | null
@@ -1764,6 +1823,7 @@ export type Database = {
         Args: { _account_id: string }
         Returns: Json
       }
+      check_consistency_rules: { Args: { _account_id: string }; Returns: Json }
       check_geo_mismatch: { Args: { _user_id: string }; Returns: Json }
       check_liability_alert: { Args: never; Returns: Json }
       check_payment_system_paused: {
@@ -1979,6 +2039,15 @@ export type Database = {
           _reason: string
         }
         Returns: Json
+      }
+      upsert_daily_stat: {
+        Args: {
+          _account_id: string
+          _commission: number
+          _pnl: number
+          _trading_day: string
+        }
+        Returns: undefined
       }
       upsert_liability_buffer_settings: {
         Args: { _assumed_avg_first_payout: number; _cash_reserve: number }
