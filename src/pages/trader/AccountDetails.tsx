@@ -21,11 +21,14 @@ interface RuleSnapshot {
   cohort_id: string;
   cohort_name: string;
   cohort_version: number;
+  cohort_phase?: string;
   max_daily_loss_percent: number;
   max_total_drawdown_percent: number;
   profit_target_percent: number;
   min_trading_days: number;
   max_position_size_percent: number;
+  max_daily_profit_cap_percent?: number | null;
+  min_profitable_days?: number;
   frozen_at: string;
 }
 
@@ -96,12 +99,17 @@ export default function AccountDetails() {
 
   const ruleSnapshot = account?.rule_snapshot as RuleSnapshot | null;
 
-  // Fetch consistency rules (only for active eval/verification accounts that have consistency config)
-  const cohortPhase = (ruleSnapshot as any)?.cohort_phase;
-  const hasConsistencyRules = ruleSnapshot && (
-    (ruleSnapshot as any).max_daily_profit_cap_percent != null ||
-    ((ruleSnapshot as any).min_profitable_days ?? 0) > 0
-  );
+  const cohortPhase = ruleSnapshot?.cohort_phase ?? 'evaluation';
+  const hasConsistencyRules =
+    (ruleSnapshot?.max_daily_profit_cap_percent ?? null) !== null ||
+    (ruleSnapshot?.min_profitable_days ?? 0) > 0;
+
+  const shouldFetchConsistency =
+    !!id &&
+    account?.status === 'active' &&
+    cohortPhase !== 'performance' &&
+    hasConsistencyRules;
+
   const { data: consistency } = useQuery({
     queryKey: ['account-consistency', id],
     queryFn: async () => {
@@ -118,7 +126,7 @@ export default function AccountDetails() {
         all_consistency_met: boolean;
       };
     },
-    enabled: !!id && account?.status === 'active' && cohortPhase !== 'performance' && !!hasConsistencyRules,
+    enabled: shouldFetchConsistency,
   });
   const status = statusLabels[account?.status || 'active'] || statusLabels.active;
   const showPayoutButton = account?.status === 'passed';
