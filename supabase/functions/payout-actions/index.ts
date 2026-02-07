@@ -778,6 +778,58 @@ Deno.serve(async (req) => {
           )
         }
       }
+
+      // SIMULATION STALENESS CHECK: Prevent the reserve gate from operating
+      // on stale simulation data. If the gate references a simulation run,
+      // that run must exist AND be recent (within 7 days).
+      // Missing or stale = fail-closed with distinct reason code.
+      {
+        const simRunId = config.last_simulation_run_id
+        if (!simRunId || typeof simRunId !== 'string') {
+          return new Response(
+            JSON.stringify({
+              error: 'Payout blocked: No simulation run linked to reserve gate',
+              reason_code: 'RESERVE_SIMULATION_STALE',
+              hint: 'Run a Monte Carlo simulation to generate a current risk assessment. The run ID will be auto-linked to the reserve gate.',
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        const { data: simRun, error: simErr } = await supabaseAdmin
+          .from('simulation_runs')
+          .select('id, created_at, status')
+          .eq('id', simRunId)
+          .single()
+
+        if (simErr || !simRun) {
+          return new Response(
+            JSON.stringify({
+              error: 'Payout blocked: Referenced simulation run not found',
+              reason_code: 'RESERVE_SIMULATION_STALE',
+              hint: `Simulation run ${simRunId} does not exist. Run a new simulation.`,
+              simulation_run_id: simRunId,
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        const MAX_SIMULATION_AGE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+        const simAge = Date.now() - new Date(simRun.created_at).getTime()
+        if (simAge > MAX_SIMULATION_AGE_MS) {
+          return new Response(
+            JSON.stringify({
+              error: 'Payout blocked: Simulation data too old',
+              reason_code: 'RESERVE_SIMULATION_STALE',
+              hint: `Last simulation was ${Math.round(simAge / (24 * 60 * 60 * 1000))} days ago (max 7). Run a new simulation.`,
+              simulation_run_id: simRunId,
+              simulation_created_at: simRun.created_at,
+              max_age_days: 7,
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
       
       {
         // Check 1: Current liability snapshot vs reserve threshold
