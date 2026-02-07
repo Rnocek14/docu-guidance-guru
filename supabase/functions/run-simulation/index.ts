@@ -320,9 +320,14 @@ function simulateMonthPerAccount(
   let resetsThisMonth = 0
   let resetRevenue = 0
   let zombieCompletions = 0
+  const toRemove: number[] = []
 
-  ctx.accountStates.forEach(state => {
-    if (!state.isActive || state.isCompleted) return
+  ctx.accountStates.forEach((state, id) => {
+    if (!state.isActive || state.isCompleted) {
+      // Prune completed/inactive accounts to keep Map small
+      toRemove.push(id)
+      return
+    }
 
     // Zombie check: headroom < $50
     if (lifetimeCap !== null) {
@@ -330,6 +335,7 @@ function simulateMonthPerAccount(
       if (headroom > 0 && headroom < 50) {
         completeAccount(state, 'zombie', ctx)
         zombieCompletions++
+        toRemove.push(id)
         return
       }
     }
@@ -347,6 +353,8 @@ function simulateMonthPerAccount(
       state.winningDaysSinceLastPayout = 0
     }
   })
+  // Prune dead accounts from Map
+  for (const id of toRemove) ctx.accountStates.delete(id)
 
   // --- Verification + PnL accumulation ---
   ctx.accountStates.forEach(state => {
@@ -367,10 +375,10 @@ function simulateMonthPerAccount(
       state.profitSinceLastPayout += monthlyPnl
       state.monthsSinceLastPayout++
 
-      let winningDays = 0
-      for (let d = 0; d < 22; d++) {
-        if (random() < 0.55) winningDays++
-      }
+      // Binomial approximation for winning days (replaces 22 individual random() calls)
+      // For n=22, p=0.55: mean=12.1, stddev=2.33
+      // Use normal approximation + round + clamp
+      const winningDays = Math.max(0, Math.min(22, Math.round(12.1 + 2.33 * normal(random))))
       state.winningDaysSinceLastPayout += winningDays
     }
   })
@@ -918,24 +926,22 @@ function autoScaleIterations(
 ): ScalingResult {
   if (forceIterations) return { iterations: requested, scaled: false, reason: null }
 
-  if (months > 24 && accountsPerMonth > 300) {
-    const capped = Math.min(requested, 300)
-    if (capped < requested) {
-      return { iterations: capped, scaled: true, reason: `Auto-scaled from ${requested} to ${capped}: ${accountsPerMonth} accounts/mo × ${months} months exceeds safe budget` }
-    }
-  }
+  // Estimate peak active accounts (rough: passRate.mode * accountsPerMonth * months, minus churn)
+  const estimatedPeakActive = Math.round(accountsPerMonth * 0.12 * Math.min(months, 10))
+  // Compute a "work score" = iterations * months * peakActive
+  // Edge Function CPU budget ~= 10s of compute, target <500M ops
+  const workScore = requested * months * Math.max(estimatedPeakActive, 10)
+  const MAX_WORK = 300_000_000
 
-  if (months > 12 && accountsPerMonth > 500) {
-    const capped = Math.min(requested, 500)
+  if (workScore > MAX_WORK) {
+    // Scale iterations down to fit budget
+    const safeCap = Math.max(100, Math.floor(MAX_WORK / (months * Math.max(estimatedPeakActive, 10))))
+    const capped = Math.min(requested, safeCap)
     if (capped < requested) {
-      return { iterations: capped, scaled: true, reason: `Auto-scaled from ${requested} to ${capped}: ${accountsPerMonth} accounts/mo × ${months} months` }
-    }
-  }
-
-  if (accountsPerMonth > 750) {
-    const capped = Math.min(requested, 500)
-    if (capped < requested) {
-      return { iterations: capped, scaled: true, reason: `Auto-scaled from ${requested} to ${capped}: ${accountsPerMonth} accounts/mo is high volume` }
+      return {
+        iterations: capped, scaled: true,
+        reason: `Auto-scaled from ${requested} to ${capped}: ~${estimatedPeakActive} peak accounts × ${months} months (work score ${(workScore / 1e6).toFixed(0)}M > ${(MAX_WORK / 1e6).toFixed(0)}M limit)`,
+      }
     }
   }
 
@@ -1018,9 +1024,12 @@ Deno.serve(async (req) => {
 
     const results = runSimulation(iterations, months, seed, effectiveAssumptions, reserveThreshold, startTime)
 
-    // Run shadow cross-check (only if time budget allows)
+    // Run shadow cross-check only if plenty of time remains AND scale is manageable
     let crossCheck: CrossCheckResult | null = null
-    if (Date.now() - startTime < RUNTIME_BUDGET_MS - 5000) {
+    const elapsed = Date.now() - startTime
+    const remainingBudget = RUNTIME_BUDGET_MS - elapsed
+    const shadowSafe = remainingBudget > 8000 && effectiveAssumptions.accountsPerMonth <= 500
+    if (shadowSafe) {
       try {
         crossCheck = runShadowCrossCheck(iterations, months, seed, effectiveAssumptions, reserveThreshold)
       } catch (e) {
