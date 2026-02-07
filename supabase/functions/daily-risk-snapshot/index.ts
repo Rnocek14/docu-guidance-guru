@@ -316,8 +316,9 @@ Deno.serve(async (req) => {
     // =========================================================================
     let proposalResult: { proposals_pending?: number } | null = null
     const isCron = triggeredBy === 'cron'
+    const shouldAttemptAutoTighten = isCron && !!econVerdict && econVerdict.status !== 'ok'
 
-    if (isCron && econVerdict && econVerdict.status !== 'ok') {
+    if (shouldAttemptAutoTighten) {
       const { data: propData, error: propError } = await db.rpc('propose_econ_auto_tightening', {
         _econ: econVerdict,
       })
@@ -351,7 +352,7 @@ Deno.serve(async (req) => {
         pending_safety_changes: pendingChanges?.length ?? 0,
         econ_gate_status: econVerdict?.status ?? 'unavailable',
         econ_gate_reasons_count: econVerdict?.reasons?.length ?? 0,
-        auto_tightening_attempted: isCron && econVerdict?.status !== 'ok',
+        auto_tightening_attempted: shouldAttemptAutoTighten,
         auto_tightening_proposals_pending: proposalResult?.proposals_pending ?? 0,
       }),
     })
