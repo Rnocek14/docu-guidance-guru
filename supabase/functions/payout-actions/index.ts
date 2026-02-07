@@ -748,6 +748,37 @@ Deno.serve(async (req) => {
         )
       }
       
+      // STRICT SHAPE VALIDATION: Any malformed field = fail-closed.
+      // Prevents NaN, undefined, or wrong types from silently disabling checks.
+      {
+        const minReserve = config.min_reserve_after_approval
+        const lossThreshold = config.block_if_simulated_loss_prob_above
+        if (typeof minReserve !== 'number' || !isFinite(minReserve) || minReserve < 0) {
+          return new Response(
+            JSON.stringify({
+              error: 'Payout blocked: Reserve gate config malformed',
+              reason_code: 'RESERVE_CONFIG_MISSING',
+              hint: 'min_reserve_after_approval must be a finite number >= 0.',
+              field: 'min_reserve_after_approval',
+              value: minReserve,
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        if (typeof lossThreshold !== 'number' || !isFinite(lossThreshold) || lossThreshold < 0 || lossThreshold > 1) {
+          return new Response(
+            JSON.stringify({
+              error: 'Payout blocked: Reserve gate config malformed',
+              reason_code: 'RESERVE_CONFIG_MISSING',
+              hint: 'block_if_simulated_loss_prob_above must be a number between 0 and 1.',
+              field: 'block_if_simulated_loss_prob_above',
+              value: lossThreshold,
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+      
       {
         // Check 1: Current liability snapshot vs reserve threshold
         const { data: liabilitySnapshot } = await supabaseAdmin.rpc('get_liability_snapshot', {})
