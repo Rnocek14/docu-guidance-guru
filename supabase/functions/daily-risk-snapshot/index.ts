@@ -315,8 +315,9 @@ Deno.serve(async (req) => {
     // 8. AUTO-TIGHTENING PROPOSALS — only from cron path (ITEM 1)
     // =========================================================================
     let proposalResult: { proposals_pending?: number } | null = null
+    const isCron = triggeredBy === 'cron'
 
-    if (econVerdict && econVerdict.status !== 'ok') {
+    if (isCron && econVerdict && econVerdict.status !== 'ok') {
       const { data: propData, error: propError } = await db.rpc('propose_econ_auto_tightening', {
         _econ: econVerdict,
       })
