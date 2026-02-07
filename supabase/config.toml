@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.run-simulation]
 verify_jwt = false
+
+[functions.daily-risk-snapshot]
+verify_jwt = false
