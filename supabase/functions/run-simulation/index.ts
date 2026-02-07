@@ -157,12 +157,17 @@ interface CohortState {
   totalAccounts: number         // total accounts in this batch (for cap math)
 }
 
+interface MonthResult {
+  netProfit: number; totalPayouts: number; payoutRequests: number; capHits: number;
+  totalAccounts: number; eligiblePool: number; firstPayoutPool: number;
+}
+
 function simulateMonthAggregate(
   assumptions: SimAssumptions,
   random: () => number,
   cohorts: CohortState[],
   monthIndex: number,
-): { netProfit: number; totalPayouts: number; payoutRequests: number; capHits: number } {
+): MonthResult {
   const { knobs } = assumptions
 
   // --- Revenue ---
@@ -286,7 +291,15 @@ function simulateMonthAggregate(
 
   const netProfit = revenue + resetRevenue - totalPayouts - fraudLoss - chargebacks - variableCosts - fixedCosts
 
-  return { netProfit, totalPayouts, payoutRequests: totalPayoutRequests, capHits: totalCapHits }
+  // Aggregate pool counters across all cohort batches
+  const aggTotalAccounts = cohorts.reduce((s, c) => s + c.totalAccounts, 0)
+  const aggEligiblePool = cohorts.reduce((s, c) => s + c.eligiblePool, 0)
+  const aggFirstPayoutPool = cohorts.reduce((s, c) => s + c.firstPayoutPool, 0)
+
+  return {
+    netProfit, totalPayouts, payoutRequests: totalPayoutRequests, capHits: totalCapHits,
+    totalAccounts: aggTotalAccounts, eligiblePool: aggEligiblePool, firstPayoutPool: aggFirstPayoutPool,
+  }
 }
 
 function runSimulation(
@@ -294,7 +307,11 @@ function runSimulation(
   assumptions: SimAssumptions, reserveThreshold: number,
 ) {
   const monthColumns: number[][] = Array.from({ length: months }, () => [])
-  const allIterProfits: number[] = []   // cumulative per iteration
+  const cohortTotalAcctCols: number[][] = Array.from({ length: months }, () => [])
+  const cohortEligibleCols: number[][] = Array.from({ length: months }, () => [])
+  const cohortFirstPayoutCols: number[][] = Array.from({ length: months }, () => [])
+  const cohortCapHitCols: number[][] = Array.from({ length: months }, () => [])
+  const allIterProfits: number[] = []
   let totalPayoutsApproved = 0
   let totalCapHits = 0
   const totalAccountsPerIter = assumptions.accountsPerMonth * months
@@ -303,6 +320,7 @@ function runSimulation(
     const random = mulberry32(seed + iter)
     const cohorts: CohortState[] = []
     let cumProfit = 0
+    let cumCapHits = 0
 
     for (let month = 0; month < months; month++) {
       const result = simulateMonthAggregate(assumptions, random, cohorts, month)
@@ -310,6 +328,12 @@ function runSimulation(
       cumProfit += result.netProfit
       totalPayoutsApproved += result.payoutRequests
       totalCapHits += result.capHits
+      cumCapHits += result.capHits
+
+      cohortTotalAcctCols[month].push(result.totalAccounts)
+      cohortEligibleCols[month].push(result.eligiblePool)
+      cohortFirstPayoutCols[month].push(result.firstPayoutPool)
+      cohortCapHitCols[month].push(cumCapHits)
     }
     allIterProfits.push(cumProfit)
   }
@@ -318,6 +342,13 @@ function runSimulation(
   // Monthly stats (flatten all month data)
   const allMonthly: number[] = []
   const monthlyBands: { p5: number; p50: number; p95: number; mean: number }[] = []
+  const cohortBands: { totalAccounts: number; eligible: number; firstPayout: number; capHits: number }[] = []
+
+  const median = (arr: number[]) => {
+    const s = arr.slice().sort((a, b) => a - b)
+    return s[Math.floor(s.length * 0.5)]
+  }
+
   for (let m = 0; m < months; m++) {
     const sorted = monthColumns[m].slice().sort((a, b) => a - b)
     const len = sorted.length
@@ -328,6 +359,13 @@ function runSimulation(
       mean: sorted.reduce((a, b) => a + b, 0) / len,
     })
     for (const v of sorted) allMonthly.push(v)
+
+    cohortBands.push({
+      totalAccounts: Math.round(median(cohortTotalAcctCols[m])),
+      eligible: Math.round(median(cohortEligibleCols[m])),
+      firstPayout: Math.round(median(cohortFirstPayoutCols[m])),
+      capHits: Math.round(median(cohortCapHitCols[m])),
+    })
   }
 
   const sortedMonthly = allMonthly.slice().sort((a, b) => a - b)
@@ -396,6 +434,7 @@ function runSimulation(
     reserve: { breachProbability: reserveBreachProbability, threshold: reserveThreshold },
     annual: { p5: annualP5, p50: annualP50, p95: annualP95, lossProb: annualLossProb, mean: annualMean },
     monthlyBands,
+    cohortBands,
     histogram,
     diagnostics: {
       avgPayoutsPerAccount: totalAccountsPerIter > 0 ? totalPayoutsApproved / (totalAccountsPerIter * iterations) : 0,
