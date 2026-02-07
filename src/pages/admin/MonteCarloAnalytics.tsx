@@ -1,339 +1,179 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
-import { ServerSimulationPanel } from '@/components/admin/ServerSimulationPanel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
-import { 
-  BarChart, 
-  Bar, 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  ResponsiveContainer, 
-  ReferenceLine,
-  Area,
-  AreaChart,
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  ResponsiveContainer, ReferenceLine, Area, AreaChart,
 } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from '@/components/ui/chart';
-import { 
-  Play, 
-  RefreshCw, 
-  TrendingUp, 
-  TrendingDown, 
-  AlertTriangle,
-  CheckCircle,
-  XCircle,
-  Info,
-  Zap,
-  Target,
-  Activity,
+import {
+  Play, RefreshCw, TrendingUp, TrendingDown, AlertTriangle,
+  Shield, Server, Zap, Info,
 } from 'lucide-react';
-import { runMonteCarlo, DEFAULT_ASSUMPTIONS, MonteCarloResult, MonteCarloConfig, MonteCarloAssumptions } from '@/lib/monte-carlo';
+import { supabase } from '@/integrations/supabase/client';
 
-// Chart configs
-const profitChartConfig: ChartConfig = {
-  profit: { label: 'Monthly Profit', color: 'hsl(var(--chart-1))' },
-  loss: { label: 'Monthly Loss', color: 'hsl(var(--destructive))' },
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ServerSimResult {
+  run_id: string | null;
+  duration_ms: number;
+  assumptions_source: string;
+  cohorts_used: { id: string; name: string; phase: string }[];
+  results: {
+    profit: { mean: number; p5: number; p50: number; p95: number; stdDev: number };
+    risk: { probabilityOfLoss: number; maxDrawdown: number; worstMonth: number; bestMonth: number; consecutiveLossMonths: number };
+    reserve: { breachProbability: number; threshold: number };
+    annual: { p5: number; p50: number; p95: number; lossProb: number; mean: number };
+    monthlyBands: { p5: number; p50: number; p95: number; mean: number }[];
+    histogram: { bucket: number; count: number }[];
+    diagnostics: { avgPayoutsPerAccount: number; lifetimeCapHitRate: number };
+  };
+}
+
+// ─── Chart configs ────────────────────────────────────────────────────────────
+
+const bandChartConfig: ChartConfig = {
+  p5: { label: 'P5 (Worst)', color: 'hsl(var(--destructive))' },
+  p50: { label: 'P50 (Median)', color: 'hsl(var(--chart-1))' },
+  p95: { label: 'P95 (Best)', color: 'hsl(var(--chart-3))' },
 };
 
-const cohortChartConfig: ChartConfig = {
-  active: { label: 'Active Accounts', color: 'hsl(var(--chart-2))' },
-  eligible: { label: 'Eligible for Payout', color: 'hsl(var(--chart-3))' },
+const histogramConfig: ChartConfig = {
+  count: { label: 'Iterations', color: 'hsl(var(--chart-1))' },
 };
 
-const ratioChartConfig: ChartConfig = {
-  ratio: { label: 'Payout/Revenue Ratio', color: 'hsl(var(--chart-4))' },
-};
+// ─── Verdict helper ───────────────────────────────────────────────────────────
 
-// Default config for quick simulations
-const QUICK_CONFIG: MonteCarloConfig = {
-  iterations: 100,
-  monthsPerIteration: 12,
-  seed: 42,
-};
+function getVerdict(r: ServerSimResult['results']) {
+  const checks = [
+    { label: 'Annual profit positive', pass: r.annual.mean > 0 },
+    { label: 'Annual loss prob < 10%', pass: r.annual.lossProb < 0.1 },
+    { label: 'Reserve breach < 10%', pass: r.reserve.breachProbability < 0.1 },
+    { label: 'Worst month > -$50k', pass: r.risk.worstMonth > -50000 },
+  ];
+  const passed = checks.filter(c => c.pass).length;
+  const score = Math.round((passed / checks.length) * 100);
+  return { score, checks };
+}
 
-const FULL_CONFIG: MonteCarloConfig = {
-  iterations: 500,
-  monthsPerIteration: 36,
-  seed: 42,
-};
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function MonteCarloAnalytics() {
   const [isRunning, setIsRunning] = useState(false);
-  const [result, setResult] = useState<MonteCarloResult | null>(null);
-  const [runType, setRunType] = useState<'quick' | 'full'>('quick');
-  
-  // Adjustable parameters
-  const [passRate, setPassRate] = useState([12]);
-  const [avgPayout, setAvgPayout] = useState([420]);
-  const [resetRate, setResetRate] = useState([18]);
-  const [lifetimeCapMultiple, setLifetimeCapMultiple] = useState([7]);
+  const [result, setResult] = useState<ServerSimResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [iterations, setIterations] = useState([2000]);
+  const [reserveThreshold, setReserveThreshold] = useState([16000]);
 
-  const runSimulation = useCallback(() => {
+  const runServerSimulation = useCallback(async () => {
     setIsRunning(true);
-    
-    // Use setTimeout to allow UI to update
-    setTimeout(() => {
-      try {
-        const config = runType === 'quick' ? QUICK_CONFIG : FULL_CONFIG;
-        
-        // Build custom assumptions
-        const customAssumptions: MonteCarloAssumptions = {
-          ...DEFAULT_ASSUMPTIONS,
-          passRate: {
-            min: (passRate[0] - 2) / 100,
-            mode: passRate[0] / 100,
-            max: (passRate[0] + 3) / 100,
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const response = await fetch(
+        `https://sfxmgwkrjwuerfkqxokq.supabase.co/functions/v1/run-simulation`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
           },
-          avgPayoutAmount: {
-            mean: avgPayout[0],
-            stdDev: avgPayout[0] * 0.3,
-          },
-          resetRate: resetRate[0] / 100,
-          knobs: {
-            ...DEFAULT_ASSUMPTIONS.knobs,
-            lifetimeCapPerUser: lifetimeCapMultiple[0] > 0 
-              ? DEFAULT_ASSUMPTIONS.pricePerAccount * lifetimeCapMultiple[0]
-              : null,
-          },
-        };
-        
-        const simResult = runMonteCarlo(config, customAssumptions);
-        setResult(simResult);
-      } catch (error) {
-        console.error('Simulation error:', error);
-      } finally {
-        setIsRunning(false);
-      }
-    }, 50);
-  }, [runType, passRate, avgPayout, resetRate, lifetimeCapMultiple]);
+          body: JSON.stringify({
+            iterations: iterations[0],
+            months: 12,
+            seed: 42,
+            reserve_threshold: reserveThreshold[0],
+          }),
+        }
+      );
 
-  // Prepare chart data
-  const profitDistributionData = useMemo(() => {
-    if (!result || !result.rawSamples) return [];
-    
-    // Flatten all profits
-    const allProfits = result.rawSamples.flat();
-    
-    // Create histogram buckets
-    const buckets: Record<string, number> = {};
-    const bucketSize = 5000;
-    
-    allProfits.forEach(profit => {
-      const bucket = Math.floor(profit / bucketSize) * bucketSize;
-      const key = bucket.toString();
-      buckets[key] = (buckets[key] || 0) + 1;
-    });
-    
-    return Object.entries(buckets)
-      .map(([bucket, count]) => ({
-        bucket: parseInt(bucket),
-        count,
-        isProfit: parseInt(bucket) >= 0,
-      }))
-      .sort((a, b) => a.bucket - b.bucket);
-  }, [result]);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Simulation failed');
+      setResult(data as ServerSimResult);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setIsRunning(false);
+    }
+  }, [iterations, reserveThreshold]);
 
-  const cohortTimeSeriesData = useMemo(() => {
-    if (!result) return [];
-    
-    return result.cohortDiagnostics.activeCohortSizeByMonth.map((active, i) => ({
-      month: i,
-      active,
-      eligible: result.cohortDiagnostics.eligibleCohortSizeByMonth[i] || 0,
-    }));
-  }, [result]);
+  const verdict = useMemo(() => result ? getVerdict(result.results) : null, [result]);
 
-  const payoutRatioData = useMemo(() => {
-    if (!result) return [];
-    
-    return result.cohortDiagnostics.payoutToRevenueRatioByMonth.map((ratio, i) => ({
-      month: i,
-      ratio: ratio * 100,
-    }));
-  }, [result]);
-
-  const getTrustScore = useCallback(() => {
-    if (!result) return null;
-    
-    let score = 100;
-    const issues: string[] = [];
-    const passes: string[] = [];
-    
-    // Check profit margin
-    if (result.profit.mean < 0) {
-      score -= 30;
-      issues.push('Negative expected profit');
-    } else if (result.profit.mean > 0) {
-      passes.push(`Positive margin: ${(result.diagnostics.effectiveMargin * 100).toFixed(1)}%`);
-    }
-    
-    // Check losing month probability
-    if (result.risk.probabilityOfLoss > 0.5) {
-      score -= 25;
-      issues.push(`High loss probability: ${(result.risk.probabilityOfLoss * 100).toFixed(0)}%`);
-    } else {
-      passes.push(`Loss probability: ${(result.risk.probabilityOfLoss * 100).toFixed(0)}%`);
-    }
-    
-    // Check reset rate accuracy
-    const resetError = Math.abs(result.cohortDiagnostics.resetRateErrorRatio - 1);
-    if (resetError > 0.3) {
-      score -= 15;
-      issues.push('Reset model inaccurate');
-    } else {
-      passes.push(`Reset accuracy: ${((1 - resetError) * 100).toFixed(0)}%`);
-    }
-    
-    // Check steady-state stability
-    const last12 = result.cohortDiagnostics.payoutToRevenueRatioByMonth.slice(-12);
-    if (last12.length >= 12) {
-      const first6Avg = last12.slice(0, 6).reduce((a, b) => a + b, 0) / 6;
-      const last6Avg = last12.slice(6).reduce((a, b) => a + b, 0) / 6;
-      const drift = Math.abs(last6Avg - first6Avg) / (first6Avg || 1);
-      
-      if (drift > 0.25) {
-        score -= 15;
-        issues.push('Payout ratio unstable');
-      } else {
-        passes.push('Steady-state stable');
-      }
-    }
-    
-    // Check cap binding
-    if (result.payoutDiagnostics.lifetimeCapBindingRate > 0) {
-      passes.push(`Cap binding: ${(result.payoutDiagnostics.lifetimeCapBindingRate * 100).toFixed(1)}%`);
-    }
-    
-    return { score: Math.max(0, score), issues, passes };
-  }, [result]);
-
-  const trustScore = getTrustScore();
+  const fmt = (v: number) => '$' + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const pct = (v: number) => (v * 100).toFixed(1) + '%';
 
   return (
     <DashboardLayout title="Monte Carlo Analytics" navItems={adminNavItems}>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        {/* Header + Controls */}
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">Economic Simulation</h2>
             <p className="text-muted-foreground">
-              Run Monte Carlo simulations to validate platform economics and risk controls.
+              Server-side Monte Carlo using your live cohort rules. Results are persisted for audit.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Badge variant={runType === 'quick' ? 'default' : 'secondary'}>
-              {runType === 'quick' ? '100 iterations / 12mo' : '500 iterations / 36mo'}
-            </Badge>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRunType(runType === 'quick' ? 'full' : 'quick')}
-            >
-              {runType === 'quick' ? 'Full Run' : 'Quick Run'}
-            </Button>
-            <Button onClick={runSimulation} disabled={isRunning}>
-              {isRunning ? (
-                <>
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                  Running...
-                </>
-              ) : (
-                <>
-                  <Play className="mr-2 h-4 w-4" />
-                  Run Simulation
-                </>
-              )}
-            </Button>
-          </div>
+          <Button onClick={runServerSimulation} disabled={isRunning} size="lg">
+            {isRunning ? (
+              <><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Running ({iterations[0].toLocaleString()} iterations)...</>
+            ) : (
+              <><Play className="mr-2 h-4 w-4" />Run Simulation</>
+            )}
+          </Button>
         </div>
 
         {/* Parameter Controls */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Simulation Parameters</CardTitle>
-            <CardDescription>Adjust assumptions to stress-test economics</CardDescription>
+            <div className="flex items-center gap-2">
+              <Server className="h-5 w-5 text-muted-foreground" />
+              <CardTitle className="text-lg">Simulation Parameters</CardTitle>
+            </div>
+            <CardDescription>
+              Uses real cohort configs from your database — evaluation, verification &amp; performance phases.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-6 md:grid-cols-2">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label>Pass Rate</Label>
-                  <span className="text-sm font-medium">{passRate[0]}%</span>
+                  <Label>Iterations</Label>
+                  <span className="text-sm font-medium">{iterations[0].toLocaleString()}</span>
                 </div>
-                <Slider
-                  value={passRate}
-                  onValueChange={setPassRate}
-                  min={5}
-                  max={30}
-                  step={1}
-                />
-                <p className="text-xs text-muted-foreground">% of accounts that pass evaluation</p>
+                <Slider value={iterations} onValueChange={setIterations} min={500} max={5000} step={500} />
+                <p className="text-xs text-muted-foreground">More iterations = more accurate tail risk estimates</p>
               </div>
-              
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label>Avg Payout</Label>
-                  <span className="text-sm font-medium">${avgPayout[0]}</span>
+                  <Label>Reserve Threshold</Label>
+                  <span className="text-sm font-medium">${reserveThreshold[0].toLocaleString()}</span>
                 </div>
-                <Slider
-                  value={avgPayout}
-                  onValueChange={setAvgPayout}
-                  min={100}
-                  max={800}
-                  step={20}
-                />
-                <p className="text-xs text-muted-foreground">Average payout amount per request</p>
-              </div>
-              
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Reset Rate</Label>
-                  <span className="text-sm font-medium">{resetRate[0]}%</span>
-                </div>
-                <Slider
-                  value={resetRate}
-                  onValueChange={setResetRate}
-                  min={5}
-                  max={40}
-                  step={1}
-                />
-                <p className="text-xs text-muted-foreground">Annual % of accounts that reset/churn</p>
-              </div>
-              
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Lifetime Cap</Label>
-                  <span className="text-sm font-medium">
-                    {lifetimeCapMultiple[0] > 0 ? `${lifetimeCapMultiple[0]}× ($${lifetimeCapMultiple[0] * 149})` : 'None'}
-                  </span>
-                </div>
-                <Slider
-                  value={lifetimeCapMultiple}
-                  onValueChange={setLifetimeCapMultiple}
-                  min={0}
-                  max={15}
-                  step={1}
-                />
-                <p className="text-xs text-muted-foreground">Multiple of entry fee (0 = unlimited)</p>
+                <Slider value={reserveThreshold} onValueChange={setReserveThreshold} min={5000} max={50000} step={1000} />
+                <p className="text-xs text-muted-foreground">Cash reserve level to test breach probability</p>
               </div>
             </div>
+            {error && (
+              <div className="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
           </CardContent>
         </Card>
 
         {result ? (
           <>
-            {/* Trust Score Card */}
+            {/* Verdict Banner */}
             <Card className={
-              trustScore && trustScore.score >= 80 
-                ? 'border-success/50 bg-success/5' 
-                : trustScore && trustScore.score >= 50 
+              verdict && verdict.score >= 75
+                ? 'border-success/50 bg-success/5'
+                : verdict && verdict.score >= 50
                   ? 'border-warning/50 bg-warning/5'
                   : 'border-destructive/50 bg-destructive/5'
             }>
@@ -341,33 +181,27 @@ export default function MonteCarloAnalytics() {
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-4">
                     <div className={`flex h-16 w-16 items-center justify-center rounded-full ${
-                      trustScore && trustScore.score >= 80 
-                        ? 'bg-success/20 text-success' 
-                        : trustScore && trustScore.score >= 50 
+                      verdict && verdict.score >= 75
+                        ? 'bg-success/20 text-success'
+                        : verdict && verdict.score >= 50
                           ? 'bg-warning/20 text-warning'
                           : 'bg-destructive/20 text-destructive'
                     }`}>
-                      <span className="text-2xl font-bold">{trustScore?.score}</span>
+                      <span className="text-2xl font-bold">{verdict?.score}</span>
                     </div>
                     <div>
-                      <h3 className="text-lg font-semibold">Model Trust Score</h3>
+                      <h3 className="text-lg font-semibold">
+                        {verdict && verdict.score >= 75 ? 'PROFITABLE' : verdict && verdict.score >= 50 ? 'MARGINAL' : 'UNPROFITABLE'}
+                      </h3>
                       <p className="text-sm text-muted-foreground">
-                        Based on mechanical invariants and steady-state checks
+                        Based on {iterations[0].toLocaleString()} iterations × 12 months using live cohort rules
                       </p>
                     </div>
                   </div>
-                  
                   <div className="flex flex-wrap gap-2">
-                    {trustScore?.passes.map((pass, i) => (
-                      <Badge key={i} variant="outline" className="border-success/50 text-success">
-                        <CheckCircle className="mr-1 h-3 w-3" />
-                        {pass}
-                      </Badge>
-                    ))}
-                    {trustScore?.issues.map((issue, i) => (
-                      <Badge key={i} variant="outline" className="border-destructive/50 text-destructive">
-                        <XCircle className="mr-1 h-3 w-3" />
-                        {issue}
+                    {verdict?.checks.map((c, i) => (
+                      <Badge key={i} variant="outline" className={c.pass ? 'border-success/50 text-success' : 'border-destructive/50 text-destructive'}>
+                        {c.pass ? '✓' : '✗'} {c.label}
                       </Badge>
                     ))}
                   </div>
@@ -376,342 +210,225 @@ export default function MonteCarloAnalytics() {
             </Card>
 
             {/* Key Metrics Grid */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Expected Monthly Profit</CardTitle>
-                  {result.profit.mean >= 0 ? (
+                  <CardTitle className="text-sm font-medium">12-Month Profit</CardTitle>
+                  {result.results.annual.mean >= 0 ? (
                     <TrendingUp className="h-4 w-4 text-success" />
                   ) : (
                     <TrendingDown className="h-4 w-4 text-destructive" />
                   )}
                 </CardHeader>
                 <CardContent>
-                  <div className={`text-2xl font-bold ${result.profit.mean >= 0 ? 'text-success' : 'text-destructive'}`}>
-                    ${result.profit.mean.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  <div className={`text-2xl font-bold ${result.results.annual.mean >= 0 ? 'text-success' : 'text-destructive'}`}>
+                    {fmt(result.results.annual.mean)}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    P5: ${result.profit.p5.toLocaleString()} / P95: ${result.profit.p95.toLocaleString()}
+                    P5: {fmt(result.results.annual.p5)} / P95: {fmt(result.results.annual.p95)}
                   </p>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Loss Probability</CardTitle>
-                  <AlertTriangle className={`h-4 w-4 ${result.risk.probabilityOfLoss > 0.3 ? 'text-destructive' : 'text-muted-foreground'}`} />
+                  <CardTitle className="text-sm font-medium">Monthly Profit (avg)</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
-                    {(result.risk.probabilityOfLoss * 100).toFixed(1)}%
+                  <div className={`text-2xl font-bold ${result.results.profit.mean >= 0 ? 'text-success' : 'text-destructive'}`}>
+                    {fmt(result.results.profit.mean)}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Chance of negative month
+                    P5: {fmt(result.results.profit.p5)} / P95: {fmt(result.results.profit.p95)}
                   </p>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Cap Binding Rate</CardTitle>
-                  <Target className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-sm font-medium">Annual Loss Prob</CardTitle>
+                  <AlertTriangle className={`h-4 w-4 ${result.results.annual.lossProb > 0.1 ? 'text-destructive' : 'text-muted-foreground'}`} />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
-                    {(result.payoutDiagnostics.lifetimeCapBindingRate * 100).toFixed(1)}%
-                  </div>
+                  <div className="text-2xl font-bold">{pct(result.results.annual.lossProb)}</div>
                   <p className="text-xs text-muted-foreground">
-                    Pressure: {result.payoutDiagnostics.capPressure !== null 
-                      ? `${(result.payoutDiagnostics.capPressure * 100).toFixed(0)}%` 
-                      : 'N/A'}
+                    Monthly loss: {pct(result.results.risk.probabilityOfLoss)}
                   </p>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Reset Accuracy</CardTitle>
-                  <Activity className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-sm font-medium">Reserve Breach</CardTitle>
+                  <Shield className={`h-4 w-4 ${result.results.reserve.breachProbability > 0.1 ? 'text-destructive' : 'text-success'}`} />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
-                    {((1 - Math.abs(result.cohortDiagnostics.resetRateErrorRatio - 1)) * 100).toFixed(0)}%
+                  <div className={`text-2xl font-bold ${result.results.reserve.breachProbability > 0.1 ? 'text-destructive' : 'text-success'}`}>
+                    {pct(result.results.reserve.breachProbability)}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Error ratio: {result.cohortDiagnostics.resetRateErrorRatio.toFixed(3)}
+                    Threshold: {fmt(result.results.reserve.threshold)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Worst Month</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-destructive">
+                    {fmt(result.results.risk.worstMonth)}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Best: {fmt(result.results.risk.bestMonth)}
                   </p>
                 </CardContent>
               </Card>
             </div>
 
             {/* Charts */}
-            <Tabs defaultValue="server" className="space-y-4">
+            <Tabs defaultValue="bands" className="space-y-4">
               <TabsList>
-                <TabsTrigger value="server">Server Simulation</TabsTrigger>
-                <TabsTrigger value="profit">Profit Distribution</TabsTrigger>
-                <TabsTrigger value="cohort">Cohort Dynamics</TabsTrigger>
-                <TabsTrigger value="ratio">Payout/Revenue</TabsTrigger>
+                <TabsTrigger value="bands">Monthly Bands</TabsTrigger>
+                <TabsTrigger value="histogram">Profit Distribution</TabsTrigger>
                 <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
               </TabsList>
-              
-              <TabsContent value="server">
-                <ServerSimulationPanel />
-              </TabsContent>
-              
-              <TabsContent value="profit">
+
+              <TabsContent value="bands">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Monthly Profit Distribution</CardTitle>
+                    <CardTitle>Monthly Profit Bands (P5 / P50 / P95)</CardTitle>
                     <CardDescription>
-                      Histogram of simulated monthly profits across {result.config.iterations} iterations
+                      Confidence bands across {iterations[0].toLocaleString()} iterations — shows margin compression over time
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <ChartContainer config={profitChartConfig} className="h-[350px]">
+                    <ChartContainer config={bandChartConfig} className="h-[350px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={profitDistributionData}>
+                        <AreaChart data={result.results.monthlyBands.map((b, i) => ({ month: i + 1, ...b }))}>
                           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                          <XAxis 
-                            dataKey="bucket" 
-                            tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                            className="text-xs"
-                          />
-                          <YAxis className="text-xs" />
-                          <ChartTooltip 
-                            content={<ChartTooltipContent />}
-                            formatter={(value, name, props) => [
-                              `${value} months`,
-                              `$${props.payload.bucket.toLocaleString()}`
-                            ]}
-                          />
-                          <ReferenceLine x={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="5 5" />
-                          <Bar 
-                            dataKey="count" 
-                            fill="hsl(var(--chart-1))"
-                            radius={[4, 4, 0, 0]}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </ChartContainer>
-                    
-                    <div className="mt-4 grid grid-cols-3 gap-4 text-center">
-                      <div className="rounded-lg bg-muted p-3">
-                        <div className="text-sm text-muted-foreground">P5 (Bad Month)</div>
-                        <div className="text-lg font-semibold text-destructive">
-                          ${result.profit.p5.toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="rounded-lg bg-muted p-3">
-                        <div className="text-sm text-muted-foreground">P50 (Median)</div>
-                        <div className="text-lg font-semibold">
-                          ${result.profit.p50.toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="rounded-lg bg-muted p-3">
-                        <div className="text-sm text-muted-foreground">P95 (Good Month)</div>
-                        <div className="text-lg font-semibold text-success">
-                          ${result.profit.p95.toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              
-              <TabsContent value="cohort">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Cohort Size Over Time</CardTitle>
-                    <CardDescription>
-                      Active vs eligible accounts showing steady-state convergence
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ChartContainer config={cohortChartConfig} className="h-[350px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={cohortTimeSeriesData}>
-                          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                          <XAxis 
-                            dataKey="month" 
-                            tickFormatter={(v) => `M${v}`}
-                            className="text-xs"
-                          />
-                          <YAxis className="text-xs" />
-                          <ChartTooltip content={<ChartTooltipContent />} />
-                          <Area 
-                            type="monotone" 
-                            dataKey="active" 
-                            stackId="1"
-                            stroke="hsl(var(--chart-2))" 
-                            fill="hsl(var(--chart-2))"
-                            fillOpacity={0.3}
-                          />
-                          <Area 
-                            type="monotone" 
-                            dataKey="eligible" 
-                            stackId="2"
-                            stroke="hsl(var(--chart-3))" 
-                            fill="hsl(var(--chart-3))"
-                            fillOpacity={0.5}
-                          />
+                          <XAxis dataKey="month" tickFormatter={(v) => `M${v}`} className="text-xs" />
+                          <YAxis tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} className="text-xs" />
+                          <ChartTooltip content={<ChartTooltipContent />} formatter={(value) => [fmt(Number(value)), '']} />
+                          <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="5 5" />
+                          <Area type="monotone" dataKey="p95" stroke="hsl(var(--chart-3))" fill="hsl(var(--chart-3))" fillOpacity={0.15} />
+                          <Area type="monotone" dataKey="p50" stroke="hsl(var(--chart-1))" fill="hsl(var(--chart-1))" fillOpacity={0.25} />
+                          <Area type="monotone" dataKey="p5" stroke="hsl(var(--destructive))" fill="hsl(var(--destructive))" fillOpacity={0.15} />
                         </AreaChart>
                       </ResponsiveContainer>
                     </ChartContainer>
-                    
-                    <div className="mt-4 grid grid-cols-2 gap-4 text-center">
+                    <div className="mt-4 grid grid-cols-3 gap-4 text-center">
                       <div className="rounded-lg bg-muted p-3">
-                        <div className="text-sm text-muted-foreground">Avg Active Cohort</div>
-                        <div className="text-lg font-semibold">
-                          {result.cohortDiagnostics.avgActiveCohortSize.toFixed(0)} accounts
+                        <div className="text-sm text-muted-foreground">Month 1 (median)</div>
+                        <div className="text-lg font-semibold text-success">{fmt(result.results.monthlyBands[0]?.p50 ?? 0)}</div>
+                      </div>
+                      <div className="rounded-lg bg-muted p-3">
+                        <div className="text-sm text-muted-foreground">Month 6 (median)</div>
+                        <div className={`text-lg font-semibold ${(result.results.monthlyBands[5]?.p50 ?? 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
+                          {fmt(result.results.monthlyBands[5]?.p50 ?? 0)}
                         </div>
                       </div>
                       <div className="rounded-lg bg-muted p-3">
-                        <div className="text-sm text-muted-foreground">Avg Eligible Cohort</div>
-                        <div className="text-lg font-semibold">
-                          {result.cohortDiagnostics.avgEligibleCohortSize.toFixed(0)} accounts
+                        <div className="text-sm text-muted-foreground">Month 12 (median)</div>
+                        <div className={`text-lg font-semibold ${(result.results.monthlyBands[11]?.p50 ?? 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
+                          {fmt(result.results.monthlyBands[11]?.p50 ?? 0)}
                         </div>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
               </TabsContent>
-              
-              <TabsContent value="ratio">
+
+              <TabsContent value="histogram">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Payout-to-Revenue Ratio</CardTitle>
+                    <CardTitle>12-Month Cumulative Profit Distribution</CardTitle>
                     <CardDescription>
-                      Key profitability indicator — should stabilize below 100%
+                      How many iterations ended at each profit level
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <ChartContainer config={ratioChartConfig} className="h-[350px]">
+                    <ChartContainer config={histogramConfig} className="h-[300px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={payoutRatioData}>
+                        <BarChart data={result.results.histogram}>
                           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                          <XAxis 
-                            dataKey="month" 
-                            tickFormatter={(v) => `M${v}`}
-                            className="text-xs"
-                          />
-                          <YAxis 
-                            domain={[0, 'auto']}
-                            tickFormatter={(v) => `${v}%`}
-                            className="text-xs"
-                          />
-                          <ChartTooltip 
-                            content={<ChartTooltipContent />}
-                            formatter={(value) => [`${Number(value).toFixed(1)}%`, 'Ratio']}
-                          />
-                          <ReferenceLine y={100} stroke="hsl(var(--destructive))" strokeDasharray="5 5" label="Break-even" />
-                          <Line 
-                            type="monotone" 
-                            dataKey="ratio" 
-                            stroke="hsl(var(--chart-4))" 
-                            strokeWidth={2}
-                            dot={false}
-                          />
-                        </LineChart>
+                          <XAxis dataKey="bucket" tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} className="text-xs" />
+                          <YAxis className="text-xs" />
+                          <ChartTooltip content={<ChartTooltipContent />} formatter={(value, _name, props) => [`${value} iterations`, `${fmt(props.payload.bucket)}`]} />
+                          <ReferenceLine x={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="5 5" />
+                          <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
+                        </BarChart>
                       </ResponsiveContainer>
                     </ChartContainer>
-                    
-                    <div className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                      <Info className="h-4 w-4" />
-                      Values above 100% indicate payout obligations exceed revenue
-                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
-              
+
               <TabsContent value="diagnostics">
                 <div className="grid gap-4 lg:grid-cols-2">
                   <Card>
-                    <CardHeader>
-                      <CardTitle>Payout Diagnostics</CardTitle>
-                    </CardHeader>
+                    <CardHeader><CardTitle>Simulation Diagnostics</CardTitle></CardHeader>
                     <CardContent>
-                      <div className="space-y-4">
-                        <div className="flex justify-between border-b pb-2">
-                          <span className="text-muted-foreground">Avg Lifetime Paid</span>
-                          <span className="font-medium">${result.payoutDiagnostics.avgLifetimePaidPerAccount.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between border-b pb-2">
-                          <span className="text-muted-foreground">Lifetime Paid P95</span>
-                          <span className="font-medium">${result.payoutDiagnostics.lifetimePaidP95.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between border-b pb-2">
-                          <span className="text-muted-foreground">Payouts Clipped by Cap</span>
-                          <span className="font-medium">{result.payoutDiagnostics.payoutsClippedByLifetimeCap}</span>
-                        </div>
-                        <div className="flex justify-between border-b pb-2">
-                          <span className="text-muted-foreground">Avg Clipped Amount</span>
-                          <span className="font-medium">${result.payoutDiagnostics.avgClippedAmount.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between border-b pb-2">
-                          <span className="text-muted-foreground">Cap Pressure</span>
-                          <span className="font-medium">
-                            {result.payoutDiagnostics.capPressure !== null 
-                              ? `${(result.payoutDiagnostics.capPressure * 100).toFixed(1)}%`
-                              : 'N/A (no cap)'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">First Payout Cap Binding</span>
-                          <span className="font-medium">{(result.payoutDiagnostics.firstPayoutCapBindingRate * 100).toFixed(1)}%</span>
-                        </div>
+                      <div className="space-y-3">
+                        {[
+                          ['Avg Payouts / Account', result.results.diagnostics.avgPayoutsPerAccount.toFixed(3)],
+                          ['Lifetime Cap Hit Rate', pct(result.results.diagnostics.lifetimeCapHitRate)],
+                          ['Max Drawdown (tail)', fmt(result.results.risk.maxDrawdown)],
+                          ['Consecutive Loss Months', result.results.risk.consecutiveLossMonths.toString()],
+                          ['Std Deviation (monthly)', fmt(result.results.profit.stdDev)],
+                        ].map(([label, value]) => (
+                          <div key={label} className="flex justify-between border-b pb-2 last:border-0">
+                            <span className="text-muted-foreground">{label}</span>
+                            <span className="font-medium">{value}</span>
+                          </div>
+                        ))}
                       </div>
                     </CardContent>
                   </Card>
-                  
+
                   <Card>
-                    <CardHeader>
-                      <CardTitle>Model Accuracy</CardTitle>
-                    </CardHeader>
+                    <CardHeader><CardTitle>Cohorts Used</CardTitle></CardHeader>
                     <CardContent>
-                      <div className="space-y-4">
+                      <div className="space-y-3">
+                        {result.cohorts_used.map(c => (
+                          <div key={c.id} className="flex items-center justify-between border-b pb-2 last:border-0">
+                            <span className="font-medium">{c.name}</span>
+                            <Badge variant="secondary">{c.phase}</Badge>
+                          </div>
+                        ))}
                         <div className="flex justify-between border-b pb-2">
-                          <span className="text-muted-foreground">Reset Error Ratio</span>
-                          <span className={`font-medium ${
-                            Math.abs(result.cohortDiagnostics.resetRateErrorRatio - 1) < 0.1 
-                              ? 'text-success' 
-                              : 'text-warning'
-                          }`}>
-                            {result.cohortDiagnostics.resetRateErrorRatio.toFixed(4)}
-                          </span>
+                          <span className="text-muted-foreground">Source</span>
+                          <Badge variant="outline">{result.assumptions_source}</Badge>
                         </div>
                         <div className="flex justify-between border-b pb-2">
-                          <span className="text-muted-foreground">Expected Resets (Run)</span>
-                          <span className="font-medium">{result.cohortDiagnostics.expectedResetsThisRun.toFixed(0)}</span>
-                        </div>
-                        <div className="flex justify-between border-b pb-2">
-                          <span className="text-muted-foreground">Observed Resets (Run)</span>
-                          <span className="font-medium">{result.cohortDiagnostics.resetsThisRun}</span>
-                        </div>
-                        <div className="flex justify-between border-b pb-2">
-                          <span className="text-muted-foreground">Zombie Accounts Completed</span>
-                          <span className="font-medium">{result.cohortDiagnostics.zombieAccountsCompleted}</span>
-                        </div>
-                        <div className="flex justify-between border-b pb-2">
-                          <span className="text-muted-foreground">Accounts Completed by Cap</span>
-                          <span className="font-medium">{result.payoutDiagnostics.accountsCompletedByCap}</span>
+                          <span className="text-muted-foreground">Duration</span>
+                          <span className="font-medium">{(result.duration_ms / 1000).toFixed(1)}s</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">Cap-Hit Share of Completions</span>
-                          <span className="font-medium">
-                            {(result.cohortDiagnostics.capHitShareOfCompletions * 100).toFixed(1)}%
-                          </span>
+                          <span className="text-muted-foreground">Run ID</span>
+                          <span className="font-mono text-xs">{result.run_id?.slice(0, 8) ?? 'n/a'}</span>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
                 </div>
+
+                <div className="mt-4 flex items-start gap-2 rounded-lg border border-muted bg-muted/30 p-4 text-sm text-muted-foreground">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <strong>Note on Max Drawdown:</strong> The {fmt(result.results.risk.maxDrawdown)} figure is the worst
+                    cumulative peak-to-trough across all {iterations[0].toLocaleString()} iterations — a statistical tail extreme,
+                    not a realistic single-month loss. The operationally relevant risk metric is <strong>Worst Month ({fmt(result.results.risk.worstMonth)})</strong>.
+                  </div>
+                </div>
               </TabsContent>
             </Tabs>
 
-            {/* Scenario Comparison */}
+            {/* Metadata */}
             <Card>
               <CardHeader>
-                <CardTitle>Quick Scenario Reference</CardTitle>
+                <CardTitle className="text-base">Quick Scenario Reference</CardTitle>
                 <CardDescription>Compare different cap configurations</CardDescription>
               </CardHeader>
               <CardContent>
@@ -722,7 +439,6 @@ export default function MonteCarloAnalytics() {
                         <th className="py-2 text-left font-medium">Scenario</th>
                         <th className="py-2 text-right font-medium">Cap Amount</th>
                         <th className="py-2 text-right font-medium">Expected Margin</th>
-                        <th className="py-2 text-right font-medium">Binding Rate</th>
                         <th className="py-2 text-right font-medium">Risk Level</th>
                       </tr>
                     </thead>
@@ -731,28 +447,24 @@ export default function MonteCarloAnalytics() {
                         <td className="py-2">No Cap (Baseline)</td>
                         <td className="py-2 text-right">Unlimited</td>
                         <td className="py-2 text-right text-destructive">-33%</td>
-                        <td className="py-2 text-right">0%</td>
                         <td className="py-2 text-right"><Badge variant="destructive">Critical</Badge></td>
                       </tr>
                       <tr className="border-b">
-                        <td className="py-2">8× Cap (Breakeven)</td>
+                        <td className="py-2">8× Cap</td>
                         <td className="py-2 text-right">$1,192</td>
                         <td className="py-2 text-right text-warning">~0%</td>
-                        <td className="py-2 text-right">~45%</td>
-                        <td className="py-2 text-right"><Badge variant="secondary">Neutral</Badge></td>
+                        <td className="py-2 text-right"><Badge variant="secondary">Breakeven</Badge></td>
                       </tr>
                       <tr className="border-b bg-muted/50">
-                        <td className="py-2 font-medium">7× Cap (Recommended)</td>
+                        <td className="py-2 font-medium">7× Cap (Current)</td>
                         <td className="py-2 text-right font-medium">$1,043</td>
                         <td className="py-2 text-right font-medium text-success">+6.8%</td>
-                        <td className="py-2 text-right font-medium">~54%</td>
                         <td className="py-2 text-right"><Badge className="bg-success text-success-foreground">Safe</Badge></td>
                       </tr>
-                      <tr className="border-b">
+                      <tr>
                         <td className="py-2">5× Cap (Conservative)</td>
                         <td className="py-2 text-right">$745</td>
                         <td className="py-2 text-right text-success">+15%</td>
-                        <td className="py-2 text-right">~70%</td>
                         <td className="py-2 text-right"><Badge className="bg-success text-success-foreground">Very Safe</Badge></td>
                       </tr>
                     </tbody>
@@ -767,11 +479,11 @@ export default function MonteCarloAnalytics() {
               <Zap className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-medium mb-2">No Simulation Data</h3>
               <p className="text-muted-foreground text-center mb-4">
-                Run a simulation to see profit distributions, cohort dynamics, and trust metrics.
+                Run a simulation to see profit forecasts, risk metrics, and monthly bands — all derived from your live cohort rules.
               </p>
-              <Button onClick={runSimulation} disabled={isRunning}>
+              <Button onClick={runServerSimulation} disabled={isRunning} size="lg">
                 <Play className="mr-2 h-4 w-4" />
-                Run First Simulation
+                Run Simulation
               </Button>
             </CardContent>
           </Card>
