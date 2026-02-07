@@ -667,6 +667,74 @@ Deno.serve(async (req) => {
     }
 
     // =============================================
+    // RESERVE-AWARE APPROVAL GATE (feature-flagged)
+    // =============================================
+    
+    if (body.action === 'approve') {
+      const { data: reserveConfig } = await supabaseAdmin
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'reserve_aware_approval')
+        .single()
+      
+      const config = reserveConfig?.value as {
+        enabled?: boolean
+        min_reserve_after_approval?: number
+        block_if_simulated_loss_prob_above?: number
+        last_simulation_run_id?: string | null
+      } | null
+      
+      if (config?.enabled) {
+        // Check 1: Current liability snapshot vs reserve threshold
+        const { data: liabilitySnapshot } = await supabaseAdmin.rpc('get_liability_snapshot', {})
+        if (liabilitySnapshot) {
+          const netBuffer = (liabilitySnapshot as { net_buffer?: number }).net_buffer ?? 0
+          const minReserve = config.min_reserve_after_approval ?? 5000
+          
+          if (netBuffer - submittedAmount < minReserve) {
+            return new Response(
+              JSON.stringify({
+                error: 'Payout blocked: Reserve threshold breach risk',
+                net_buffer: netBuffer,
+                payout_amount: submittedAmount,
+                remaining_after: netBuffer - submittedAmount,
+                min_reserve_required: minReserve,
+                hint: 'Approving this payout would drop reserve below minimum. Increase reserve or disable gate in system_settings.',
+              }),
+              { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+        }
+        
+        // Check 2: If latest simulation shows high loss probability, warn
+        if (config.last_simulation_run_id && config.block_if_simulated_loss_prob_above) {
+          const { data: simRun } = await supabaseAdmin
+            .from('simulation_runs')
+            .select('probability_of_loss, reserve_breach_probability')
+            .eq('id', config.last_simulation_run_id)
+            .single()
+          
+          if (simRun) {
+            const lossProb = Number(simRun.probability_of_loss)
+            const threshold = config.block_if_simulated_loss_prob_above
+            if (lossProb > threshold) {
+              return new Response(
+                JSON.stringify({
+                  error: 'Payout blocked: Simulated loss probability exceeds threshold',
+                  simulated_loss_prob: lossProb,
+                  threshold,
+                  simulation_run_id: config.last_simulation_run_id,
+                  hint: 'Latest Monte Carlo simulation shows elevated risk. Review simulation results or adjust threshold in system_settings.',
+                }),
+                { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+              )
+            }
+          }
+        }
+      }
+    }
+
+    // =============================================
     // EXECUTE PAYOUT STATE CHANGE
     // =============================================
 

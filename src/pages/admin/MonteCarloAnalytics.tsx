@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { ServerSimulationPanel } from '@/components/admin/ServerSimulationPanel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -444,13 +445,18 @@ export default function MonteCarloAnalytics() {
             </div>
 
             {/* Charts */}
-            <Tabs defaultValue="profit" className="space-y-4">
+            <Tabs defaultValue="server" className="space-y-4">
               <TabsList>
+                <TabsTrigger value="server">Server Simulation</TabsTrigger>
                 <TabsTrigger value="profit">Profit Distribution</TabsTrigger>
                 <TabsTrigger value="cohort">Cohort Dynamics</TabsTrigger>
                 <TabsTrigger value="ratio">Payout/Revenue</TabsTrigger>
                 <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
               </TabsList>
+              
+              <TabsContent value="server">
+                <ServerSimulationPanel />
+              </TabsContent>
               
               <TabsContent value="profit">
                 <Card>

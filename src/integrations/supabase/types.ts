@@ -1447,6 +1447,84 @@ export type Database = {
           },
         ]
       }
+      simulation_runs: {
+        Row: {
+          assumptions: Json
+          best_month: number
+          cohort_configs: Json
+          consecutive_loss_months: number
+          created_at: string
+          duration_ms: number | null
+          full_results: Json
+          id: string
+          iterations: number
+          max_drawdown: number
+          months_per_iteration: number
+          probability_of_loss: number
+          profit_mean: number
+          profit_p5: number
+          profit_p50: number
+          profit_p95: number
+          profit_std_dev: number
+          reserve_breach_probability: number | null
+          reserve_threshold: number | null
+          seed: number
+          status: string
+          triggered_by: string | null
+          worst_month: number
+        }
+        Insert: {
+          assumptions: Json
+          best_month: number
+          cohort_configs?: Json
+          consecutive_loss_months?: number
+          created_at?: string
+          duration_ms?: number | null
+          full_results: Json
+          id?: string
+          iterations?: number
+          max_drawdown: number
+          months_per_iteration?: number
+          probability_of_loss: number
+          profit_mean: number
+          profit_p5: number
+          profit_p50: number
+          profit_p95: number
+          profit_std_dev: number
+          reserve_breach_probability?: number | null
+          reserve_threshold?: number | null
+          seed?: number
+          status?: string
+          triggered_by?: string | null
+          worst_month: number
+        }
+        Update: {
+          assumptions?: Json
+          best_month?: number
+          cohort_configs?: Json
+          consecutive_loss_months?: number
+          created_at?: string
+          duration_ms?: number | null
+          full_results?: Json
+          id?: string
+          iterations?: number
+          max_drawdown?: number
+          months_per_iteration?: number
+          probability_of_loss?: number
+          profit_mean?: number
+          profit_p5?: number
+          profit_p50?: number
+          profit_p95?: number
+          profit_std_dev?: number
+          reserve_breach_probability?: number | null
+          reserve_threshold?: number | null
+          seed?: number
+          status?: string
+          triggered_by?: string | null
+          worst_month?: number
+        }
+        Relationships: []
+      }
       staff_notifications: {
         Row: {
           body: string | null
