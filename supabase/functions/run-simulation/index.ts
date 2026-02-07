@@ -264,21 +264,32 @@ function simulateMonth(
     ctx.totalEverCreated++
   }
   
-  // Lifecycle: resets + zombies
+  // SINGLE PASS: lifecycle, verification, profit accumulation, and eligible collection
   let resetsThisMonth = 0, resetRevenue = 0, zombieAccountsCompleted = 0
   const lifetimeCap = knobs.lifetimeCapPerUser
   const monthlyResetProb = 1 - Math.pow(1 - assumptions.resetRate, 1/12)
+  let activeCohortSize = 0, eligibleCohortSize = 0
+  const eligibleAccounts: AccountState[] = []
+  const toRemove: number[] = []
   
-  ctx.accountStates.forEach(state => {
-    if (!state.isActive || state.isCompleted) return
+  ctx.accountStates.forEach((state, id) => {
+    if (state.isCompleted || !state.isActive) {
+      toRemove.push(id) // Prune dead accounts to save memory
+      return
+    }
+    
+    // Zombie check
     if (lifetimeCap !== null) {
       const headroom = lifetimeCap - state.lifetimePaidTotal
       if (headroom > 0 && headroom < 50) {
         completeAccount(state, 'zombie', ctx)
         zombieAccountsCompleted++
+        toRemove.push(id)
         return
       }
     }
+    
+    // Reset check
     if (random() < monthlyResetProb) {
       resetsThisMonth++
       resetRevenue += knobs.resetPrice
@@ -290,40 +301,45 @@ function simulateMonth(
       state.monthsSinceLastPayout = 0
       state.winningDaysSinceLastPayout = 0
     }
-  })
-  
-  // Verification + profit accumulation
-  ctx.accountStates.forEach(state => {
-    if (!state.isActive || state.isCompleted) return
+    
+    // Verification phase
     if (state.phase === 'verification' && knobs.verificationMonths > 0) {
       if (knobs.verificationFailRate > 0 && random() < knobs.verificationFailRate) {
         state.isActive = false
+        toRemove.push(id)
         return
       }
       if (monthIndex - state.verificationStartMonth >= knobs.verificationMonths) {
         state.phase = 'funded'
       }
     }
+    
+    // Profit accumulation for funded accounts
     if (state.phase === 'funded') {
       const monthlyPnl = logNormal(random, 200, 180) * (random() < 0.65 ? 1 : -0.7)
       state.profitSinceLastPayout += monthlyPnl
       state.monthsSinceLastPayout++
-      let winningDays = 0
-      for (let d = 0; d < 22; d++) { if (random() < 0.55) winningDays++ }
-      state.winningDaysSinceLastPayout += winningDays
+      // Batch winning days: binomial approx instead of 22 individual rolls
+      const p = 0.55, n = 22
+      const mean = n * p, stddev = Math.sqrt(n * p * (1 - p))
+      const u1 = random(), u2 = random()
+      const z = Math.sqrt(-2 * Math.log(u1 || 1e-10)) * Math.cos(2 * Math.PI * u2)
+      state.winningDaysSinceLastPayout += Math.max(0, Math.min(n, Math.round(mean + stddev * z)))
+    }
+    
+    activeCohortSize++
+    if (state.phase === 'funded' && monthIndex >= state.eligibleMonth) {
+      eligibleCohortSize++
+      eligibleAccounts.push(state)
     }
   })
+  
+  // Prune completed accounts from Map
+  for (const id of toRemove) ctx.accountStates.delete(id)
   
   // Payout processing
   let totalPayouts = 0, firstPayoutCapHits = 0, lifetimeCapHits = 0, lifetimeCapRejections = 0
   let accountsCompletedThisMonth = 0, payoutRequestCount = 0, payoutApprovedCount = 0
-  
-  const eligibleAccounts: AccountState[] = []
-  ctx.accountStates.forEach(state => {
-    if (state.isActive && !state.isCompleted && state.phase === 'funded' && monthIndex >= state.eligibleMonth) {
-      eligibleAccounts.push(state)
-    }
-  })
   
   for (const account of eligibleAccounts) {
     if (random() > payoutRequestRate) continue
@@ -370,14 +386,6 @@ function simulateMonth(
     }
   }
   
-  let activeCohortSize = 0, eligibleCohortSize = 0
-  ctx.accountStates.forEach(state => {
-    if (state.isActive && !state.isCompleted) {
-      activeCohortSize++
-      if (monthIndex >= state.eligibleMonth) eligibleCohortSize++
-    }
-  })
-  
   const fraudAttempts = eligibleAccounts.length * fraudAttemptRate
   const successfulFrauds = fraudAttempts * fraudSuccessRate
   const avgFraudPayout = logNormal(random, assumptions.avgPayoutAmount.mean * 1.3, assumptions.avgPayoutAmount.stdDev * 1.5)
@@ -417,17 +425,20 @@ function runSimulation(iterations: number, months: number, seed: number, assumpt
     const ctx: SimContext = {
       accountStates: new Map(), nextAccountId: 1, totalEverCreated: 0, totalEverCompleted: 0,
     }
+    let iterCapHits = 0
     
     for (let month = 0; month < months; month++) {
       const result = simulateMonth(assumptions, random, ctx, month)
       monthProfits.push(result.netProfit)
       monthColumns[month].push(result.netProfit)
       totalPayoutsApproved += result.payoutDetails.approvedCount
+      iterCapHits += result.payoutDetails.accountsCompletedByCap
     }
     
     allMonthlyProfits.push(monthProfits)
     totalAccountsCreated += ctx.totalEverCreated
-    ctx.accountStates.forEach(s => { if (s.completedByCapHit) totalCapHits++ })
+    totalCapHits += iterCapHits
+    // No post-iteration Map scan needed — cap hits counted inline
   }
   
   // Compute per-month percentile bands
