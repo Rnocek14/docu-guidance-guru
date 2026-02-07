@@ -94,7 +94,14 @@ export default function AccountDetails() {
     enabled: !!user?.id,
   });
 
-  // Fetch consistency rules (for active accounts)
+  const ruleSnapshot = account?.rule_snapshot as RuleSnapshot | null;
+
+  // Fetch consistency rules (only for active eval/verification accounts that have consistency config)
+  const cohortPhase = (ruleSnapshot as any)?.cohort_phase;
+  const hasConsistencyRules = ruleSnapshot && (
+    (ruleSnapshot as any).max_daily_profit_cap_percent != null ||
+    ((ruleSnapshot as any).min_profitable_days ?? 0) > 0
+  );
   const { data: consistency } = useQuery({
     queryKey: ['account-consistency', id],
     queryFn: async () => {
@@ -111,10 +118,8 @@ export default function AccountDetails() {
         all_consistency_met: boolean;
       };
     },
-    enabled: !!id && account?.status === 'active',
+    enabled: !!id && account?.status === 'active' && cohortPhase !== 'performance' && !!hasConsistencyRules,
   });
-
-  const ruleSnapshot = account?.rule_snapshot as RuleSnapshot | null;
   const status = statusLabels[account?.status || 'active'] || statusLabels.active;
   const showPayoutButton = account?.status === 'passed';
   
