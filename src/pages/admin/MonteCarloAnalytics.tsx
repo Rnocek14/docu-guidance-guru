@@ -1,21 +1,20 @@
 import { useState, useCallback, useMemo } from 'react';
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Slider } from '@/components/ui/slider';
-import { Label } from '@/components/ui/label';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  ResponsiveContainer, ReferenceLine, Area, AreaChart,
+  ResponsiveContainer, ReferenceLine, Area, AreaChart, Line,
 } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from '@/components/ui/chart';
 import {
-  Play, RefreshCw, TrendingUp, TrendingDown, AlertTriangle,
-  Shield, Server, Zap, Info,
+  TrendingUp, TrendingDown, AlertTriangle, Shield, Zap, Info, Play,
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
+import { SimulationControls, type SimOverrides } from '@/components/admin/SimulationControls';
+import { RiskReportTab } from '@/components/admin/RiskReportTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,16 +34,24 @@ interface ServerSimResult {
   };
 }
 
+interface SavedComparison {
+  label: string;
+  overrides: SimOverrides;
+  result: ServerSimResult;
+}
+
 // ─── Chart configs ────────────────────────────────────────────────────────────
 
 const bandChartConfig: ChartConfig = {
   p5: { label: 'P5 (Worst)', color: 'hsl(var(--destructive))' },
   p50: { label: 'P50 (Median)', color: 'hsl(var(--chart-1))' },
   p95: { label: 'P95 (Best)', color: 'hsl(var(--chart-3))' },
+  prev_p50: { label: 'Prev P50', color: 'hsl(var(--muted-foreground))' },
 };
 
 const histogramConfig: ChartConfig = {
   count: { label: 'Iterations', color: 'hsl(var(--chart-1))' },
+  prev_count: { label: 'Previous', color: 'hsl(var(--muted-foreground))' },
 };
 
 // ─── Verdict helper ───────────────────────────────────────────────────────────
@@ -61,14 +68,27 @@ function getVerdict(r: ServerSimResult['results']) {
   return { score, checks };
 }
 
+// ─── Default overrides ────────────────────────────────────────────────────────
+
+const DEFAULT_OVERRIDES: SimOverrides = {
+  accountsPerMonth: 150,
+  fixedMonthlyCosts: 6000,
+  entryFee: 149,
+  resetFee: 99,
+  horizon: 12,
+  attackIntensity: 0,
+  iterations: 2000,
+  reserveThreshold: 16000,
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function MonteCarloAnalytics() {
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<ServerSimResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [iterations, setIterations] = useState([2000]);
-  const [reserveThreshold, setReserveThreshold] = useState([16000]);
+  const [overrides, setOverrides] = useState<SimOverrides>(DEFAULT_OVERRIDES);
+  const [comparison, setComparison] = useState<SavedComparison | null>(null);
 
   const runServerSimulation = useCallback(async () => {
     setIsRunning(true);
@@ -86,10 +106,19 @@ export default function MonteCarloAnalytics() {
             'Authorization': `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
-            iterations: iterations[0],
-            months: 12,
+            iterations: overrides.iterations,
+            months: overrides.horizon,
             seed: 42,
-            reserve_threshold: reserveThreshold[0],
+            reserve_threshold: overrides.reserveThreshold,
+            overrides: {
+              accountsPerMonth: overrides.accountsPerMonth,
+              fixedMonthlyCosts: overrides.fixedMonthlyCosts,
+              pricePerAccount: overrides.entryFee,
+              knobs: {
+                resetPrice: overrides.resetFee,
+                attackIntensity: overrides.attackIntensity,
+              },
+            },
           }),
         }
       );
@@ -102,70 +131,81 @@ export default function MonteCarloAnalytics() {
     } finally {
       setIsRunning(false);
     }
-  }, [iterations, reserveThreshold]);
+  }, [overrides]);
+
+  const handleSaveComparison = useCallback(() => {
+    if (!result) return;
+    setComparison({
+      label: `${overrides.accountsPerMonth} accts, $${(overrides.fixedMonthlyCosts / 1000).toFixed(0)}k costs`,
+      overrides: { ...overrides },
+      result,
+    });
+  }, [result, overrides]);
 
   const verdict = useMemo(() => result ? getVerdict(result.results) : null, [result]);
-
   const fmt = (v: number) => '$' + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
   const pct = (v: number) => (v * 100).toFixed(1) + '%';
+
+  // Merge band data for comparison overlay
+  const bandData = useMemo(() => {
+    if (!result) return [];
+    return result.results.monthlyBands.map((b, i) => ({
+      month: i + 1,
+      ...b,
+      ...(comparison ? {
+        prev_p5: comparison.result.results.monthlyBands[i]?.p5,
+        prev_p50: comparison.result.results.monthlyBands[i]?.p50,
+        prev_p95: comparison.result.results.monthlyBands[i]?.p95,
+      } : {}),
+    }));
+  }, [result, comparison]);
+
+  // Merge histogram data for comparison overlay
+  const histogramData = useMemo(() => {
+    if (!result) return [];
+    if (!comparison) return result.results.histogram;
+    const map = new Map<number, { bucket: number; count: number; prev_count: number }>();
+    for (const h of result.results.histogram) {
+      map.set(h.bucket, { ...h, prev_count: 0 });
+    }
+    for (const h of comparison.result.results.histogram) {
+      const existing = map.get(h.bucket);
+      if (existing) existing.prev_count = h.count;
+      else map.set(h.bucket, { bucket: h.bucket, count: 0, prev_count: h.count });
+    }
+    return Array.from(map.values()).sort((a, b) => a.bucket - b.bucket);
+  }, [result, comparison]);
 
   return (
     <DashboardLayout title="Monte Carlo Analytics" navItems={adminNavItems}>
       <div className="space-y-6">
-        {/* Header + Controls */}
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight">Economic Simulation</h2>
-            <p className="text-muted-foreground">
-              Server-side Monte Carlo using your live cohort rules. Results are persisted for audit.
-            </p>
-          </div>
-          <Button onClick={runServerSimulation} disabled={isRunning} size="lg">
-            {isRunning ? (
-              <><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Running ({iterations[0].toLocaleString()} iterations)...</>
-            ) : (
-              <><Play className="mr-2 h-4 w-4" />Run Simulation</>
-            )}
-          </Button>
+        {/* Header */}
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Economic Simulation</h2>
+          <p className="text-muted-foreground">
+            Server-side Monte Carlo using your live cohort rules. Results are persisted for audit.
+          </p>
         </div>
 
-        {/* Parameter Controls */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Server className="h-5 w-5 text-muted-foreground" />
-              <CardTitle className="text-lg">Simulation Parameters</CardTitle>
-            </div>
-            <CardDescription>
-              Uses real cohort configs from your database — evaluation, verification &amp; performance phases.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-6 md:grid-cols-2">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Iterations</Label>
-                  <span className="text-sm font-medium">{iterations[0].toLocaleString()}</span>
-                </div>
-                <Slider value={iterations} onValueChange={setIterations} min={500} max={5000} step={500} />
-                <p className="text-xs text-muted-foreground">More iterations = more accurate tail risk estimates</p>
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Reserve Threshold</Label>
-                  <span className="text-sm font-medium">${reserveThreshold[0].toLocaleString()}</span>
-                </div>
-                <Slider value={reserveThreshold} onValueChange={setReserveThreshold} min={5000} max={50000} step={1000} />
-                <p className="text-xs text-muted-foreground">Cash reserve level to test breach probability</p>
-              </div>
-            </div>
-            {error && (
-              <div className="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Controls */}
+        <SimulationControls
+          overrides={overrides}
+          onChange={setOverrides}
+          onRun={runServerSimulation}
+          onCompare={handleSaveComparison}
+          isRunning={isRunning}
+          hasResult={!!result}
+          error={error}
+        />
+
+        {/* Comparison indicator */}
+        {comparison && (
+          <div className="flex items-center gap-2 rounded-lg border border-muted bg-muted/30 p-3 text-sm">
+            <span className="text-muted-foreground">Comparing against:</span>
+            <Badge variant="outline">{comparison.label}</Badge>
+            <Button variant="ghost" size="sm" onClick={() => setComparison(null)}>Clear</Button>
+          </div>
+        )}
 
         {result ? (
           <>
@@ -194,7 +234,7 @@ export default function MonteCarloAnalytics() {
                         {verdict && verdict.score >= 75 ? 'PROFITABLE' : verdict && verdict.score >= 50 ? 'MARGINAL' : 'UNPROFITABLE'}
                       </h3>
                       <p className="text-sm text-muted-foreground">
-                        Based on {iterations[0].toLocaleString()} iterations × 12 months using live cohort rules
+                        {overrides.iterations.toLocaleString()} iterations × {overrides.horizon} months using live cohort rules
                       </p>
                     </div>
                   </div>
@@ -211,80 +251,38 @@ export default function MonteCarloAnalytics() {
 
             {/* Key Metrics Grid */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">12-Month Profit</CardTitle>
-                  {result.results.annual.mean >= 0 ? (
-                    <TrendingUp className="h-4 w-4 text-success" />
-                  ) : (
-                    <TrendingDown className="h-4 w-4 text-destructive" />
-                  )}
-                </CardHeader>
-                <CardContent>
-                  <div className={`text-2xl font-bold ${result.results.annual.mean >= 0 ? 'text-success' : 'text-destructive'}`}>
-                    {fmt(result.results.annual.mean)}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    P5: {fmt(result.results.annual.p5)} / P95: {fmt(result.results.annual.p95)}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Monthly Profit (avg)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className={`text-2xl font-bold ${result.results.profit.mean >= 0 ? 'text-success' : 'text-destructive'}`}>
-                    {fmt(result.results.profit.mean)}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    P5: {fmt(result.results.profit.p5)} / P95: {fmt(result.results.profit.p95)}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Annual Loss Prob</CardTitle>
-                  <AlertTriangle className={`h-4 w-4 ${result.results.annual.lossProb > 0.1 ? 'text-destructive' : 'text-muted-foreground'}`} />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{pct(result.results.annual.lossProb)}</div>
-                  <p className="text-xs text-muted-foreground">
-                    Monthly loss: {pct(result.results.risk.probabilityOfLoss)}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Reserve Breach</CardTitle>
-                  <Shield className={`h-4 w-4 ${result.results.reserve.breachProbability > 0.1 ? 'text-destructive' : 'text-success'}`} />
-                </CardHeader>
-                <CardContent>
-                  <div className={`text-2xl font-bold ${result.results.reserve.breachProbability > 0.1 ? 'text-destructive' : 'text-success'}`}>
-                    {pct(result.results.reserve.breachProbability)}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Threshold: {fmt(result.results.reserve.threshold)}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Worst Month</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-destructive">
-                    {fmt(result.results.risk.worstMonth)}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Best: {fmt(result.results.risk.bestMonth)}
-                  </p>
-                </CardContent>
-              </Card>
+              <MetricCard
+                title={`${overrides.horizon}-Mo Profit`}
+                value={fmt(result.results.annual.mean)}
+                positive={result.results.annual.mean >= 0}
+                icon={result.results.annual.mean >= 0 ? <TrendingUp className="h-4 w-4 text-success" /> : <TrendingDown className="h-4 w-4 text-destructive" />}
+                detail={`P5: ${fmt(result.results.annual.p5)} / P95: ${fmt(result.results.annual.p95)}`}
+              />
+              <MetricCard
+                title="Monthly Profit (avg)"
+                value={fmt(result.results.profit.mean)}
+                positive={result.results.profit.mean >= 0}
+                detail={`P5: ${fmt(result.results.profit.p5)} / P95: ${fmt(result.results.profit.p95)}`}
+              />
+              <MetricCard
+                title="Annual Loss Prob"
+                value={pct(result.results.annual.lossProb)}
+                icon={<AlertTriangle className={`h-4 w-4 ${result.results.annual.lossProb > 0.1 ? 'text-destructive' : 'text-muted-foreground'}`} />}
+                detail={`Monthly loss: ${pct(result.results.risk.probabilityOfLoss)}`}
+              />
+              <MetricCard
+                title="Reserve Breach"
+                value={pct(result.results.reserve.breachProbability)}
+                positive={result.results.reserve.breachProbability <= 0.1}
+                icon={<Shield className={`h-4 w-4 ${result.results.reserve.breachProbability > 0.1 ? 'text-destructive' : 'text-success'}`} />}
+                detail={`Threshold: ${fmt(result.results.reserve.threshold)}`}
+              />
+              <MetricCard
+                title="Worst Month"
+                value={fmt(result.results.risk.worstMonth)}
+                positive={false}
+                detail={`Best: ${fmt(result.results.risk.bestMonth)}`}
+              />
             </div>
 
             {/* Charts */}
@@ -292,6 +290,7 @@ export default function MonteCarloAnalytics() {
               <TabsList>
                 <TabsTrigger value="bands">Monthly Bands</TabsTrigger>
                 <TabsTrigger value="histogram">Profit Distribution</TabsTrigger>
+                <TabsTrigger value="risk">Risk Report</TabsTrigger>
                 <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
               </TabsList>
 
@@ -300,13 +299,14 @@ export default function MonteCarloAnalytics() {
                   <CardHeader>
                     <CardTitle>Monthly Profit Bands (P5 / P50 / P95)</CardTitle>
                     <CardDescription>
-                      Confidence bands across {iterations[0].toLocaleString()} iterations — shows margin compression over time
+                      Confidence bands across {overrides.iterations.toLocaleString()} iterations
+                      {comparison && ' — dashed lines show previous run'}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <ChartContainer config={bandChartConfig} className="h-[350px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={result.results.monthlyBands.map((b, i) => ({ month: i + 1, ...b }))}>
+                        <AreaChart data={bandData}>
                           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                           <XAxis dataKey="month" tickFormatter={(v) => `M${v}`} className="text-xs" />
                           <YAxis tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} className="text-xs" />
@@ -315,27 +315,12 @@ export default function MonteCarloAnalytics() {
                           <Area type="monotone" dataKey="p95" stroke="hsl(var(--chart-3))" fill="hsl(var(--chart-3))" fillOpacity={0.15} />
                           <Area type="monotone" dataKey="p50" stroke="hsl(var(--chart-1))" fill="hsl(var(--chart-1))" fillOpacity={0.25} />
                           <Area type="monotone" dataKey="p5" stroke="hsl(var(--destructive))" fill="hsl(var(--destructive))" fillOpacity={0.15} />
+                          {comparison && (
+                            <Line type="monotone" dataKey="prev_p50" stroke="hsl(var(--muted-foreground))" strokeDasharray="6 3" dot={false} />
+                          )}
                         </AreaChart>
                       </ResponsiveContainer>
                     </ChartContainer>
-                    <div className="mt-4 grid grid-cols-3 gap-4 text-center">
-                      <div className="rounded-lg bg-muted p-3">
-                        <div className="text-sm text-muted-foreground">Month 1 (median)</div>
-                        <div className="text-lg font-semibold text-success">{fmt(result.results.monthlyBands[0]?.p50 ?? 0)}</div>
-                      </div>
-                      <div className="rounded-lg bg-muted p-3">
-                        <div className="text-sm text-muted-foreground">Month 6 (median)</div>
-                        <div className={`text-lg font-semibold ${(result.results.monthlyBands[5]?.p50 ?? 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
-                          {fmt(result.results.monthlyBands[5]?.p50 ?? 0)}
-                        </div>
-                      </div>
-                      <div className="rounded-lg bg-muted p-3">
-                        <div className="text-sm text-muted-foreground">Month 12 (median)</div>
-                        <div className={`text-lg font-semibold ${(result.results.monthlyBands[11]?.p50 ?? 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
-                          {fmt(result.results.monthlyBands[11]?.p50 ?? 0)}
-                        </div>
-                      </div>
-                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -343,26 +328,31 @@ export default function MonteCarloAnalytics() {
               <TabsContent value="histogram">
                 <Card>
                   <CardHeader>
-                    <CardTitle>12-Month Cumulative Profit Distribution</CardTitle>
-                    <CardDescription>
-                      How many iterations ended at each profit level
-                    </CardDescription>
+                    <CardTitle>{overrides.horizon}-Month Cumulative Profit Distribution</CardTitle>
+                    <CardDescription>How many iterations ended at each profit level</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <ChartContainer config={histogramConfig} className="h-[300px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={result.results.histogram}>
+                        <BarChart data={histogramData}>
                           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                           <XAxis dataKey="bucket" tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} className="text-xs" />
                           <YAxis className="text-xs" />
                           <ChartTooltip content={<ChartTooltipContent />} formatter={(value, _name, props) => [`${value} iterations`, `${fmt(props.payload.bucket)}`]} />
                           <ReferenceLine x={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="5 5" />
                           <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
+                          {comparison && (
+                            <Bar dataKey="prev_count" fill="hsl(var(--muted-foreground))" radius={[4, 4, 0, 0]} fillOpacity={0.4} />
+                          )}
                         </BarChart>
                       </ResponsiveContainer>
                     </ChartContainer>
                   </CardContent>
                 </Card>
+              </TabsContent>
+
+              <TabsContent value="risk">
+                <RiskReportTab results={result.results} overrides={overrides} />
               </TabsContent>
 
               <TabsContent value="diagnostics">
@@ -418,60 +408,12 @@ export default function MonteCarloAnalytics() {
                   <Info className="mt-0.5 h-4 w-4 shrink-0" />
                   <div>
                     <strong>Note on Max Drawdown:</strong> The {fmt(result.results.risk.maxDrawdown)} figure is the worst
-                    cumulative peak-to-trough across all {iterations[0].toLocaleString()} iterations — a statistical tail extreme,
+                    cumulative peak-to-trough across all {overrides.iterations.toLocaleString()} iterations — a statistical tail extreme,
                     not a realistic single-month loss. The operationally relevant risk metric is <strong>Worst Month ({fmt(result.results.risk.worstMonth)})</strong>.
                   </div>
                 </div>
               </TabsContent>
             </Tabs>
-
-            {/* Metadata */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Quick Scenario Reference</CardTitle>
-                <CardDescription>Compare different cap configurations</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="py-2 text-left font-medium">Scenario</th>
-                        <th className="py-2 text-right font-medium">Cap Amount</th>
-                        <th className="py-2 text-right font-medium">Expected Margin</th>
-                        <th className="py-2 text-right font-medium">Risk Level</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className="border-b">
-                        <td className="py-2">No Cap (Baseline)</td>
-                        <td className="py-2 text-right">Unlimited</td>
-                        <td className="py-2 text-right text-destructive">-33%</td>
-                        <td className="py-2 text-right"><Badge variant="destructive">Critical</Badge></td>
-                      </tr>
-                      <tr className="border-b">
-                        <td className="py-2">8× Cap</td>
-                        <td className="py-2 text-right">$1,192</td>
-                        <td className="py-2 text-right text-warning">~0%</td>
-                        <td className="py-2 text-right"><Badge variant="secondary">Breakeven</Badge></td>
-                      </tr>
-                      <tr className="border-b bg-muted/50">
-                        <td className="py-2 font-medium">7× Cap (Current)</td>
-                        <td className="py-2 text-right font-medium">$1,043</td>
-                        <td className="py-2 text-right font-medium text-success">+6.8%</td>
-                        <td className="py-2 text-right"><Badge className="bg-success text-success-foreground">Safe</Badge></td>
-                      </tr>
-                      <tr>
-                        <td className="py-2">5× Cap (Conservative)</td>
-                        <td className="py-2 text-right">$745</td>
-                        <td className="py-2 text-right text-success">+15%</td>
-                        <td className="py-2 text-right"><Badge className="bg-success text-success-foreground">Very Safe</Badge></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
           </>
         ) : (
           <Card className="border-dashed">
@@ -490,5 +432,26 @@ export default function MonteCarloAnalytics() {
         )}
       </div>
     </DashboardLayout>
+  );
+}
+
+// ─── Reusable metric card ─────────────────────────────────────────────────────
+
+function MetricCard({ title, value, positive, icon, detail }: {
+  title: string; value: string; positive?: boolean; icon?: React.ReactNode; detail: string;
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        {icon}
+      </CardHeader>
+      <CardContent>
+        <div className={`text-2xl font-bold ${positive === true ? 'text-success' : positive === false ? 'text-destructive' : ''}`}>
+          {value}
+        </div>
+        <p className="text-xs text-muted-foreground">{detail}</p>
+      </CardContent>
+    </Card>
   );
 }
