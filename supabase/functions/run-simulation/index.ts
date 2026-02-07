@@ -536,17 +536,15 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 
-  // Use anon key + JWT for proper token validation (canonical pattern)
-  const anonClient = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
-  })
+  // Stateless anon client — no header propagation needed
+  const anonClient = createClient(supabaseUrl, anonKey)
   const serviceClient = createClient(
     supabaseUrl,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   )
 
-  // Verify caller identity via getUser (not getClaims which doesn't exist)
-  const { data: userData, error: userError } = await anonClient.auth.getUser()
+  // Verify caller identity by passing JWT directly (canonical Edge Function pattern)
+  const { data: userData, error: userError } = await anonClient.auth.getUser(jwt)
   if (userError || !userData?.user) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   }
@@ -633,6 +631,23 @@ Deno.serve(async (req) => {
 
     if (insertError) {
       console.error('Failed to persist simulation:', insertError)
+    }
+
+    // Auto-link this run_id into the reserve-aware gate config
+    if (inserted?.id) {
+      const { data: currentSetting } = await serviceClient
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'reserve_aware_approval')
+        .single()
+
+      if (currentSetting?.value) {
+        const updatedValue = { ...(currentSetting.value as Record<string, unknown>), last_simulation_run_id: inserted.id }
+        await serviceClient
+          .from('system_settings')
+          .update({ value: updatedValue })
+          .eq('key', 'reserve_aware_approval')
+      }
     }
 
     return new Response(
