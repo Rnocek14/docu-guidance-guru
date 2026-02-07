@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { SimulationControls, type SimOverrides } from '@/components/admin/SimulationControls';
 import { RiskReportTab } from '@/components/admin/RiskReportTab';
+import { CustomerGrowthTab } from '@/components/admin/CustomerGrowthTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ interface ServerSimResult {
     reserve: { breachProbability: number; threshold: number };
     annual: { p5: number; p50: number; p95: number; lossProb: number; mean: number };
     monthlyBands: { p5: number; p50: number; p95: number; mean: number }[];
+    cohortBands?: { totalAccounts: number; eligible: number; firstPayout: number; capHits: number }[];
     histogram: { bucket: number; count: number }[];
     diagnostics: { avgPayoutsPerAccount: number; lifetimeCapHitRate: number };
   };
@@ -234,7 +236,9 @@ export default function MonteCarloAnalytics() {
                         {verdict && verdict.score >= 75 ? 'PROFITABLE' : verdict && verdict.score >= 50 ? 'MARGINAL' : 'UNPROFITABLE'}
                       </h3>
                       <p className="text-sm text-muted-foreground">
-                        {overrides.iterations.toLocaleString()} iterations × {overrides.horizon} months using live cohort rules
+                        {overrides.iterations.toLocaleString()} iterations × {overrides.horizon} months
+                        {' | '}{(overrides.accountsPerMonth * overrides.horizon).toLocaleString()} customers ({overrides.accountsPerMonth}/mo)
+                        {' | '}live cohort rules
                       </p>
                     </div>
                   </div>
@@ -289,6 +293,7 @@ export default function MonteCarloAnalytics() {
             <Tabs defaultValue="bands" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="bands">Monthly Bands</TabsTrigger>
+                <TabsTrigger value="customers">Customers</TabsTrigger>
                 <TabsTrigger value="histogram">Profit Distribution</TabsTrigger>
                 <TabsTrigger value="risk">Risk Report</TabsTrigger>
                 <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
@@ -323,6 +328,22 @@ export default function MonteCarloAnalytics() {
                     </ChartContainer>
                   </CardContent>
                 </Card>
+              </TabsContent>
+
+              <TabsContent value="customers">
+                {result.results.cohortBands ? (
+                  <CustomerGrowthTab
+                    cohortBands={result.results.cohortBands}
+                    accountsPerMonth={overrides.accountsPerMonth}
+                    horizon={overrides.horizon}
+                  />
+                ) : (
+                  <Card>
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      Re-run the simulation to see customer growth data (requires updated edge function).
+                    </CardContent>
+                  </Card>
+                )}
               </TabsContent>
 
               <TabsContent value="histogram">
@@ -362,6 +383,8 @@ export default function MonteCarloAnalytics() {
                     <CardContent>
                       <div className="space-y-3">
                         {[
+                          ['Total Customers Simulated', (overrides.accountsPerMonth * overrides.horizon).toLocaleString()],
+                          ['Peak Eligible Pool', result.results.cohortBands ? Math.max(...result.results.cohortBands.map(b => b.eligible)).toLocaleString() : 'n/a'],
                           ['Avg Payouts / Account', result.results.diagnostics.avgPayoutsPerAccount.toFixed(3)],
                           ['Lifetime Cap Hit Rate', pct(result.results.diagnostics.lifetimeCapHitRate)],
                           ['Max Drawdown (tail)', fmt(result.results.risk.maxDrawdown)],
