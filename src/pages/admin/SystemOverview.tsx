@@ -4,9 +4,12 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { format, subDays } from 'date-fns';
+import { useState } from 'react';
+import { toast } from 'sonner';
 import {
   Shield,
   AlertTriangle,
@@ -25,6 +28,7 @@ import {
   AlertOctagon,
   Loader2,
   RefreshCw,
+  Play,
 } from 'lucide-react';
 
 interface SystemStats {
@@ -80,6 +84,42 @@ interface SystemStats {
 
 export default function SystemOverview() {
   // Fetch all system stats
+  const [snapshotRunning, setSnapshotRunning] = useState(false);
+
+  const runRiskSnapshot = async () => {
+    setSnapshotRunning(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast.error('No active session — please log in first');
+        return;
+      }
+
+      const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/daily-risk-snapshot`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+
+      const json = await res.json();
+      console.log('daily-risk-snapshot:', res.status, json);
+
+      if (res.ok) {
+        toast.success(`Snapshot created (${json.alarms_count} alarms). triggered_by=${json.triggered_by}`);
+      } else {
+        toast.error(`Snapshot failed: ${res.status} — ${json.error || JSON.stringify(json)}`);
+      }
+    } catch (err) {
+      console.error('Risk snapshot error:', err);
+      toast.error(`Snapshot error: ${(err as Error).message}`);
+    } finally {
+      setSnapshotRunning(false);
+    }
+  };
+
   const { data: stats, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['admin-system-stats'],
     queryFn: async (): Promise<SystemStats> => {
@@ -289,6 +329,16 @@ export default function SystemOverview() {
               {riskLevel.level === 'Normal' && <CheckCircle className="h-4 w-4 mr-1" />}
               Risk: {riskLevel.level}
             </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={runRiskSnapshot}
+              disabled={snapshotRunning}
+              className="gap-2"
+            >
+              {snapshotRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              Run Risk Snapshot
+            </Button>
             <button
               onClick={() => refetch()}
               className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
