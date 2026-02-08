@@ -183,6 +183,7 @@ export type Database = {
           rule_snapshot: Json | null
           starting_balance: number
           status: Database["public"]["Enums"]["account_status"]
+          stripe_session_id: string | null
           total_pnl: number
           trading_days_count: number
           updated_at: string
@@ -209,6 +210,7 @@ export type Database = {
           rule_snapshot?: Json | null
           starting_balance?: number
           status?: Database["public"]["Enums"]["account_status"]
+          stripe_session_id?: string | null
           total_pnl?: number
           trading_days_count?: number
           updated_at?: string
@@ -235,6 +237,7 @@ export type Database = {
           rule_snapshot?: Json | null
           starting_balance?: number
           status?: Database["public"]["Enums"]["account_status"]
+          stripe_session_id?: string | null
           total_pnl?: number
           trading_days_count?: number
           updated_at?: string
@@ -2200,6 +2203,16 @@ export type Database = {
         Args: { _method_hash: string; _user_id: string }
         Returns: Json
       }
+      claim_checkout_fulfillment: {
+        Args: { p_session_id: string }
+        Returns: {
+          fulfilled_account_id: string
+          id: string
+          status: string
+          tier_id: string
+          user_id: string
+        }[]
+      }
       confirm_payout_payment: {
         Args: {
           _confirmed_at?: string
@@ -2278,6 +2291,24 @@ export type Database = {
           _raw_webhook?: Json
         }
         Returns: Json
+      }
+      fulfill_checkout_session: {
+        Args: {
+          p_account_number: string
+          p_account_size: number
+          p_amount_cents: number
+          p_cohort_id: string
+          p_currency: string
+          p_disclaimer_version?: string
+          p_payment_intent: string
+          p_product_description?: string
+          p_queue_id: string
+          p_rule_snapshot: Json
+          p_stripe_session_id: string
+          p_tier_id: string
+          p_user_id: string
+        }
+        Returns: string
       }
       get_cohort_account_stats: {
         Args: never
