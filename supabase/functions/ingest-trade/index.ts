@@ -476,8 +476,11 @@ Deno.serve(async (req) => {
     if (mappingError || !platformAccount) {
       // Log unknown platform account to audit
       await supabase.from('audit_logs').insert({
-        action: 'account_created', // Using closest available action
+        action: 'status_changed',
         request_id: requestId,
+        idempotency_key: `audit.ingest:unknown_acct:${payload.platform_account_id}:${payload.platform_trade_id}`,
+        prev_hash: 'COMPUTED_BY_TRIGGER',
+        row_hash: 'COMPUTED_BY_TRIGGER',
         details: {
           type: 'unknown_platform_account',
           platform_account_id: payload.platform_account_id,
@@ -571,6 +574,9 @@ Deno.serve(async (req) => {
         account_id: accountId,
         action: 'status_changed',
         request_id: requestId,
+        idempotency_key: `audit.ingest:trade_fail:${accountId}:${payload.platform_trade_id}`,
+        prev_hash: 'COMPUTED_BY_TRIGGER',
+        row_hash: 'COMPUTED_BY_TRIGGER',
         details: {
           type: 'trade_insert_failed',
           error: tradeError.message,
@@ -660,6 +666,9 @@ Deno.serve(async (req) => {
         account_id: accountId,
         action: 'status_changed',
         request_id: requestId,
+        idempotency_key: `audit.ingest:update_fail:${accountId}:${insertedTrade?.id ?? requestId}`,
+        prev_hash: 'COMPUTED_BY_TRIGGER',
+        row_hash: 'COMPUTED_BY_TRIGGER',
         details: {
           type: 'account_update_failed',
           error: updateError.message,
@@ -706,41 +715,50 @@ Deno.serve(async (req) => {
       }
 
       // Write trader-visible account event (transparency)
-      await supabase.from('account_events').insert({
-        account_id: accountId,
-        event_type: 'breach_detected',
-        request_id: requestId,
-        event_data: {
-          rule: breachResult.rule_type,
-          current_value_pct: breachResult.actual_value?.toFixed(2),
-          limit_pct: breachResult.threshold,
-          description: breachResult.description,
-          threshold_crossed_at: payload.filled_at,
-          trade_id: insertedTrade?.id,
-          // Trader-friendly explanation
-          explanation: `Your account triggered a ${breachResult.rule_type === 'max_daily_loss' ? 'daily loss' : 'total drawdown'} limit. ` +
-            `Current: ${breachResult.actual_value?.toFixed(2)}% | Limit: ${breachResult.threshold}%. ` +
-            `This requires human review before any terminal decision.`,
-          next_step: 'Under review — human confirmation required'
-        }
-      })
+      await supabase.from('account_events').upsert(
+        {
+          account_id: accountId,
+          event_type: 'breach_detected',
+          request_id: requestId,
+          idempotency_key: `acctevt.breach:${accountId}:${breachResult.rule_type}:${insertedTrade?.id ?? requestId}`,
+          event_data: {
+            rule: breachResult.rule_type,
+            current_value_pct: breachResult.actual_value?.toFixed(2),
+            limit_pct: breachResult.threshold,
+            description: breachResult.description,
+            threshold_crossed_at: payload.filled_at,
+            trade_id: insertedTrade?.id,
+            explanation: `Your account triggered a ${breachResult.rule_type === 'max_daily_loss' ? 'daily loss' : 'total drawdown'} limit. ` +
+              `Current: ${breachResult.actual_value?.toFixed(2)}% | Limit: ${breachResult.threshold}%. ` +
+              `This requires human review before any terminal decision.`,
+            next_step: 'Under review — human confirmation required'
+          }
+        },
+        { onConflict: 'idempotency_key', ignoreDuplicates: true }
+      )
 
       // Write internal audit log
-      await supabase.from('audit_logs').insert({
-        account_id: accountId,
-        action: 'breach_detected',
-        request_id: requestId,
-        details: {
-          rule_type: breachResult.rule_type,
-          actual_value: breachResult.actual_value,
-          threshold: breachResult.threshold,
-          trade_id: insertedTrade?.id,
-          platform_trade_id: payload.platform_trade_id,
-          net_pnl: netPnl,
-          new_balance: newBalance
+      await supabase.from('audit_logs').upsert(
+        {
+          account_id: accountId,
+          action: 'breach_detected',
+          request_id: requestId,
+          idempotency_key: `audit.ingest:breach:${accountId}:${breachResult.rule_type}:${insertedTrade?.id ?? requestId}`,
+          prev_hash: 'COMPUTED_BY_TRIGGER',
+          row_hash: 'COMPUTED_BY_TRIGGER',
+          details: {
+            rule_type: breachResult.rule_type,
+            actual_value: breachResult.actual_value,
+            threshold: breachResult.threshold,
+            trade_id: insertedTrade?.id,
+            platform_trade_id: payload.platform_trade_id,
+            net_pnl: netPnl,
+            new_balance: newBalance
+          },
+          reason: breachResult.description
         },
-        reason: breachResult.description
-      })
+        { onConflict: 'idempotency_key', ignoreDuplicates: true }
+      )
     }
 
     // --- AUTO-PASS DETECTION (P0-3) ---
@@ -891,6 +909,9 @@ Deno.serve(async (req) => {
       await supabase.from('audit_logs').insert({
         action: 'status_changed',
         request_id: requestId,
+        idempotency_key: `audit.ingest:error:${requestId}`,
+        prev_hash: 'COMPUTED_BY_TRIGGER',
+        row_hash: 'COMPUTED_BY_TRIGGER',
         details: {
           type: 'ingestion_error',
           error: error.message
