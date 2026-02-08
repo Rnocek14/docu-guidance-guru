@@ -410,6 +410,7 @@ export type Database = {
           id: string
           last_error: string | null
           payment_intent: string | null
+          processing_started_at: string | null
           status: string
           stripe_session_id: string
           tier_id: string
@@ -425,6 +426,7 @@ export type Database = {
           id?: string
           last_error?: string | null
           payment_intent?: string | null
+          processing_started_at?: string | null
           status?: string
           stripe_session_id: string
           tier_id: string
@@ -440,6 +442,7 @@ export type Database = {
           id?: string
           last_error?: string | null
           payment_intent?: string | null
+          processing_started_at?: string | null
           status?: string
           stripe_session_id?: string
           tier_id?: string
