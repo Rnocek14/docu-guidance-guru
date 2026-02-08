@@ -551,6 +551,57 @@ export type Database = {
           },
         ]
       }
+      econ_breaker_state: {
+        Row: {
+          approvals_blocked: boolean
+          breaker_level: string
+          evaluations_frozen: boolean
+          id: string
+          last_evaluated_at: string
+          net_buffer: number | null
+          payouts_blocked: boolean
+          pending_liability: number
+          previous_level: string | null
+          rolling_pass_count: number
+          rolling_pass_rate: number
+          rolling_total_count: number
+          triggered_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          approvals_blocked?: boolean
+          breaker_level?: string
+          evaluations_frozen?: boolean
+          id?: string
+          last_evaluated_at?: string
+          net_buffer?: number | null
+          payouts_blocked?: boolean
+          pending_liability?: number
+          previous_level?: string | null
+          rolling_pass_count?: number
+          rolling_pass_rate?: number
+          rolling_total_count?: number
+          triggered_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          approvals_blocked?: boolean
+          breaker_level?: string
+          evaluations_frozen?: boolean
+          id?: string
+          last_evaluated_at?: string
+          net_buffer?: number | null
+          payouts_blocked?: boolean
+          pending_liability?: number
+          previous_level?: string | null
+          rolling_pass_count?: number
+          rolling_pass_rate?: number
+          rolling_total_count?: number
+          triggered_by?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       flags: {
         Row: {
           account_id: string
@@ -2159,6 +2210,7 @@ export type Database = {
             }
             Returns: Json
           }
+      evaluate_econ_breaker: { Args: never; Returns: undefined }
       fail_payout_payment: {
         Args: {
           _failure_code?: string
@@ -2178,6 +2230,23 @@ export type Database = {
           passed_accounts: number
           passed_no_paid_payout: number
           total_accounts: number
+        }[]
+      }
+      get_econ_breaker_state: {
+        Args: never
+        Returns: {
+          approvals_blocked: boolean
+          breaker_level: string
+          evaluations_frozen: boolean
+          last_evaluated_at: string
+          net_buffer: number
+          payouts_blocked: boolean
+          pending_liability: number
+          previous_level: string
+          rolling_pass_count: number
+          rolling_pass_rate: number
+          rolling_total_count: number
+          triggered_by: string
         }[]
       }
       get_econ_guardrail_status: {
@@ -2334,6 +2403,7 @@ export type Database = {
               reason: string
             }[]
           }
+      simulate_compound_config_impact: { Args: never; Returns: Json }
       spawn_next_phase_account: {
         Args: { _from_account_id: string; _request_id?: string }
         Returns: Json

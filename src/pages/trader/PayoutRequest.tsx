@@ -6,8 +6,7 @@ import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLa
 import { PayoutCoolingCard } from '@/components/trader/PayoutCoolingCard';
 import { PayoutProfitBufferCard } from '@/components/trader/PayoutProfitBufferCard';
 import { PayoutWinningDaysCard } from '@/components/trader/PayoutWinningDaysCard';
-import { PayoutMilestoneCard } from '@/components/trader/PayoutMilestoneCard';
-import { LifetimeHeadroomCard } from '@/components/trader/LifetimeHeadroomCard';
+import { CapProgressCard } from '@/components/trader/CapProgressCard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -224,19 +223,16 @@ export default function PayoutRequest() {
           />
         )}
 
-        {/* Payout Info Cards */}
+        {/* Cap Progress Card (D: brand-safe cap messaging) */}
         {eligibility && isWindowOpen && (
-          <div className="grid gap-4 md:grid-cols-2">
-            <PayoutMilestoneCard
-              firstPayoutCapAmount={account.cohort?.first_payout_cap_amount ?? null}
-              isFirstPayoutInCycle={eligibility.is_first_payout_in_cycle ?? true}
-            />
-            <LifetimeHeadroomCard
-              lifetimeCapAmount={eligibility.lifetime_cap_amount ?? null}
-              lifetimePaidTotal={eligibility.lifetime_paid_total ?? 0}
-              lifetimeHeadroom={eligibility.lifetime_headroom ?? null}
-            />
-          </div>
+          <CapProgressCard
+            lifetimeCapAmount={eligibility.lifetime_cap_amount ?? null}
+            lifetimePaidTotal={eligibility.lifetime_paid_total ?? 0}
+            lifetimeHeadroom={eligibility.lifetime_headroom ?? null}
+            firstPayoutCapAmount={account.cohort?.first_payout_cap_amount ?? null}
+            isFirstPayoutInCycle={eligibility.is_first_payout_in_cycle ?? true}
+            payoutSplitPercent={eligibility.payout_split_percent ?? 80}
+          />
         )}
 
         {/* Payout Request Form */}

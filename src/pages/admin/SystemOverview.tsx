@@ -11,6 +11,8 @@ import { format, subDays } from 'date-fns';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { BreakerStatusPanel } from '@/components/admin/BreakerStatusPanel';
+import { CompoundImpactPanel } from '@/components/admin/CompoundImpactPanel';
 import {
   Shield,
   AlertTriangle,
@@ -430,6 +432,12 @@ export default function SystemOverview() {
             )}
           </div>
         )}
+
+        {/* Circuit Breaker + Compound Impact */}
+        <div className="grid gap-6 md:grid-cols-2">
+          <BreakerStatusPanel />
+          <CompoundImpactPanel />
+        </div>
 
         {/* Account State Distribution */}
         <Card>
