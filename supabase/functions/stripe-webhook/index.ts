@@ -133,24 +133,46 @@ async function handleCheckoutCompleted(
   console.log(`Processing checkout: user=${userId} tier=${tierId} session=${session.id}`)
 
   // PRE-CHECK: Circuit breaker intake freeze.
-  // The DB trigger on accounts INSERT also blocks this, but checking here
-  // prevents "customer paid but account creation failed" support hell.
-  // We give a clear log message and can trigger a refund workflow later.
-  const { data: breakerState } = await supabase
+  // Fail-closed: if RPC errors, row missing, or evaluations frozen → block.
+  // This prevents "customer paid but account creation failed" support hell.
+  const { data: breakerState, error: breakerError } = await supabase
     .from('econ_breaker_state')
     .select('evaluations_frozen, breaker_level')
     .eq('id', '00000000-0000-0000-0000-000000000001')
     .single()
 
-  // Fail-closed: if we can't read breaker state, or evaluations are frozen, block.
-  if (!breakerState || breakerState.evaluations_frozen) {
+  if (breakerError || !breakerState || breakerState.evaluations_frozen) {
     const level = breakerState?.breaker_level ?? 'UNKNOWN'
+    const reason = breakerError
+      ? `RPC_ERROR: ${breakerError.message}`
+      : !breakerState
+        ? 'BREAKER_STATE_MISSING'
+        : `EVALUATIONS_FROZEN (level=${level})`
+
     console.error(
-      `BREAKER_INTAKE_BLOCKED: Evaluation intake frozen (level=${level}). ` +
+      `BREAKER_INTAKE_BLOCKED: ${reason}. ` +
       `Customer paid but account NOT created. session=${session.id} user=${userId}. ` +
       `Manual refund or deferred account creation required.`
     )
-    // TODO: Queue for automatic refund or deferred creation when breaker lifts
+
+    // Staff notification for visibility (idempotent per session)
+    await supabase.from('staff_notifications').insert({
+      notification_type: 'intake_blocked',
+      title: '🚨 Paid checkout blocked by breaker',
+      body: `User ${userId} paid for tier ${tierId} but account NOT created. Reason: ${reason}. Session: ${session.id}. Requires manual refund or deferred creation.`,
+      data: {
+        user_id: userId,
+        tier_id: tierId,
+        stripe_session_id: session.id,
+        breaker_level: level,
+        block_reason: reason,
+      },
+      idempotency_key: `intake_blocked:${session.id}`,
+    }).throwOnError().catch(notifErr => {
+      // Don't fail the webhook response over notification insert
+      console.error('Failed to insert intake_blocked notification:', (notifErr as Error).message)
+    })
+
     return
   }
 
