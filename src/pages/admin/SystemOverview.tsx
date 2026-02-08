@@ -10,6 +10,7 @@ import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client
 import { format, subDays } from 'date-fns';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   Shield,
   AlertTriangle,
@@ -83,6 +84,9 @@ interface SystemStats {
 }
 
 export default function SystemOverview() {
+  const { hasAnyRole } = useAuth();
+  const canRunSnapshot = hasAnyRole(['admin', 'risk_officer']);
+  
   // Fetch all system stats
   const [snapshotRunning, setSnapshotRunning] = useState(false);
 
@@ -95,6 +99,7 @@ export default function SystemOverview() {
         return;
       }
 
+      // SUPABASE_FUNCTIONS_URL = https://<project>.supabase.co/functions/v1
       const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/daily-risk-snapshot`, {
         method: 'POST',
         headers: {
@@ -105,10 +110,28 @@ export default function SystemOverview() {
       });
 
       const json = await res.json();
-      console.log('daily-risk-snapshot:', res.status, json);
+      console.log('daily-risk-snapshot response:', res.status, json);
 
       if (res.ok) {
-        toast.success(`Snapshot created (${json.alarms_count} alarms). triggered_by=${json.triggered_by}`);
+        // Extract proof fields explicitly
+        const triggeredBy = json.triggered_by ?? '(missing)';
+        const alarmsCount = json.alarms_count ?? 0;
+        const econStatus = json.econ_gate?.status ?? '(n/a)';
+        const autoTightenAttempted = json.summary?.auto_tightening_attempted 
+          ?? (json.auto_tightening !== null ? 'see response' : 'false (JWT path)');
+        const snapshotId = json.snapshot_id ?? '(no id)';
+
+        console.log('PROOF FIELDS:', {
+          snapshot_id: snapshotId,
+          triggered_by: triggeredBy,
+          econ_gate_status: econStatus,
+          auto_tightening_attempted: autoTightenAttempted,
+          alarms_count: alarmsCount,
+        });
+
+        toast.success(
+          `Snapshot ${snapshotId} created. triggered_by=${triggeredBy}, econ=${econStatus}, auto_tighten=${autoTightenAttempted}`
+        );
       } else {
         toast.error(`Snapshot failed: ${res.status} — ${json.error || JSON.stringify(json)}`);
       }
@@ -329,16 +352,18 @@ export default function SystemOverview() {
               {riskLevel.level === 'Normal' && <CheckCircle className="h-4 w-4 mr-1" />}
               Risk: {riskLevel.level}
             </Badge>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={runRiskSnapshot}
-              disabled={snapshotRunning}
-              className="gap-2"
-            >
-              {snapshotRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              Run Risk Snapshot
-            </Button>
+            {canRunSnapshot && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={runRiskSnapshot}
+                disabled={snapshotRunning}
+                className="gap-2"
+              >
+                {snapshotRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                Run Risk Snapshot
+              </Button>
+            )}
             <button
               onClick={() => refetch()}
               className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
