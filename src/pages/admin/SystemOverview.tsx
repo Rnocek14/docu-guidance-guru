@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { format, subDays } from 'date-fns';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -90,12 +90,23 @@ export default function SystemOverview() {
   // Fetch all system stats
   const [snapshotRunning, setSnapshotRunning] = useState(false);
 
-  if (import.meta.env.DEV) {
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+
     console.log('SUPABASE_FUNCTIONS_URL:', SUPABASE_FUNCTIONS_URL);
-    if (!SUPABASE_FUNCTIONS_URL.includes('/functions/v1')) {
-      console.warn('SUPABASE_FUNCTIONS_URL missing /functions/v1:', SUPABASE_FUNCTIONS_URL);
+
+    const looksLikeFunctionsBase =
+      typeof SUPABASE_FUNCTIONS_URL === 'string' &&
+      SUPABASE_FUNCTIONS_URL.includes('/functions/v1') &&
+      /^https:\/\/[a-z0-9-]+\.supabase\.co\/functions\/v1\/?$/.test(SUPABASE_FUNCTIONS_URL);
+
+    if (!looksLikeFunctionsBase) {
+      console.warn(
+        '[DEV] SUPABASE_FUNCTIONS_URL looks wrong. Expected https://<project-ref>.supabase.co/functions/v1',
+        { SUPABASE_FUNCTIONS_URL }
+      );
     }
-  }
+  }, []);
 
   const runRiskSnapshot = async () => {
     setSnapshotRunning(true);
