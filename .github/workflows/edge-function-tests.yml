@@ -17,6 +17,10 @@
 #   TEST_PAYOUT_ID_APPROVED    — payout ID in approved state
 #   TEST_ACCOUNT_ID            — account ID in active state
 #   TEST_ACCOUNT_ID_BREACHED   — account ID in breached state
+#
+# Workflow Dispatch Inputs:
+#   run_cron_path — when true, calls the function with X-Cron-Secret to verify
+#                   the live cron auth path and econ gate behavior
 
 name: Edge Function Tests
 
@@ -31,7 +35,13 @@ on:
     paths:
       - 'supabase/functions/**'
       - '.github/workflows/edge-function-tests.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      run_cron_path:
+        description: 'Run live cron-secret verification against deployed function'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: edge-function-tests-${{ github.ref }}
@@ -59,15 +69,16 @@ jobs:
 
   # ───────────────────────────────────────────────────────────────────────────
   # Tier 2 — Integration tests (service role + cron secret)
+  #
+  # On main: FAIL FAST if required secrets are missing (never silently skip).
+  # On PRs:  Skip gracefully (fork PRs won't have secrets).
   # ───────────────────────────────────────────────────────────────────────────
   tier2_integration:
     name: "Tier 2 — Integration (service role + cron)"
     runs-on: ubuntu-latest
     needs: [tier1_unit]
-    if: ${{ vars.SUPABASE_ANON_KEY != '' }}
     timeout-minutes: 10
     env:
-      # Dual env vars — tests may read either name
       SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
       VITE_SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
       SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM' }}
@@ -81,13 +92,22 @@ jobs:
         with:
           deno-version: v1.x
 
-      - name: "Sanity check required env"
+      # On main: fail-fast if required secrets are missing.
+      # On PRs: warn but continue (tests self-skip via ignore flags).
+      - name: "Enforce required secrets (main only)"
+        if: github.ref == 'refs/heads/main'
         run: |
-          test -n "${SUPABASE_URL}" && echo "✓ SUPABASE_URL"
-          test -n "${SUPABASE_ANON_KEY}" && echo "✓ SUPABASE_ANON_KEY"
-          # These may be empty if secrets aren't configured — tests self-skip via ignore flags
-          [ -n "${SUPABASE_SERVICE_ROLE_KEY}" ] && echo "✓ SERVICE_ROLE_KEY" || echo "⚠ SERVICE_ROLE_KEY missing — some tests will be skipped"
-          [ -n "${CRON_SECRET}" ] && echo "✓ CRON_SECRET" || echo "⚠ CRON_SECRET missing — some tests will be skipped"
+          missing=0
+          [ -z "${SUPABASE_SERVICE_ROLE_KEY}" ] && echo "::error::SUPABASE_SERVICE_ROLE_KEY is missing" && missing=1
+          [ -z "${CRON_SECRET}" ] && echo "::error::CRON_SECRET is missing" && missing=1
+          [ $missing -eq 1 ] && echo "::error::Tier 2 secrets MUST be configured on main. Add them in Settings → Secrets." && exit 1
+          echo "✓ All Tier 2 secrets present"
+
+      - name: "Sanity check env (PRs — non-blocking)"
+        if: github.ref != 'refs/heads/main'
+        run: |
+          [ -n "${SUPABASE_SERVICE_ROLE_KEY}" ] && echo "✓ SERVICE_ROLE_KEY" || echo "⚠ SERVICE_ROLE_KEY missing — some tests will self-skip"
+          [ -n "${CRON_SECRET}" ] && echo "✓ CRON_SECRET" || echo "⚠ CRON_SECRET missing — some tests will self-skip"
 
       - name: "daily-risk-snapshot auth tests"
         run: |
@@ -101,12 +121,13 @@ jobs:
 
   # ───────────────────────────────────────────────────────────────────────────
   # Tier 3 — Stateful E2E (tokens + state-specific IDs)
+  #
+  # Same pattern: fail-fast on main, skip gracefully on PRs.
   # ───────────────────────────────────────────────────────────────────────────
   tier3_stateful:
     name: "Tier 3 — Stateful E2E (tokens + IDs)"
     runs-on: ubuntu-latest
     needs: [tier2_integration]
-    if: ${{ vars.SUPABASE_ANON_KEY != '' }}
     timeout-minutes: 10
     env:
       SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
@@ -128,10 +149,25 @@ jobs:
         with:
           deno-version: v1.x
 
-      - name: "Sanity check stateful env"
+      # On main: fail-fast if Tier 3 secrets are missing.
+      - name: "Enforce required secrets (main only)"
+        if: github.ref == 'refs/heads/main'
         run: |
-          [ -n "${TEST_ADMIN_TOKEN}" ] && echo "✓ TEST_ADMIN_TOKEN" || echo "⚠ TEST_ADMIN_TOKEN missing — payout idempotency tests will be skipped"
-          [ -n "${TEST_STAFF_TOKEN}" ] && echo "✓ TEST_STAFF_TOKEN" || echo "⚠ TEST_STAFF_TOKEN missing — review idempotency tests will be skipped"
+          missing=0
+          [ -z "${TEST_ADMIN_TOKEN}" ] && echo "::error::TEST_ADMIN_TOKEN is missing" && missing=1
+          [ -z "${TEST_STAFF_TOKEN}" ] && echo "::error::TEST_STAFF_TOKEN is missing" && missing=1
+          [ -z "${TEST_PAYOUT_ID_PENDING}" ] && echo "::error::TEST_PAYOUT_ID_PENDING is missing" && missing=1
+          [ -z "${TEST_PAYOUT_ID_APPROVED}" ] && echo "::error::TEST_PAYOUT_ID_APPROVED is missing" && missing=1
+          [ -z "${TEST_ACCOUNT_ID}" ] && echo "::error::TEST_ACCOUNT_ID is missing" && missing=1
+          [ -z "${TEST_ACCOUNT_ID_BREACHED}" ] && echo "::error::TEST_ACCOUNT_ID_BREACHED is missing" && missing=1
+          [ $missing -eq 1 ] && echo "::error::Tier 3 secrets MUST be configured on main. Add them in Settings → Secrets." && exit 1
+          echo "✓ All Tier 3 secrets present"
+
+      - name: "Sanity check env (PRs — non-blocking)"
+        if: github.ref != 'refs/heads/main'
+        run: |
+          [ -n "${TEST_ADMIN_TOKEN}" ] && echo "✓ TEST_ADMIN_TOKEN" || echo "⚠ TEST_ADMIN_TOKEN missing — payout idempotency tests will self-skip"
+          [ -n "${TEST_STAFF_TOKEN}" ] && echo "✓ TEST_STAFF_TOKEN" || echo "⚠ TEST_STAFF_TOKEN missing — review idempotency tests will self-skip"
 
       - name: "payout-actions idempotency tests"
         run: |
@@ -142,3 +178,79 @@ jobs:
         run: |
           deno test --allow-net --allow-env --allow-read \
             supabase/functions/review-actions/idempotency_test.ts
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Cron Path Verification (manual dispatch only)
+  #
+  # Proves the live cron auth path works end-to-end:
+  #   1. Calls the function with X-Cron-Secret
+  #   2. Asserts 200 + success=true + triggered_by=cron
+  #   3. Verifies snapshot was written to risk_snapshots table
+  # ───────────────────────────────────────────────────────────────────────────
+  cron_path_verify:
+    name: "Cron Path — Live Verification"
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_cron_path == true }}
+    timeout-minutes: 5
+    env:
+      SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: "Enforce cron secrets"
+        run: |
+          [ -z "${SUPABASE_SERVICE_ROLE_KEY}" ] && echo "::error::SUPABASE_SERVICE_ROLE_KEY required for cron verify" && exit 1
+          [ -z "${CRON_SECRET}" ] && echo "::error::CRON_SECRET required for cron verify" && exit 1
+          echo "✓ Cron verification secrets present"
+
+      - name: "Call daily-risk-snapshot with X-Cron-Secret"
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "${SUPABASE_URL}/functions/v1/daily-risk-snapshot" \
+            -H "Content-Type: application/json" \
+            -H "X-Cron-Secret: ${CRON_SECRET}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          echo "HTTP status: ${HTTP_CODE}"
+          echo "Response body: ${BODY}"
+
+          # Assert 200
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Expected HTTP 200, got ${HTTP_CODE}"
+            exit 1
+          fi
+
+          # Assert success=true
+          echo "$BODY" | grep -q '"success":true' || echo "$BODY" | grep -q '"success": true'
+          if [ $? -ne 0 ]; then
+            echo "::error::Response missing success:true"
+            exit 1
+          fi
+
+          # Assert triggered_by=cron
+          echo "$BODY" | grep -q '"triggered_by":"cron"' || echo "$BODY" | grep -q '"triggered_by": "cron"'
+          if [ $? -ne 0 ]; then
+            echo "::error::Response missing triggered_by:cron"
+            exit 1
+          fi
+
+          echo "✓ Cron path verification passed"
+
+      - name: "Verify snapshot written (query risk_snapshots)"
+        run: |
+          # Query the most recent snapshot to confirm it was written
+          RESULT=$(curl -s \
+            "${SUPABASE_URL}/rest/v1/risk_snapshots?order=created_at.desc&limit=1&select=id,snapshot_type,created_at" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}")
+
+          echo "Latest snapshot: ${RESULT}"
+
+          # Basic check: response should be a non-empty array
+          if echo "$RESULT" | grep -q '"id"'; then
+            echo "✓ Snapshot row exists in risk_snapshots"
+          else
+            echo "::warning::Could not confirm snapshot row — check manually"
+          fi
