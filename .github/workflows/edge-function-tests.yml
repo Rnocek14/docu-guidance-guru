@@ -1,10 +1,9 @@
 # Edge Function Integration Tests
 #
-# Runs the full Deno test suite against the deployed Supabase edge functions.
+# Tiered test suite for Supabase edge functions.
 #
-# Test tiers:
-#   Tier 1 (always) — pure unit tests + unauthenticated 401/400 checks
-#   Tier 2 (secrets) — SERVICE_ROLE_KEY + CRON_SECRET for infra/auth/guardrail tests
+#   Tier 1 (always)  — pure unit tests, no secrets needed
+#   Tier 2 (secrets) — SERVICE_ROLE_KEY + CRON_SECRET for auth/guardrail tests
 #   Tier 3 (state)   — admin/staff JWTs + state-specific IDs for idempotency tests
 #
 # Required GitHub Secrets (Tier 2):
@@ -26,22 +25,26 @@ on:
     branches: [main]
     paths:
       - 'supabase/functions/**'
+      - '.github/workflows/edge-function-tests.yml'
   pull_request:
     branches: [main]
     paths:
       - 'supabase/functions/**'
-  workflow_dispatch: # manual trigger
+      - '.github/workflows/edge-function-tests.yml'
+  workflow_dispatch: {}
 
 concurrency:
-  group: edge-tests-${{ github.ref }}
+  group: edge-function-tests-${{ github.ref }}
   cancel-in-progress: true
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier 1 — Pure unit tests (no secrets, no network dependencies)
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  test:
-    name: Deno Edge Function Tests
+  tier1_unit:
+    name: "Tier 1 — Unit (no secrets)"
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -49,55 +52,93 @@ jobs:
         with:
           deno-version: v1.x
 
-      # ─── Tier 1: Pure unit tests (no secrets needed) ───────────────
-      - name: "Tier 1: normalizeSymbol unit tests"
+      - name: "normalizeSymbol unit tests"
         run: |
           deno test --allow-net --allow-env --allow-read \
             supabase/functions/reconcile-trades/normalizeSymbol.test.ts
 
-      # ─── Tier 2: Auth + guardrail + snapshot tests ─────────────────
-      - name: "Tier 2: daily-risk-snapshot auth tests"
-        if: ${{ env.SUPABASE_SERVICE_ROLE_KEY != '' }}
-        env:
-          SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
-          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM' }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+  # ───────────────────────────────────────────────────────────────────────────
+  # Tier 2 — Integration tests (service role + cron secret)
+  # ───────────────────────────────────────────────────────────────────────────
+  tier2_integration:
+    name: "Tier 2 — Integration (service role + cron)"
+    runs-on: ubuntu-latest
+    needs: [tier1_unit]
+    if: ${{ vars.SUPABASE_ANON_KEY != '' }}
+    timeout-minutes: 10
+    env:
+      # Dual env vars — tests may read either name
+      SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
+      VITE_SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
+      SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM' }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM' }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v1.x
+
+      - name: "Sanity check required env"
+        run: |
+          test -n "${SUPABASE_URL}" && echo "✓ SUPABASE_URL"
+          test -n "${SUPABASE_ANON_KEY}" && echo "✓ SUPABASE_ANON_KEY"
+          # These may be empty if secrets aren't configured — tests self-skip via ignore flags
+          [ -n "${SUPABASE_SERVICE_ROLE_KEY}" ] && echo "✓ SERVICE_ROLE_KEY" || echo "⚠ SERVICE_ROLE_KEY missing — some tests will be skipped"
+          [ -n "${CRON_SECRET}" ] && echo "✓ CRON_SECRET" || echo "⚠ CRON_SECRET missing — some tests will be skipped"
+
+      - name: "daily-risk-snapshot auth tests"
         run: |
           deno test --allow-net --allow-env --allow-read \
             supabase/functions/daily-risk-snapshot/auth_test.ts
 
-      - name: "Tier 2: payout guardrail tests"
-        if: ${{ env.SUPABASE_SERVICE_ROLE_KEY != '' }}
-        env:
-          SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
-          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM' }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: "payout-actions guardrail tests"
         run: |
           deno test --allow-net --allow-env --allow-read \
             supabase/functions/payout-actions/guardrail_test.ts
 
-      # ─── Tier 3: Idempotency tests (need state-specific test data) ─
-      - name: "Tier 3: payout-actions idempotency tests"
-        if: ${{ env.TEST_ADMIN_TOKEN != '' }}
-        env:
-          VITE_SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM' }}
-          TEST_ADMIN_TOKEN: ${{ secrets.TEST_ADMIN_TOKEN }}
-          TEST_PAYOUT_ID_PENDING: ${{ secrets.TEST_PAYOUT_ID_PENDING }}
-          TEST_PAYOUT_ID_APPROVED: ${{ secrets.TEST_PAYOUT_ID_APPROVED }}
+  # ───────────────────────────────────────────────────────────────────────────
+  # Tier 3 — Stateful E2E (tokens + state-specific IDs)
+  # ───────────────────────────────────────────────────────────────────────────
+  tier3_stateful:
+    name: "Tier 3 — Stateful E2E (tokens + IDs)"
+    runs-on: ubuntu-latest
+    needs: [tier2_integration]
+    if: ${{ vars.SUPABASE_ANON_KEY != '' }}
+    timeout-minutes: 10
+    env:
+      SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
+      VITE_SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
+      SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM' }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM' }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      TEST_ADMIN_TOKEN: ${{ secrets.TEST_ADMIN_TOKEN }}
+      TEST_STAFF_TOKEN: ${{ secrets.TEST_STAFF_TOKEN }}
+      TEST_PAYOUT_ID_PENDING: ${{ secrets.TEST_PAYOUT_ID_PENDING }}
+      TEST_PAYOUT_ID_APPROVED: ${{ secrets.TEST_PAYOUT_ID_APPROVED }}
+      TEST_ACCOUNT_ID: ${{ secrets.TEST_ACCOUNT_ID }}
+      TEST_ACCOUNT_ID_BREACHED: ${{ secrets.TEST_ACCOUNT_ID_BREACHED }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v1.x
+
+      - name: "Sanity check stateful env"
+        run: |
+          [ -n "${TEST_ADMIN_TOKEN}" ] && echo "✓ TEST_ADMIN_TOKEN" || echo "⚠ TEST_ADMIN_TOKEN missing — payout idempotency tests will be skipped"
+          [ -n "${TEST_STAFF_TOKEN}" ] && echo "✓ TEST_STAFF_TOKEN" || echo "⚠ TEST_STAFF_TOKEN missing — review idempotency tests will be skipped"
+
+      - name: "payout-actions idempotency tests"
         run: |
           deno test --allow-net --allow-env --allow-read \
             supabase/functions/payout-actions/idempotency_test.ts
 
-      - name: "Tier 3: review-actions idempotency tests"
-        if: ${{ env.TEST_STAFF_TOKEN != '' }}
-        env:
-          VITE_SUPABASE_URL: https://sfxmgwkrjwuerfkqxokq.supabase.co
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM' }}
-          TEST_STAFF_TOKEN: ${{ secrets.TEST_STAFF_TOKEN }}
-          TEST_ACCOUNT_ID: ${{ secrets.TEST_ACCOUNT_ID }}
-          TEST_ACCOUNT_ID_BREACHED: ${{ secrets.TEST_ACCOUNT_ID_BREACHED }}
+      - name: "review-actions idempotency tests"
         run: |
           deno test --allow-net --allow-env --allow-read \
             supabase/functions/review-actions/idempotency_test.ts
