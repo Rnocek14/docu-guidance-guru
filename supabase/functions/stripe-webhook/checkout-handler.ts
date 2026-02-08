@@ -69,28 +69,34 @@ export async function handleCheckoutCompleted(
 
   console.log(`Processing checkout: user=${userId} tier=${tierId} session=${session.id}`)
 
-  // ── Step 1: Upsert queue row (idempotent) ──
-  // On conflict, the existing row is returned unchanged (upsert updates
-  // with same values = no-op for stable fields).
-  const { data: queueRow, error: upsertErr } = await supabase
+  // ── Step 1: Ensure queue row exists (insert-only, never overwrites status) ──
+  const { error: insertErr } = await supabase
     .from('checkout_fulfillment_queue')
-    .upsert(
-      {
-        stripe_session_id: session.id,
-        user_id: userId,
-        tier_id: tierId,
-        payment_intent: session.payment_intent as string,
-        amount_cents: session.amount_total || 0,
-        currency: session.currency || 'usd',
-        status: 'queued',
-      },
-      { onConflict: 'stripe_session_id' }
-    )
+    .insert({
+      stripe_session_id: session.id,
+      user_id: userId,
+      tier_id: tierId,
+      payment_intent: session.payment_intent as string,
+      amount_cents: session.amount_total || 0,
+      currency: session.currency || 'usd',
+      status: 'queued',
+    })
+
+  // 23505 = unique_violation → row already exists, which is fine (Stripe retry)
+  if (insertErr && !insertErr.code?.includes('23505')) {
+    console.error(`Queue insert failed: ${insertErr.message}`, { sessionId: session.id })
+    return
+  }
+
+  // Now read the current state (whether we just inserted or it already existed)
+  const { data: queueRow, error: selectErr } = await supabase
+    .from('checkout_fulfillment_queue')
     .select('id, status, fulfilled_account_id')
+    .eq('stripe_session_id', session.id)
     .single()
 
-  if (upsertErr) {
-    console.error(`Queue upsert failed: ${upsertErr.message}`, { sessionId: session.id })
+  if (selectErr || !queueRow) {
+    console.error(`Queue row not found after insert: ${selectErr?.message}`, { sessionId: session.id })
     return
   }
 
@@ -160,7 +166,7 @@ export async function handleCheckoutCompleted(
         queue_id: claimRow.id,
         retryable,
       },
-      idempotency_key: `intake_blocked:${session.id}`,
+      idempotency_key: `${retryable ? 'intake_blocked' : 'intake_failed'}:${session.id}`,
     }).catch(notifErr => {
       console.error('Failed to insert notification:', (notifErr as Error).message)
     })
