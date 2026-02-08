@@ -99,7 +99,7 @@ export default function SystemOverview() {
         return;
       }
 
-      // SUPABASE_FUNCTIONS_URL = https://<project>.supabase.co/functions/v1
+      console.log('SUPABASE_FUNCTIONS_URL:', SUPABASE_FUNCTIONS_URL);
       const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/daily-risk-snapshot`, {
         method: 'POST',
         headers: {
@@ -113,13 +113,16 @@ export default function SystemOverview() {
       console.log('daily-risk-snapshot response:', res.status, json);
 
       if (res.ok) {
-        // Extract proof fields explicitly
-        const triggeredBy = json.triggered_by ?? '(missing)';
-        const alarmsCount = json.alarms_count ?? 0;
-        const econStatus = json.econ_gate?.status ?? '(n/a)';
-        const autoTightenAttempted = json.summary?.auto_tightening_attempted 
-          ?? (json.auto_tightening !== null ? 'see response' : 'false (JWT path)');
-        const snapshotId = json.snapshot_id ?? '(no id)';
+        const triggeredBy = json?.triggered_by ?? '(missing)';
+        const alarmsCount = json?.alarms_count ?? 0;
+        const econStatus = json?.econ_gate?.status ?? '(unavailable)';
+        const snapshotId = json?.snapshot_id ?? '(no id returned)';
+
+        // Response may not include metadata. Canonical truth is DB query.
+        const autoTightenAttempted =
+          json?.auto_tightening_attempted ??
+          json?.metadata?.auto_tightening_attempted ??
+          false;
 
         console.log('PROOF FIELDS:', {
           snapshot_id: snapshotId,
@@ -130,8 +133,10 @@ export default function SystemOverview() {
         });
 
         toast.success(
-          `Snapshot ${snapshotId} created. triggered_by=${triggeredBy}, econ=${econStatus}, auto_tighten=${autoTightenAttempted}`
+          `Snapshot ${snapshotId} created. triggered_by=${triggeredBy}, econ=${econStatus}, auto_tighten_attempted=${autoTightenAttempted}`
         );
+
+        await refetch();
       } else {
         toast.error(`Snapshot failed: ${res.status} — ${json.error || JSON.stringify(json)}`);
       }
