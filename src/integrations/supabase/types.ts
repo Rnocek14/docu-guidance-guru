@@ -2292,24 +2292,42 @@ export type Database = {
         }
         Returns: Json
       }
-      fulfill_checkout_session: {
-        Args: {
-          p_account_number: string
-          p_account_size: number
-          p_amount_cents: number
-          p_cohort_id: string
-          p_currency: string
-          p_disclaimer_version?: string
-          p_payment_intent: string
-          p_product_description?: string
-          p_queue_id: string
-          p_rule_snapshot: Json
-          p_stripe_session_id: string
-          p_tier_id: string
-          p_user_id: string
-        }
-        Returns: string
-      }
+      fulfill_checkout_session:
+        | {
+            Args: {
+              p_account_number: string
+              p_account_size: number
+              p_amount_cents: number
+              p_cohort_id: string
+              p_currency: string
+              p_disclaimer_version?: string
+              p_payment_intent: string
+              p_product_description?: string
+              p_queue_id: string
+              p_rule_snapshot: Json
+              p_stripe_session_id: string
+              p_tier_id: string
+              p_user_id: string
+            }
+            Returns: string
+          }
+        | {
+            Args: {
+              p_account_number: string
+              p_account_size: number
+              p_amount_cents: number
+              p_cohort_name: string
+              p_currency: string
+              p_disclaimer_version?: string
+              p_payment_intent: string
+              p_product_description?: string
+              p_queue_id: string
+              p_stripe_session_id: string
+              p_tier_id: string
+              p_user_id: string
+            }
+            Returns: string
+          }
       get_cohort_account_stats: {
         Args: never
         Returns: {
