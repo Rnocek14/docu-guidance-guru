@@ -21,40 +21,68 @@ function generateAccountNumber(): string {
 }
 
 /**
- * Attempt to fulfill a queued checkout: create account + payment txn.
- * Returns { fulfilled: true, accountId } or { fulfilled: false, error }.
+ * Handle checkout.session.completed:
+ * 1. Ensure queue row exists (insert, then select on conflict)
+ * 2. Claim atomically via RPC (FOR UPDATE + status='processing')
+ * 3. Fulfill atomically via RPC (breaker + account + txn + queue in one txn)
+ * 4. If breaker blocks → queue stays 'queued'/'processing', staff notified
  */
-export async function attemptFulfillment(
+export async function handleCheckoutCompleted(
   supabase: ReturnType<typeof createClient>,
-  queueId: string,
-  userId: string,
-  tierId: string,
-  session: { id: string; payment_intent: string | null; amount_total: number | null; currency: string | null; metadata: Record<string, string> }
-): Promise<{ fulfilled: boolean; accountId?: string; error?: string }> {
+  session: Stripe.Checkout.Session
+) {
+  const metadata = session.metadata || {}
+  const userId = metadata.user_id
+  const tierId = metadata.tier_id
+
+  if (!userId || !tierId) {
+    console.error('Missing user_id or tier_id in session metadata', { sessionId: session.id })
+    return
+  }
+
   const tierConfig = TIER_COHORT_MAP[tierId]
   if (!tierConfig) {
-    return { fulfilled: false, error: `Unknown tier_id: ${tierId}` }
+    console.error(`Unknown tier_id: ${tierId}`, { sessionId: session.id })
+    return
   }
 
-  // ── Breaker pre-check (fail-closed) ──
-  const { data: breakerState, error: breakerError } = await supabase
-    .from('econ_breaker_state')
-    .select('evaluations_frozen, breaker_level')
-    .eq('id', '00000000-0000-0000-0000-000000000001')
-    .single()
+  console.log(`Processing checkout: user=${userId} tier=${tierId} session=${session.id}`)
 
-  if (breakerError || !breakerState) {
-    const reason = breakerError
-      ? `RPC_ERROR: ${breakerError.message}`
-      : 'BREAKER_STATE_MISSING'
-    return { fulfilled: false, error: reason }
+  // ── Step 1: Ensure queue row exists (idempotent) ──
+  // Insert; if conflict on stripe_session_id, it's fine — we'll select below.
+  await supabase
+    .from('checkout_fulfillment_queue')
+    .insert({
+      stripe_session_id: session.id,
+      user_id: userId,
+      tier_id: tierId,
+      payment_intent: session.payment_intent as string,
+      amount_cents: session.amount_total || 0,
+      currency: session.currency || 'usd',
+      status: 'queued',
+    })
+    .select()
+    .maybeSingle() // Don't throw on conflict
+
+  // ── Step 2: Claim the queue row atomically ──
+  // This locks the row FOR UPDATE and flips to 'processing'.
+  // If already fulfilled or claimed by another worker → returns empty.
+  const { data: claimed, error: claimError } = await supabase
+    .rpc('claim_checkout_fulfillment', { p_session_id: session.id })
+
+  if (claimError) {
+    console.error(`Claim RPC failed: ${claimError.message}`, { sessionId: session.id })
+    return
   }
 
-  if (breakerState.evaluations_frozen) {
-    return { fulfilled: false, error: `EVALUATIONS_FROZEN (level=${breakerState.breaker_level})` }
+  const claimRow = Array.isArray(claimed) ? claimed[0] : claimed
+  if (!claimRow) {
+    // Already fulfilled or not claimable
+    console.log(`Checkout already fulfilled or not claimable: session=${session.id}`)
+    return
   }
 
-  // ── Cohort lookup ──
+  // ── Step 3: Look up cohort ──
   const { data: cohort, error: cohortError } = await supabase
     .from('cohorts')
     .select('*')
@@ -65,11 +93,11 @@ export async function attemptFulfillment(
     .maybeSingle()
 
   if (cohortError || !cohort) {
-    return { fulfilled: false, error: `Cohort lookup failed: ${cohortError?.message ?? 'not found'}` }
+    await markQueueError(supabase, claimRow.id, `Cohort lookup failed: ${cohortError?.message ?? 'not found'}`)
+    return
   }
 
-  // ── Build rule snapshot ──
-  const metadata = session.metadata || {}
+  // ── Step 4: Build rule snapshot ──
   const ruleSnapshot = {
     cohort_id: cohort.id,
     cohort_name: cohort.name,
@@ -95,183 +123,69 @@ export async function attemptFulfillment(
     purchased_at: new Date().toISOString(),
   }
 
-  const accountNumber = generateAccountNumber()
-
-  // ── Create account ──
-  const { data: account, error: accountError } = await supabase
-    .from('accounts')
-    .insert({
-      user_id: userId,
-      cohort_id: cohort.id,
-      account_number: accountNumber,
-      starting_balance: tierConfig.accountSize,
-      current_balance: tierConfig.accountSize,
-      highest_balance: tierConfig.accountSize,
-      payout_cycle_start_balance: tierConfig.accountSize,
-      rule_snapshot: ruleSnapshot,
-      status: 'active',
+  // ── Step 5: Atomic fulfillment (breaker + account + txn + queue in one txn) ──
+  const { data: accountId, error: fulfillError } = await supabase
+    .rpc('fulfill_checkout_session', {
+      p_queue_id: claimRow.id,
+      p_user_id: userId,
+      p_stripe_session_id: session.id,
+      p_payment_intent: (session.payment_intent as string) || '',
+      p_amount_cents: session.amount_total || 0,
+      p_currency: session.currency || 'usd',
+      p_tier_id: tierId,
+      p_cohort_id: cohort.id,
+      p_account_number: generateAccountNumber(),
+      p_account_size: tierConfig.accountSize,
+      p_rule_snapshot: ruleSnapshot,
     })
-    .select('id')
-    .single()
 
-  if (accountError) {
-    return { fulfilled: false, error: `Account creation failed: ${accountError.message}` }
+  if (fulfillError) {
+    const errorMsg = fulfillError.message || 'Unknown fulfillment error'
+
+    // Revert queue to 'queued' so it can be retried
+    await markQueueError(supabase, claimRow.id, errorMsg)
+
+    console.error(
+      `FULFILLMENT_FAILED: ${errorMsg}. session=${session.id} user=${userId}. Queued for retry.`
+    )
+
+    // Staff notification (idempotent per session)
+    await supabase.from('staff_notifications').insert({
+      notification_type: 'intake_blocked',
+      title: '🚨 Paid checkout blocked',
+      body: `User ${userId} paid for tier ${tierId} but account NOT created. Reason: ${errorMsg}. Session: ${session.id}. Queued for retry.`,
+      data: {
+        user_id: userId,
+        tier_id: tierId,
+        stripe_session_id: session.id,
+        block_reason: errorMsg,
+        queue_id: claimRow.id,
+      },
+      idempotency_key: `intake_blocked:${session.id}`,
+    }).catch(notifErr => {
+      console.error('Failed to insert intake_blocked notification:', (notifErr as Error).message)
+    })
+
+    return
   }
 
-  // ── Payment transaction (audit trail) ──
-  await supabase.from('payment_transactions').insert({
-    user_id: userId,
-    amount: (session.amount_total || 0) / 100,
-    currency: session.currency || 'usd',
-    direction: 'inbound',
-    purpose: 'evaluation_purchase',
-    provider: 'stripe',
-    provider_payment_id: session.payment_intent as string,
-    status: 'completed',
-    idempotency_key: `stripe:checkout:${session.id}`,
-    metadata: {
-      tier_id: tierId,
-      account_id: account.id,
-      account_number: accountNumber,
-      stripe_session_id: session.id,
-    },
-  })
-
-  // ── Mark queue row as fulfilled ──
-  await supabase
-    .from('checkout_fulfillment_queue')
-    .update({
-      status: 'fulfilled',
-      fulfilled_account_id: account.id,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', queueId)
-
-  console.log(`Account created: id=${account.id} number=${accountNumber} tier=${tierId} user=${userId}`)
-  return { fulfilled: true, accountId: account.id }
+  console.log(`Account created atomically: id=${accountId} tier=${tierId} user=${userId} session=${session.id}`)
 }
 
 /**
- * Handle checkout.session.completed:
- * 1. Always insert a queue row (idempotent by session_id)
- * 2. Attempt fulfillment
- * 3. If breaker blocks → queue stays 'queued', staff notified
+ * Mark a queue row back to 'queued' with error info so it can be retried.
  */
-export async function handleCheckoutCompleted(
-  supabase: ReturnType<typeof createClient>,
-  session: Stripe.Checkout.Session
-) {
-  const metadata = session.metadata || {}
-  const userId = metadata.user_id
-  const tierId = metadata.tier_id
-
-  if (!userId || !tierId) {
-    console.error('Missing user_id or tier_id in session metadata', { sessionId: session.id })
-    return
-  }
-
-  console.log(`Processing checkout: user=${userId} tier=${tierId} session=${session.id}`)
-
-  // ── Step 1: Insert queue row (idempotent) ──
-  const { data: queueRow, error: queueError } = await supabase
-    .from('checkout_fulfillment_queue')
-    .upsert(
-      {
-        stripe_session_id: session.id,
-        user_id: userId,
-        tier_id: tierId,
-        payment_intent: session.payment_intent as string,
-        amount_cents: session.amount_total || 0,
-        currency: session.currency || 'usd',
-        status: 'queued',
-      },
-      { onConflict: 'stripe_session_id', ignoreDuplicates: true }
-    )
-    .select('id, status')
-    .single()
-
-  if (queueError) {
-    // Could be a duplicate where it was already fulfilled
-    const { data: existing } = await supabase
-      .from('checkout_fulfillment_queue')
-      .select('id, status')
-      .eq('stripe_session_id', session.id)
-      .single()
-
-    if (existing?.status === 'fulfilled') {
-      console.log(`Checkout already fulfilled: session=${session.id}`)
-      return
-    }
-    if (!existing) {
-      console.error(`Failed to insert fulfillment queue row: ${queueError.message}`)
-      return
-    }
-    // Proceed with existing queued row
-    return await tryFulfillAndNotify(supabase, existing.id, userId, tierId, session)
-  }
-
-  if (queueRow.status === 'fulfilled') {
-    console.log(`Checkout already fulfilled: session=${session.id}`)
-    return
-  }
-
-  // ── Step 2: Attempt fulfillment ──
-  await tryFulfillAndNotify(supabase, queueRow.id, userId, tierId, session)
-}
-
-async function tryFulfillAndNotify(
+async function markQueueError(
   supabase: ReturnType<typeof createClient>,
   queueId: string,
-  userId: string,
-  tierId: string,
-  session: Stripe.Checkout.Session
+  error: string
 ) {
-  const result = await attemptFulfillment(supabase, queueId, userId, tierId, {
-    id: session.id,
-    payment_intent: session.payment_intent as string | null,
-    amount_total: session.amount_total,
-    currency: session.currency,
-    metadata: session.metadata || {},
-  })
-
-  if (result.fulfilled) return
-
-  // ── Update queue with error + increment attempts ──
-  await supabase.rpc('increment_fulfillment_attempts' as never, {
-    p_queue_id: queueId,
-    p_error: result.error,
-  } as never).catch(() => {
-    // Fallback: direct update if RPC doesn't exist yet
-    supabase
-      .from('checkout_fulfillment_queue')
-      .update({
-        last_error: result.error,
-        attempts: 1, // will be wrong on retries without RPC, but safe
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', queueId)
-  })
-
-  console.error(
-    `BREAKER_INTAKE_BLOCKED: ${result.error}. ` +
-    `Customer paid but account NOT created. session=${session.id} user=${userId}. ` +
-    `Queued for retry.`
-  )
-
-  // Staff notification (idempotent per session)
-  await supabase.from('staff_notifications').insert({
-    notification_type: 'intake_blocked',
-    title: '🚨 Paid checkout blocked by breaker',
-    body: `User ${userId} paid for tier ${tierId} but account NOT created. Reason: ${result.error}. Session: ${session.id}. Queued for retry.`,
-    data: {
-      user_id: userId,
-      tier_id: tierId,
-      stripe_session_id: session.id,
-      block_reason: result.error,
-      queue_id: queueId,
-    },
-    idempotency_key: `intake_blocked:${session.id}`,
-  }).catch(notifErr => {
-    console.error('Failed to insert intake_blocked notification:', (notifErr as Error).message)
-  })
+  await supabase
+    .from('checkout_fulfillment_queue')
+    .update({
+      status: 'queued',
+      last_error: error,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', queueId)
 }
