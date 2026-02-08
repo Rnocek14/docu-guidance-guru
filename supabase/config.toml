@@ -38,3 +38,6 @@ verify_jwt = false
 
 [functions.daily-risk-snapshot]
 verify_jwt = false
+
+[functions.retry-fulfillment-queue]
+verify_jwt = false
