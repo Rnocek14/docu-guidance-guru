@@ -90,6 +90,13 @@ export default function SystemOverview() {
   // Fetch all system stats
   const [snapshotRunning, setSnapshotRunning] = useState(false);
 
+  if (import.meta.env.DEV) {
+    console.log('SUPABASE_FUNCTIONS_URL:', SUPABASE_FUNCTIONS_URL);
+    if (!SUPABASE_FUNCTIONS_URL.includes('/functions/v1')) {
+      console.warn('SUPABASE_FUNCTIONS_URL missing /functions/v1:', SUPABASE_FUNCTIONS_URL);
+    }
+  }
+
   const runRiskSnapshot = async () => {
     setSnapshotRunning(true);
     try {
