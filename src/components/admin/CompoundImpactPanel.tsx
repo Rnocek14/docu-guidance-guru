@@ -11,14 +11,19 @@ interface CompoundImpact {
     avg_payout_split: number;
     avg_lifetime_cap_multiple: number;
     avg_entry_fee: number;
+    avg_first_payout_cap: number;
     estimated_breakeven_pass_rate: number;
   };
   proposed: {
     avg_payout_split: number;
+    avg_lifetime_cap_multiple: number;
+    avg_first_payout_cap: number;
     estimated_breakeven_pass_rate: number;
   };
   delta: {
     split_change_pct: number;
+    cap_multiple_change: number;
+    first_cap_change: number;
     breakeven_shift_pct: number;
   };
   breaker: {
@@ -36,6 +41,7 @@ interface CompoundImpact {
     proposed_at: string;
     proposed_by_system: boolean;
   }>;
+  approximation_notice: string;
   warning: string | null;
   evaluated_at: string;
 }
@@ -147,6 +153,24 @@ export function CompoundImpactPanel() {
                   {impact.delta.breakeven_shift_pct > 0 ? '+' : ''}{impact.delta.breakeven_shift_pct}pp
                 </span>
               </div>
+              <div>
+                <span className="text-muted-foreground">Cap Multiple:</span>{' '}
+                <span className="font-medium">{impact.current.avg_lifetime_cap_multiple}x</span>
+                {impact.delta.cap_multiple_change !== 0 && (
+                  <span className={`ml-1 ${impact.delta.cap_multiple_change > 0 ? 'text-destructive' : 'text-success'}`}>
+                    ({impact.delta.cap_multiple_change > 0 ? '+' : ''}{impact.delta.cap_multiple_change})
+                  </span>
+                )}
+              </div>
+              <div>
+                <span className="text-muted-foreground">First Cap:</span>{' '}
+                <span className="font-medium">${impact.current.avg_first_payout_cap}</span>
+                {impact.delta.first_cap_change !== 0 && (
+                  <span className={`ml-1 ${impact.delta.first_cap_change > 0 ? 'text-success' : 'text-destructive'}`}>
+                    ({impact.delta.first_cap_change > 0 ? '+' : ''}${impact.delta.first_cap_change})
+                  </span>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -186,6 +210,13 @@ export function CompoundImpactPanel() {
         <div className="flex items-center gap-4 text-xs text-muted-foreground pt-1">
           <span>Cap Multiple: {impact.current.avg_lifetime_cap_multiple}x</span>
           <span>Avg Entry: ${impact.current.avg_entry_fee}</span>
+          <span>First Cap: ${impact.current.avg_first_payout_cap}</span>
+        </div>
+
+        {/* Approximation notice */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground/60 pt-1 border-t border-border/50">
+          <Info className="h-3 w-3 shrink-0" />
+          <span>{impact.approximation_notice || 'Heuristic estimate — not a Monte Carlo simulation.'}</span>
         </div>
       </CardContent>
     </Card>
