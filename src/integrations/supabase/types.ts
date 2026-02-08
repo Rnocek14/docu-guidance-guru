@@ -397,6 +397,62 @@ export type Database = {
           },
         ]
       }
+      checkout_fulfillment_queue: {
+        Row: {
+          amount_cents: number | null
+          attempts: number
+          created_at: string
+          currency: string | null
+          fulfilled_account_id: string | null
+          id: string
+          last_error: string | null
+          payment_intent: string | null
+          status: string
+          stripe_session_id: string
+          tier_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          amount_cents?: number | null
+          attempts?: number
+          created_at?: string
+          currency?: string | null
+          fulfilled_account_id?: string | null
+          id?: string
+          last_error?: string | null
+          payment_intent?: string | null
+          status?: string
+          stripe_session_id: string
+          tier_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          amount_cents?: number | null
+          attempts?: number
+          created_at?: string
+          currency?: string | null
+          fulfilled_account_id?: string | null
+          id?: string
+          last_error?: string | null
+          payment_intent?: string | null
+          status?: string
+          stripe_session_id?: string
+          tier_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "checkout_fulfillment_queue_fulfilled_account_id_fkey"
+            columns: ["fulfilled_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cohorts: {
         Row: {
           cohort_phase: string
