@@ -216,7 +216,7 @@ export function CompoundImpactPanel() {
         {/* Approximation notice */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground/60 pt-1 border-t border-border/50">
           <Info className="h-3 w-3 shrink-0" />
-          <span>{impact.approximation_notice || 'Heuristic estimate — not a Monte Carlo simulation.'}</span>
+          <span>Breakeven estimate reflects split + lifetime cap multiple. First payout cap is displayed but not included in breakeven formula. Not a Monte Carlo simulation.</span>
         </div>
       </CardContent>
     </Card>

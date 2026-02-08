@@ -132,6 +132,28 @@ async function handleCheckoutCompleted(
 
   console.log(`Processing checkout: user=${userId} tier=${tierId} session=${session.id}`)
 
+  // PRE-CHECK: Circuit breaker intake freeze.
+  // The DB trigger on accounts INSERT also blocks this, but checking here
+  // prevents "customer paid but account creation failed" support hell.
+  // We give a clear log message and can trigger a refund workflow later.
+  const { data: breakerState } = await supabase
+    .from('econ_breaker_state')
+    .select('evaluations_frozen, breaker_level')
+    .eq('id', '00000000-0000-0000-0000-000000000001')
+    .single()
+
+  // Fail-closed: if we can't read breaker state, or evaluations are frozen, block.
+  if (!breakerState || breakerState.evaluations_frozen) {
+    const level = breakerState?.breaker_level ?? 'UNKNOWN'
+    console.error(
+      `BREAKER_INTAKE_BLOCKED: Evaluation intake frozen (level=${level}). ` +
+      `Customer paid but account NOT created. session=${session.id} user=${userId}. ` +
+      `Manual refund or deferred account creation required.`
+    )
+    // TODO: Queue for automatic refund or deferred creation when breaker lifts
+    return
+  }
+
   // Look up the cohort by name + is_active + intake_active
   const { data: cohort, error: cohortError } = await supabase
     .from('cohorts')
