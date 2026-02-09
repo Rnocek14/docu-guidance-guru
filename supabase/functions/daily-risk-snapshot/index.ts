@@ -245,10 +245,24 @@ Deno.serve(async (req) => {
       })
     }
 
-    // 3. Liability snapshot
+    // 3. Liability snapshot — read cash_reserve from liability_alerts config
     let netBuffer: number | null = null
-    const { data: liabilityData } = await db.rpc('get_liability_snapshot', {})
-    if (liabilityData) {
+    const { data: alertConfig } = await db
+      .from('liability_alerts')
+      .select('cash_reserve, assumed_avg_first_payout')
+      .eq('is_active', true)
+      .limit(1)
+      .single()
+    
+    const cashReserve = alertConfig?.cash_reserve ?? 0
+    const assumedAvgFirstPayout = alertConfig?.assumed_avg_first_payout ?? 300
+    
+    const { data: liabilityData } = await db.rpc('get_liability_snapshot', {
+      _days_forward: 7,
+      _cash_reserve: cashReserve,
+      _assumed_avg_first_payout: assumedAvgFirstPayout,
+    })
+    if (liabilityData && !(liabilityData as Record<string, unknown>).error) {
       netBuffer = (liabilityData as { net_buffer?: number }).net_buffer ?? null
     }
 

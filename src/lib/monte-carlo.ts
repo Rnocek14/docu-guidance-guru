@@ -1182,7 +1182,7 @@ export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
     payoutSplitPercent: 0.80,       // 80% to trader
     maxPayoutPercent: 0.80,         // max 80% of profits
     resetPrice: 99,                 // $99 reset
-    lifetimeCapPerUser: null,       // no lifetime cap by default
+    lifetimeCapPerUser: 149 * 7,    // 7× entry fee = $1,043 (matches prod cohort default)
     attackIntensity: 0,             // no attack scenario
     minWinningDaysPerPayout: 0,     // disabled by default
     minProfitSinceLastPayout: 0,    // disabled by default
