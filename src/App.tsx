@@ -29,6 +29,7 @@ import CohortsManagement from "./pages/admin/CohortsManagement";
 import AuditLogs from "./pages/admin/AuditLogs";
 import MonteCarloAnalytics from "./pages/admin/MonteCarloAnalytics";
 import LiabilityDashboard from "./pages/admin/LiabilityDashboard";
+import OpsPlaybook from "./pages/admin/OpsPlaybook";
 import SupportDashboard from "./pages/support/SupportDashboard";
 import AccountDetails from "./pages/trader/AccountDetails";
 
@@ -188,6 +189,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <LiabilityDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/ops-playbook"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <OpsPlaybook />
                 </ProtectedRoute>
               }
             />
