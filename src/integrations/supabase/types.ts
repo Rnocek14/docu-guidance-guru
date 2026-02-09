@@ -1053,6 +1053,24 @@ export type Database = {
         }
         Relationships: []
       }
+      ops_heartbeat_config: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
       pass_rate_monitors: {
         Row: {
           created_at: string
@@ -2362,6 +2380,7 @@ export type Database = {
             }
             Returns: Json
           }
+      emit_cron_health_heartbeat: { Args: never; Returns: undefined }
       evaluate_econ_breaker: { Args: never; Returns: undefined }
       fail_payout_payment: {
         Args: {
