@@ -8,6 +8,8 @@ import { format, differenceInHours, differenceInMinutes } from 'date-fns';
 import {
   AlertTriangle,
   Shield,
+  ShieldCheck,
+  ShieldAlert,
   DollarSign,
   CreditCard,
   Activity,
@@ -258,6 +260,22 @@ function useDataFreshness() {
   });
 }
 
+function usePaymentSystemState() {
+  return useQuery({
+    queryKey: ['ops-payment-state'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('payment_system_state')
+        .select('is_paused_inbound, is_paused_outbound, pause_reason')
+        .limit(1)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    refetchInterval: 30_000,
+  });
+}
+
 // ── Component ──
 
 export default function OpsMetrics() {
@@ -267,6 +285,7 @@ export default function OpsMetrics() {
   const pipeline = usePayoutPipeline();
   const cron = useCronHealth();
   const freshness = useDataFreshness();
+  const paymentState = usePaymentSystemState();
 
   const isLoading = dispute.isLoading || breaker.isLoading || snapshot.isLoading || pipeline.isLoading || cron.isLoading;
   const isRefetching = dispute.isRefetching || breaker.isRefetching || snapshot.isRefetching || pipeline.isRefetching || cron.isRefetching;
@@ -278,6 +297,7 @@ export default function OpsMetrics() {
     pipeline.refetch();
     cron.refetch();
     freshness.refetch();
+    paymentState.refetch();
   };
 
   // ── Build cards ──
@@ -426,6 +446,21 @@ export default function OpsMetrics() {
 
   const overallLabel = overallSignal === 'green' ? 'ALL CLEAR' : overallSignal === 'yellow' ? 'ATTENTION' : 'ACTION REQUIRED';
 
+  // ── "Safe to Sell?" executive signal ──
+  // Derived from: no red cards + breaker normal + inbound not paused + buffer positive
+  const ps = paymentState.data;
+  const inboundPaused = ps?.is_paused_inbound ?? false;
+  const breakerBlocking = breaker.data ? ['critical', 'emergency'].includes(breaker.data.breaker_level) : false;
+  const hasRedCard = cards.some((c) => c.signal === 'red');
+  const bufferNegative = snapshot.data ? Number(snapshot.data.net_buffer ?? 0) <= 0 : true;
+
+  const safeToSell = !hasRedCard && !inboundPaused && !breakerBlocking && !bufferNegative;
+  const safeReasons: string[] = [];
+  if (hasRedCard) safeReasons.push('Red metric(s) active');
+  if (inboundPaused) safeReasons.push('Inbound payments paused');
+  if (breakerBlocking) safeReasons.push(`Breaker: ${breaker.data?.breaker_level}`);
+  if (bufferNegative) safeReasons.push('Net buffer ≤ 0');
+
   return (
     <DashboardLayout title="Morning Checks" navItems={adminNavItems}>
       <div className="space-y-6 max-w-5xl">
@@ -450,6 +485,29 @@ export default function OpsMetrics() {
               <RefreshCw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
               Refresh
             </button>
+          </div>
+        </div>
+
+        {/* Safe to Sell? banner */}
+        <div className={`flex items-center gap-3 rounded-lg px-4 py-3 border ${
+          safeToSell
+            ? 'bg-green-500/10 border-green-500/30'
+            : 'bg-destructive/10 border-destructive/30'
+        }`}>
+          {safeToSell ? (
+            <ShieldCheck className="h-5 w-5 text-green-600 shrink-0" />
+          ) : (
+            <ShieldAlert className="h-5 w-5 text-destructive shrink-0" />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className={`text-sm font-semibold ${safeToSell ? 'text-green-700 dark:text-green-400' : 'text-destructive'}`}>
+              {safeToSell ? 'SAFE TO SELL — all systems nominal' : 'NOT SAFE TO SELL'}
+            </p>
+            {safeReasons.length > 0 && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {safeReasons.join(' · ')}
+              </p>
+            )}
           </div>
         </div>
 
