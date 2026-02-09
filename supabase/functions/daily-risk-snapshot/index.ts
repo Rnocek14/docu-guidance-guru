@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
         .select('value')
         .eq('key', 'CRON_SECRET')
         .single()
-      cronSecret = secretRow?.value ?? null
+      cronSecret = (secretRow?.value ?? '').trim() || null
     }
 
     // =========================================================================
