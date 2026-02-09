@@ -560,6 +560,39 @@ export type Database = {
           },
         ]
       }
+      cron_health_config: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          expected_interval: unknown
+          jobname: string
+          min_expected_runs: number
+          red_if_success_rate_below: number
+          updated_at: string
+          yellow_if_success_rate_below: number
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          expected_interval: unknown
+          jobname: string
+          min_expected_runs: number
+          red_if_success_rate_below?: number
+          updated_at?: string
+          yellow_if_success_rate_below?: number
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          expected_interval?: unknown
+          jobname?: string
+          min_expected_runs?: number
+          red_if_success_rate_below?: number
+          updated_at?: string
+          yellow_if_success_rate_below?: number
+        }
+        Relationships: []
+      }
       cron_http_runs: {
         Row: {
           http_content: string | null
@@ -2649,6 +2682,10 @@ export type Database = {
           _ticket_ref?: string
         }
         Returns: Json
+      }
+      purge_cron_http_runs: {
+        Args: { retain_days?: number }
+        Returns: undefined
       }
       record_geo_signal: {
         Args: {
