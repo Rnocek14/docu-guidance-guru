@@ -214,6 +214,7 @@ export const adminNavItems: NavItem[] = [
   { label: 'Users', href: '/admin/users', icon: <Users className="h-5 w-5" /> },
   { label: 'Cohorts', href: '/admin/cohorts', icon: <Settings className="h-5 w-5" /> },
   { label: 'Audit Logs', href: '/admin/audit', icon: <FileText className="h-5 w-5" /> },
+  { label: 'Morning Checks', href: '/admin/ops-metrics', icon: <Activity className="h-5 w-5" /> },
   { label: 'Ops Playbook', href: '/admin/ops-playbook', icon: <FileText className="h-5 w-5" /> },
 ];
 

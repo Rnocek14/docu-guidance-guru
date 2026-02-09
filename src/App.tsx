@@ -30,6 +30,7 @@ import AuditLogs from "./pages/admin/AuditLogs";
 import MonteCarloAnalytics from "./pages/admin/MonteCarloAnalytics";
 import LiabilityDashboard from "./pages/admin/LiabilityDashboard";
 import OpsPlaybook from "./pages/admin/OpsPlaybook";
+import OpsMetrics from "./pages/admin/OpsMetrics";
 import SupportDashboard from "./pages/support/SupportDashboard";
 import AccountDetails from "./pages/trader/AccountDetails";
 
@@ -197,6 +198,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <OpsPlaybook />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/ops-metrics"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <OpsMetrics />
                 </ProtectedRoute>
               }
             />
