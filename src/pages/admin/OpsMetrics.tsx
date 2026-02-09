@@ -247,6 +247,9 @@ function useDataFreshness() {
         if (statusOk && ageMinutes <= expectedMinutes * 2) signal = 'green';
         else if (statusOk && ageMinutes <= expectedMinutes * 4) signal = 'yellow';
 
+        // Missing config is itself a hygiene issue — don't let it stay green
+        if (configMissing && signal === 'green') signal = 'yellow';
+
         results[job] = { lastRun: latest?.ran_at ?? null, signal, expectedMinutes, configMissing };
       }
       return results;
