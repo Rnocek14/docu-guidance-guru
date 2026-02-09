@@ -287,8 +287,23 @@ export default function OpsMetrics() {
   const freshness = useDataFreshness();
   const paymentState = usePaymentSystemState();
 
-  const isLoading = dispute.isLoading || breaker.isLoading || snapshot.isLoading || pipeline.isLoading || cron.isLoading;
-  const isRefetching = dispute.isRefetching || breaker.isRefetching || snapshot.isRefetching || pipeline.isRefetching || cron.isRefetching;
+  const isLoading =
+    dispute.isLoading ||
+    breaker.isLoading ||
+    snapshot.isLoading ||
+    pipeline.isLoading ||
+    cron.isLoading ||
+    freshness.isLoading ||
+    paymentState.isLoading;
+
+  const isRefetching =
+    dispute.isRefetching ||
+    breaker.isRefetching ||
+    snapshot.isRefetching ||
+    pipeline.isRefetching ||
+    cron.isRefetching ||
+    freshness.isRefetching ||
+    paymentState.isRefetching;
 
   const refetchAll = () => {
     dispute.refetch();
@@ -447,19 +462,36 @@ export default function OpsMetrics() {
   const overallLabel = overallSignal === 'green' ? 'ALL CLEAR' : overallSignal === 'yellow' ? 'ATTENTION' : 'ACTION REQUIRED';
 
   // ── "Safe to Sell?" executive signal ──
-  // Derived from: no red cards + breaker normal + inbound not paused + buffer positive
+  // Safe = strictly proven, not inferred. Missing data = NOT SAFE.
   const ps = paymentState.data;
-  const inboundPaused = ps?.is_paused_inbound ?? false;
-  const breakerBlocking = breaker.data ? ['critical', 'emergency'].includes(breaker.data.breaker_level) : false;
+  const fr = freshness.data;
+
+  // Treat missing critical inputs as NOT SAFE (prevents false green)
+  const missingCriticalData = !ps || !fr || !breaker.data || !snapshot.data || !dispute.data?.d30;
+
+  // Freshness blockers: any red OR config drift
+  const freshnessRed = fr
+    ? Object.values(fr).some((j) => j.signal === 'red')
+    : true;
+  const freshnessConfigDrift = fr
+    ? Object.values(fr).some((j) => j.configMissing)
+    : true;
+
+  const inboundPaused = ps?.is_paused_inbound ?? true; // default to paused if missing
+  const breakerBlockingForSale = breakerLevel ? breakerLevel !== 'normal' : true; // elevated = NO-GO
   const hasRedCard = cards.some((c) => c.signal === 'red');
   const bufferNegative = snapshot.data ? Number(snapshot.data.net_buffer ?? 0) <= 0 : true;
 
-  const safeToSell = !hasRedCard && !inboundPaused && !breakerBlocking && !bufferNegative;
   const safeReasons: string[] = [];
+  if (missingCriticalData) safeReasons.push('Metrics incomplete');
   if (hasRedCard) safeReasons.push('Red metric(s) active');
-  if (inboundPaused) safeReasons.push('Inbound payments paused');
-  if (breakerBlocking) safeReasons.push(`Breaker: ${breaker.data?.breaker_level}`);
+  if (freshnessRed) safeReasons.push('Data freshness RED');
+  if (freshnessConfigDrift) safeReasons.push('Cron config drift');
+  if (inboundPaused) safeReasons.push(ps?.pause_reason ? `Inbound paused: ${ps.pause_reason}` : 'Inbound payments paused');
+  if (breakerBlockingForSale) safeReasons.push(`Breaker: ${breakerLevel ?? 'unknown'}`);
   if (bufferNegative) safeReasons.push('Net buffer ≤ 0');
+
+  const safeToSell = safeReasons.length === 0;
 
   return (
     <DashboardLayout title="Morning Checks" navItems={adminNavItems}>
