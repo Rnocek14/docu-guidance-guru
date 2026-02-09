@@ -348,6 +348,23 @@ Deno.serve(async (req) => {
   )
 
   try {
+    // ── PLATFORM INGEST KILL SWITCH ──
+    // Check system_settings.platform_ingest_enabled before processing any trade
+    const { data: ingestSetting } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'platform_ingest_enabled')
+      .single()
+
+    const ingestEnabled = ingestSetting?.value === true || ingestSetting?.value === 'true'
+    if (!ingestEnabled) {
+      console.log('Platform ingestion disabled via system_settings.platform_ingest_enabled')
+      return new Response(
+        JSON.stringify({ error: 'Platform ingestion is currently disabled', request_id: requestId }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Get webhook secret
     const webhookSecret = Deno.env.get('TRADE_WEBHOOK_SECRET')
     if (!webhookSecret) {
