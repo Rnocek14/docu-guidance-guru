@@ -344,17 +344,17 @@ export default function OpsMetrics() {
 
   // 2. Econ Breaker
   const bk = breaker.data;
-  const breakerLevel = bk?.breaker_level ?? '';
+  const breakerLevelCard = bk?.breaker_level ?? '';
   const breakerSignal: Signal = !bk ? 'yellow'
-    : breakerLevel === 'normal' ? 'green'
-    : breakerLevel === 'elevated' ? 'yellow'
+    : breakerLevelCard === 'normal' ? 'green'
+    : breakerLevelCard === 'elevated' ? 'yellow'
     : 'red'; // critical, emergency
   cards.push({
     id: 'breaker',
     title: 'Econ Breaker',
     icon: <Shield className="h-5 w-5" />,
     signal: breakerSignal,
-    headline: bk ? `${breakerLevel.toUpperCase()} · ${Number(bk.rolling_pass_rate).toFixed(1)}% pass rate` : '—',
+    headline: bk ? `${breakerLevelCard.toUpperCase()} · ${Number(bk.rolling_pass_rate).toFixed(1)}% pass rate` : '—',
     details: [
       bk ? `${bk.rolling_pass_count}/${bk.rolling_total_count} passed (30d)` : '',
       bk?.approvals_blocked ? '⛔ Approvals blocked' : '',
@@ -464,7 +464,8 @@ export default function OpsMetrics() {
   // ── "Safe to Sell?" executive signal ──
   // Safe = strictly proven, not inferred. Missing data = NOT SAFE.
   const ps = paymentState.data;
-  const fr = freshness.data;
+  type FreshnessInfo = { signal: Signal; configMissing?: boolean };
+  const fr = freshness.data as Record<string, FreshnessInfo> | undefined;
 
   // Treat missing critical inputs as NOT SAFE (prevents false green)
   const missingCriticalData = !ps || !fr || !breaker.data || !snapshot.data || !dispute.data?.d30;
@@ -474,10 +475,11 @@ export default function OpsMetrics() {
     ? Object.values(fr).some((j) => j.signal === 'red')
     : true;
   const freshnessConfigDrift = fr
-    ? Object.values(fr).some((j) => j.configMissing)
+    ? Object.values(fr).some((j) => !!j.configMissing)
     : true;
 
   const inboundPaused = ps?.is_paused_inbound ?? true; // default to paused if missing
+  const breakerLevel = breaker.data?.breaker_level;
   const breakerBlockingForSale = breakerLevel ? breakerLevel !== 'normal' : true; // elevated = NO-GO
   const hasRedCard = cards.some((c) => c.signal === 'red');
   const bufferNegative = snapshot.data ? Number(snapshot.data.net_buffer ?? 0) <= 0 : true;
