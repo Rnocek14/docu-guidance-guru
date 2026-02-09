@@ -2242,6 +2242,7 @@ export type Database = {
         Returns: Json
       }
       check_consistency_rules: { Args: { _account_id: string }; Returns: Json }
+      check_cron_health: { Args: never; Returns: undefined }
       check_geo_mismatch: { Args: { _user_id: string }; Returns: Json }
       check_liability_alert: { Args: never; Returns: Json }
       check_payment_system_paused: {
