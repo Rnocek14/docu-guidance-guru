@@ -1,5 +1,5 @@
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
-import { getSafeToSell, type SafeToSellInputs } from '@/lib/safe-to-sell';
+import { getSafeToSell, type SafeToSellInputs, type ReserveGateInfo } from '@/lib/safe-to-sell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
@@ -277,6 +277,26 @@ function usePaymentSystemState() {
   });
 }
 
+function useReserveGate() {
+  return useQuery({
+    queryKey: ['ops-reserve-gate'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'reserve_aware_approval')
+        .single();
+      if (error) return { enabled: false, hasSimRunId: false } as ReserveGateInfo;
+      const val = data?.value as any;
+      return {
+        enabled: val?.enabled === true,
+        hasSimRunId: !!val?.last_simulation_run_id,
+      } as ReserveGateInfo;
+    },
+    refetchInterval: 60_000,
+  });
+}
+
 // ── Component ──
 
 export default function OpsMetrics() {
@@ -287,6 +307,7 @@ export default function OpsMetrics() {
   const cron = useCronHealth();
   const freshness = useDataFreshness();
   const paymentState = usePaymentSystemState();
+  const reserveGate = useReserveGate();
 
   const isLoading =
     dispute.isLoading ||
@@ -295,7 +316,8 @@ export default function OpsMetrics() {
     pipeline.isLoading ||
     cron.isLoading ||
     freshness.isLoading ||
-    paymentState.isLoading;
+    paymentState.isLoading ||
+    reserveGate.isLoading;
 
   const isRefetching =
     dispute.isRefetching ||
@@ -304,7 +326,8 @@ export default function OpsMetrics() {
     pipeline.isRefetching ||
     cron.isRefetching ||
     freshness.isRefetching ||
-    paymentState.isRefetching;
+    paymentState.isRefetching ||
+    reserveGate.isRefetching;
 
   const refetchAll = () => {
     dispute.refetch();
@@ -314,6 +337,7 @@ export default function OpsMetrics() {
     cron.refetch();
     freshness.refetch();
     paymentState.refetch();
+    reserveGate.refetch();
   };
 
   // ── Build cards ──
@@ -470,6 +494,7 @@ export default function OpsMetrics() {
     snapshotNetBuffer: snapshot.data?.net_buffer ?? null,
     hasDisputeData: !!dispute.data?.d30,
     hasRedCard: cards.some((c) => c.signal === 'red'),
+    reserveGate: reserveGate.data ?? undefined,
   });
 
   return (
