@@ -94,73 +94,82 @@ export async function handleChargeRefunded(
     .eq('id', txn.id)
 
   // ── Step 6: Audit log (hash-chain compliant, deterministic key) ─
+  // prev_hash and row_hash are computed by the DB trigger — never supply placeholders
   const auditIdempotencyKey = `audit.refund_invalidated:${charge.id}:${accountId}`
-  await supabase
+  const { error: auditErr } = await supabase
     .from('audit_logs')
-    .upsert(
-      {
-        account_id: accountId,
-        user_id: account.user_id,
-        action: 'failure_confirmed' as const,
-        idempotency_key: auditIdempotencyKey,
-        prev_hash: 'COMPUTED_BY_TRIGGER',
-        row_hash: 'COMPUTED_BY_TRIGGER',
-        details: {
-          type: 'refund_invalidated',
-          charge_id: charge.id,
-          payment_intent_id: paymentIntentId,
-          previous_status: previousStatus,
-          new_status: alreadyTerminal ? previousStatus : 'failed_confirmed',
-          already_terminal: alreadyTerminal,
-          refund_amount: charge.amount_refunded,
-          currency: charge.currency,
-        },
-        reason: `Account invalidated due to Stripe refund on charge ${charge.id}`,
+    .insert({
+      account_id: accountId,
+      user_id: account.user_id,
+      action: 'failure_confirmed' as const,
+      idempotency_key: auditIdempotencyKey,
+      details: {
+        type: 'refund_invalidated',
+        charge_id: charge.id,
+        payment_intent_id: paymentIntentId,
+        previous_status: previousStatus,
+        new_status: alreadyTerminal ? previousStatus : 'failed_confirmed',
+        already_terminal: alreadyTerminal,
+        refund_amount: charge.amount_refunded,
+        currency: charge.currency,
       },
-      { onConflict: 'idempotency_key', ignoreDuplicates: true }
-    )
+      reason: `Account invalidated due to Stripe refund on charge ${charge.id}`,
+    })
+  if (auditErr) {
+    // 23505 = unique_violation (idempotency_key already exists) — safe to ignore
+    if (auditErr.code === '23505') {
+      console.log(`Audit log already exists for refund ${charge.id}, skipping (idempotent)`)
+    } else {
+      console.error('Audit log insert failed:', auditErr.message)
+    }
+  }
 
   // ── Step 7: Trader-visible account event ──────────────────────
   const eventIdempotencyKey = `acctevt.refund_invalidated:${charge.id}:${accountId}`
-  await supabase
+  const { error: eventErr } = await supabase
     .from('account_events')
-    .upsert(
-      {
-        account_id: accountId,
-        event_type: 'failure_confirmed' as const,
-        idempotency_key: eventIdempotencyKey,
-        event_data: {
-          trigger: 'payment_refund',
-          previous_status: previousStatus,
-          explanation: 'Your account has been invalidated because the payment was refunded.',
-          next_step: 'If you believe this is an error, please contact support.',
-        },
+    .insert({
+      account_id: accountId,
+      event_type: 'failure_confirmed' as const,
+      idempotency_key: eventIdempotencyKey,
+      event_data: {
+        trigger: 'payment_refund',
+        previous_status: previousStatus,
+        explanation: 'Your account has been invalidated because the payment was refunded.',
+        next_step: 'If you believe this is an error, please contact support.',
       },
-      { onConflict: 'idempotency_key', ignoreDuplicates: true }
-    )
+    })
+  if (eventErr) {
+    if (eventErr.code === '23505') {
+      console.log(`Account event already exists for refund ${charge.id}, skipping (idempotent)`)
+    } else {
+      console.error('Account event insert failed:', eventErr.message)
+    }
+  }
 
   // ── Step 8: Staff notification (idempotent per charge) ────────
-  await supabase
+  const { error: notifErr } = await supabase
     .from('staff_notifications')
-    .upsert(
-      {
-        notification_type: 'refund_processed',
-        title: '💸 Refund: Account invalidated',
-        body: `Account ${account.account_number || accountId} invalidated due to refund on charge ${charge.id}. Previous status: ${previousStatus}.`,
-        data: {
-          account_id: accountId,
-          charge_id: charge.id,
-          payment_intent_id: paymentIntentId,
-          previous_status: previousStatus,
-          user_id: account.user_id,
-        },
-        idempotency_key: `refund:${charge.id}`,
+    .insert({
+      notification_type: 'refund_processed',
+      title: '💸 Refund: Account invalidated',
+      body: `Account ${account.account_number || accountId} invalidated due to refund on charge ${charge.id}. Previous status: ${previousStatus}.`,
+      data: {
+        account_id: accountId,
+        charge_id: charge.id,
+        payment_intent_id: paymentIntentId,
+        previous_status: previousStatus,
+        user_id: account.user_id,
       },
-      { onConflict: 'idempotency_key', ignoreDuplicates: true }
-    )
-    .catch((err: Error) => {
-      console.error('Staff notification insert failed:', err.message)
+      idempotency_key: `refund:${charge.id}`,
     })
+  if (notifErr) {
+    if (notifErr.code === '23505') {
+      console.log(`Staff notification already exists for refund ${charge.id}, skipping`)
+    } else {
+      console.error('Staff notification insert failed:', notifErr.message)
+    }
+  }
 
   // ── Step 9: Mark fulfillment queue row as refunded ─────────────
   const sessionId = (txn.metadata as Record<string, unknown>)?.stripe_session_id as string
