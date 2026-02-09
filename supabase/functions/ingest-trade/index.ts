@@ -358,7 +358,21 @@ Deno.serve(async (req) => {
 
     const ingestEnabled = ingestSetting?.value === true || ingestSetting?.value === 'true'
     if (!ingestEnabled) {
-      console.log('Platform ingestion disabled via system_settings.platform_ingest_enabled')
+      // Audit log blocked ingest for observability (signature not yet verified at this point)
+      const sig = req.headers.get('x-webhook-signature') ?? 'none'
+      const ts = req.headers.get('x-webhook-timestamp') ?? 'none'
+      await supabase.from('cron_http_runs').insert({
+        jobname: 'ingest-trade-blocked',
+        http_status: 503,
+        http_content: JSON.stringify({
+          reason: 'platform_ingest_disabled',
+          has_signature: sig !== 'none',
+          has_timestamp: ts !== 'none',
+          request_id: requestId,
+        }),
+      }).catch(() => {}) // best-effort logging
+
+      console.log('Platform ingestion disabled — blocked request logged')
       return new Response(
         JSON.stringify({ error: 'Platform ingestion is currently disabled', request_id: requestId }),
         { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

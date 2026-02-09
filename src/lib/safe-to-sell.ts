@@ -10,6 +10,11 @@ export interface FreshnessInfo {
   configMissing?: boolean;
 }
 
+export interface ReserveGateInfo {
+  enabled: boolean;
+  hasSimRunId: boolean;
+}
+
 export interface SafeToSellInputs {
   paymentState: { is_paused_inbound: boolean; pause_reason?: string | null } | undefined;
   freshness: Record<string, FreshnessInfo> | undefined;
@@ -17,6 +22,7 @@ export interface SafeToSellInputs {
   snapshotNetBuffer: number | null | undefined;
   hasDisputeData: boolean;
   hasRedCard: boolean;
+  reserveGate?: ReserveGateInfo | undefined;
 }
 
 export interface SafeToSellResult {
@@ -25,7 +31,7 @@ export interface SafeToSellResult {
 }
 
 export function getSafeToSell(inputs: SafeToSellInputs): SafeToSellResult {
-  const { paymentState: ps, freshness: fr, breakerLevel, snapshotNetBuffer, hasDisputeData, hasRedCard } = inputs;
+  const { paymentState: ps, freshness: fr, breakerLevel, snapshotNetBuffer, hasDisputeData, hasRedCard, reserveGate } = inputs;
 
   const missingCriticalData = !ps || !fr || breakerLevel === undefined || snapshotNetBuffer === undefined || !hasDisputeData;
 
@@ -42,6 +48,9 @@ export function getSafeToSell(inputs: SafeToSellInputs): SafeToSellResult {
     ? Number(snapshotNetBuffer) <= 0
     : true;
 
+  // Reserve gate: must be enabled with a current simulation run
+  const reserveGateMissing = !reserveGate || !reserveGate.enabled || !reserveGate.hasSimRunId;
+
   const reasons: string[] = [];
   if (missingCriticalData) reasons.push('Metrics incomplete');
   if (hasRedCard) reasons.push('Red metric(s) active');
@@ -50,6 +59,7 @@ export function getSafeToSell(inputs: SafeToSellInputs): SafeToSellResult {
   if (inboundPaused) reasons.push(ps?.pause_reason ? `Inbound paused: ${ps.pause_reason}` : 'Inbound payments paused');
   if (breakerBlockingForSale) reasons.push(`Breaker: ${breakerLevel ?? 'unknown'}`);
   if (bufferNegative) reasons.push('Net buffer ≤ 0');
+  if (reserveGateMissing) reasons.push('Reserve gate not configured or missing simulation run');
 
   return { safe: reasons.length === 0, reasons };
 }

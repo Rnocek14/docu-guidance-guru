@@ -11,6 +11,7 @@ const allGreen: SafeToSellInputs = {
   snapshotNetBuffer: 50000,
   hasDisputeData: true,
   hasRedCard: false,
+  reserveGate: { enabled: true, hasSimRunId: true },
 };
 
 describe('getSafeToSell', () => {
@@ -116,8 +117,27 @@ describe('getSafeToSell', () => {
       snapshotNetBuffer: -500,
       hasDisputeData: false,
       hasRedCard: true,
+      reserveGate: undefined,
     });
     expect(result.safe).toBe(false);
-    expect(result.reasons.length).toBeGreaterThanOrEqual(6);
+    expect(result.reasons.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it('returns NOT safe when reserve gate is missing', () => {
+    const result = getSafeToSell({ ...allGreen, reserveGate: undefined });
+    expect(result.safe).toBe(false);
+    expect(result.reasons).toContain('Reserve gate not configured or missing simulation run');
+  });
+
+  it('returns NOT safe when reserve gate is disabled', () => {
+    const result = getSafeToSell({ ...allGreen, reserveGate: { enabled: false, hasSimRunId: true } });
+    expect(result.safe).toBe(false);
+    expect(result.reasons).toContain('Reserve gate not configured or missing simulation run');
+  });
+
+  it('returns NOT safe when reserve gate has no simulation run', () => {
+    const result = getSafeToSell({ ...allGreen, reserveGate: { enabled: true, hasSimRunId: false } });
+    expect(result.safe).toBe(false);
+    expect(result.reasons).toContain('Reserve gate not configured or missing simulation run');
   });
 });
