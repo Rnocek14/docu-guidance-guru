@@ -58,11 +58,26 @@ Deno.serve(async (req) => {
   }
 
   // ── Auth: X-Cron-Secret only (no JWT path — this is machine-only) ──
-  const cronSecret = Deno.env.get('CRON_SECRET')
   const incomingSecret = (req.headers.get('X-Cron-Secret') ?? '').trim()
 
+  // Try env var first, fall back to internal_secrets table
+  let cronSecret = Deno.env.get('CRON_SECRET')
+
   if (!cronSecret || cronSecret.length < 16) {
-    console.error('CRON_SECRET not configured or too short')
+    console.warn('CRON_SECRET env var missing/short — falling back to internal_secrets table')
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const tempClient = createClient(supabaseUrl, serviceKey)
+    const { data: secretRow } = await tempClient
+      .from('internal_secrets')
+      .select('value')
+      .eq('key', 'CRON_SECRET')
+      .single()
+    cronSecret = secretRow?.value ?? null
+  }
+
+  if (!cronSecret || cronSecret.length < 16) {
+    console.error('CRON_SECRET not configured or too short (both env and DB)')
     return new Response(
       JSON.stringify({ error: 'Service unavailable' }),
       { status: 503, headers: { 'Content-Type': 'application/json' } }
