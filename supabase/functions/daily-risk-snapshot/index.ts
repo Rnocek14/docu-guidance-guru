@@ -390,35 +390,59 @@ Deno.serve(async (req) => {
       )
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        snapshot_id: snapshotId,
-        alarms_count: alarms.length,
-        alarms,
-        triggered_by: triggeredBy,
-        econ_gate: econVerdict ? {
-          status: econVerdict.status,
-          reasons_count: econVerdict.reasons.length,
-          recommended_actions: econVerdict.recommended_actions,
-        } : null,
-        auto_tightening: proposalResult,
-        summary: {
-          pass_rate: passRate,
-          pass_rate_alert_level: passRateAlertLevel,
-          simulation_stale: simulationStale,
-          simulation_age_hours: simulationAgeHours,
-          reserve_breach_probability: reserveBreachProb,
-          net_buffer: netBuffer,
-          pending_payouts: { count: pendingPayoutsCount, amount: pendingPayoutsAmount },
-        },
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    const responseBody = JSON.stringify({
+      success: true,
+      snapshot_id: snapshotId,
+      alarms_count: alarms.length,
+      alarms,
+      triggered_by: triggeredBy,
+      econ_gate: econVerdict ? {
+        status: econVerdict.status,
+        reasons_count: econVerdict.reasons.length,
+        recommended_actions: econVerdict.recommended_actions,
+      } : null,
+      auto_tightening: proposalResult,
+      summary: {
+        pass_rate: passRate,
+        pass_rate_alert_level: passRateAlertLevel,
+        simulation_stale: simulationStale,
+        simulation_age_hours: simulationAgeHours,
+        reserve_breach_probability: reserveBreachProb,
+        net_buffer: netBuffer,
+        pending_payouts: { count: pendingPayoutsCount, amount: pendingPayoutsAmount },
+      },
+    })
+
+    // Self-log to cron_http_runs for observability
+    await db.from('cron_http_runs').insert({
+      jobname: 'daily-risk-snapshot',
+      http_status: 200,
+      http_content: responseBody.slice(0, 2000),
+    })
+
+    return new Response(responseBody, {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
 
   } catch (err) {
     const error = err as Error
     console.error('Risk snapshot error:', error)
+
+    // Self-log failure to cron_http_runs
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      const errorDb = createClient(supabaseUrl, serviceKey)
+      await errorDb.from('cron_http_runs').insert({
+        jobname: 'daily-risk-snapshot',
+        http_status: 500,
+        http_content: JSON.stringify({ error: error.message }).slice(0, 2000),
+      })
+    } catch (logErr) {
+      console.error('Failed to self-log error to cron_http_runs:', logErr)
+    }
+
     return new Response(
       JSON.stringify({ error: error.message || 'Internal server error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
