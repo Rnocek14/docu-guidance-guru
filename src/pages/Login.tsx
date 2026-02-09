@@ -49,7 +49,7 @@ export default function Login() {
         
         <div className="space-y-6">
           <h1 className="text-4xl font-bold text-primary-foreground">
-            Prop Trading Risk Management
+            Simulated Trading Evaluation
           </h1>
           <p className="text-lg text-primary-foreground/80">
             Real-time detection. Human-approved decisions. Complete audit trail.

@@ -2439,6 +2439,10 @@ export type Database = {
           total_accounts: number
         }[]
       }
+      get_dispute_rate_snapshot: {
+        Args: { window_days?: number }
+        Returns: Json
+      }
       get_econ_breaker_state: {
         Args: never
         Returns: {
