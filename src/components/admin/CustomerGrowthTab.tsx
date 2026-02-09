@@ -21,7 +21,7 @@ interface CustomerGrowthTabProps {
 
 const chartConfig: ChartConfig = {
   totalAccounts: { label: 'Total Signups', color: 'hsl(var(--chart-1))' },
-  eligible: { label: 'Eligible (Funded)', color: 'hsl(var(--chart-3))' },
+  eligible: { label: 'Eligible (Performance)', color: 'hsl(var(--chart-3))' },
   firstPayout: { label: 'Pending First Payout', color: 'hsl(var(--chart-4))' },
   capHits: { label: 'Cap-Hit (Cumulative)', color: 'hsl(var(--destructive))' },
 };

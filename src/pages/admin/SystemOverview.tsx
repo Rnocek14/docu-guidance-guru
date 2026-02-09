@@ -254,7 +254,7 @@ export default function SystemOverview() {
         if (p.status === 'pending') { pendingCount++; pendingAmount += amt; }
         if (p.status === 'under_review') { underReviewCount++; underReviewAmount += amt; }
         if (p.status === 'approved') { approvedCount++; approvedAmount += amt; }
-        if (p.status === 'paid' && p.paid_at && p.paid_at >= thirtyDaysAgo) { paidLast30 += amt; }
+        if ((p.status === 'paid' || p.status === 'paid_confirmed') && p.paid_at && p.paid_at >= thirtyDaysAgo) { paidLast30 += amt; }
         if (p.status === 'rejected' && p.reviewed_at && p.reviewed_at >= thirtyDaysAgo) { rejectedLast30++; }
       });
 

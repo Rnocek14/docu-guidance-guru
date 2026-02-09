@@ -13,7 +13,21 @@ export type AccountStatus =
   | 'payout_approved'
   | 'closed';
 
-export type PayoutStatus = 'pending' | 'under_review' | 'approved' | 'rejected' | 'paid';
+export type PayoutStatus =
+  | 'pending'
+  | 'under_review'
+  | 'approved'
+  | 'rejected'
+  | 'payment_initiated'
+  | 'payment_failed'
+  | 'paid'
+  | 'paid_confirmed';
+
+/** Terminal paid statuses — use everywhere to prevent drift */
+export const TERMINAL_PAID_STATUSES = ['paid', 'paid_confirmed'] as const;
+export type TerminalPaidStatus = (typeof TERMINAL_PAID_STATUSES)[number];
+export const isTerminalPaid = (s: string): s is TerminalPaidStatus =>
+  (TERMINAL_PAID_STATUSES as readonly string[]).includes(s);
 
 export type FlagStatus = 'pending' | 'cleared' | 'escalated' | 'resolved';
 

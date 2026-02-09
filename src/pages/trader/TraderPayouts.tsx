@@ -14,6 +14,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { DollarSign, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { isTerminalPaid } from '@/lib/types';
 
 interface Payout {
   id: string;
@@ -68,6 +69,9 @@ export default function TraderPayouts() {
       under_review: { variant: 'outline', icon: <Loader2 className="h-3 w-3 animate-spin" /> },
       approved: { variant: 'secondary', icon: <CheckCircle className="h-3 w-3" /> },
       paid: { variant: 'default', icon: <CheckCircle className="h-3 w-3" /> },
+      paid_confirmed: { variant: 'default', icon: <CheckCircle className="h-3 w-3" /> },
+      payment_initiated: { variant: 'outline', icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+      payment_failed: { variant: 'destructive', icon: <XCircle className="h-3 w-3" /> },
       rejected: { variant: 'destructive', icon: <XCircle className="h-3 w-3" /> },
     };
     const { variant, icon } = config[status] || { variant: 'secondary' as const, icon: null };
@@ -79,7 +83,7 @@ export default function TraderPayouts() {
     );
   };
 
-  const totalPaid = payouts?.filter((p) => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0) || 0;
+  const totalPaid = payouts?.filter((p) => isTerminalPaid(p.status)).reduce((sum, p) => sum + p.amount, 0) || 0;
   const pendingAmount = payouts?.filter((p) => ['pending', 'under_review', 'approved'].includes(p.status)).reduce((sum, p) => sum + p.amount, 0) || 0;
 
   return (
