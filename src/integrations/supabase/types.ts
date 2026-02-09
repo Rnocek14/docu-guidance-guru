@@ -560,6 +560,30 @@ export type Database = {
           },
         ]
       }
+      cron_http_runs: {
+        Row: {
+          http_content: string | null
+          http_status: number | null
+          id: number
+          jobname: string
+          ran_at: string
+        }
+        Insert: {
+          http_content?: string | null
+          http_status?: number | null
+          id?: number
+          jobname: string
+          ran_at?: string
+        }
+        Update: {
+          http_content?: string | null
+          http_status?: number | null
+          id?: number
+          jobname?: string
+          ran_at?: string
+        }
+        Relationships: []
+      }
       device_fingerprints: {
         Row: {
           asn: string | null
