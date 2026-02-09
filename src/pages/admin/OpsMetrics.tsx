@@ -1,5 +1,5 @@
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
-import { getSafeToSell, FreshnessInfo } from '@/lib/safe-to-sell';
+import { getSafeToSell, type SafeToSellInputs } from '@/lib/safe-to-sell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
@@ -465,9 +465,9 @@ export default function OpsMetrics() {
   // ── "Safe to Sell?" executive signal ──
   const { safe: safeToSell, reasons: safeReasons } = getSafeToSell({
     paymentState: paymentState.data ?? undefined,
-    freshness: freshness.data as Record<string, FreshnessInfo> | undefined,
+    freshness: (freshness.data as SafeToSellInputs['freshness']) ?? undefined,
     breakerLevel: breaker.data?.breaker_level,
-    snapshotNetBuffer: snapshot.data ? Number(snapshot.data.net_buffer ?? null) : undefined,
+    snapshotNetBuffer: snapshot.data?.net_buffer ?? null,
     hasDisputeData: !!dispute.data?.d30,
     hasRedCard: cards.some((c) => c.signal === 'red'),
   });
