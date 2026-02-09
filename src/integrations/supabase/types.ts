@@ -2657,23 +2657,14 @@ export type Database = {
         }
         Returns: Json
       }
-      mark_payout_paid:
-        | {
-            Args: {
-              _payment_reference: string
-              _payout_id: string
-              _reviewed_by: string
-            }
-            Returns: Json
-          }
-        | {
-            Args: {
-              _payment_reference: string
-              _payout_id: string
-              _reviewed_by: string
-            }
-            Returns: Json
-          }
+      mark_payout_paid: {
+        Args: {
+          _payment_reference: string
+          _payout_id: string
+          _reviewed_by: string
+        }
+        Returns: Json
+      }
       normalize_legal_name: { Args: { input: string }; Returns: string }
       process_chargeback_event: {
         Args: {
