@@ -235,17 +235,19 @@ function useDataFreshness() {
       }
 
       const now = new Date();
-      const results: Record<string, { lastRun: string | null; ok: boolean; expectedMinutes: number }> = {};
+      const results: Record<string, { lastRun: string | null; signal: Signal; expectedMinutes: number; configMissing: boolean }> = {};
       for (const job of MONITOR_JOBS) {
         const latest = (runsRes.data || []).find((r) => r.jobname === job);
+        const configMissing = !intervalMap.has(job);
         const expectedMinutes = intervalMap.get(job) ?? 60;
         const ageMinutes = latest?.ran_at ? differenceInMinutes(now, new Date(latest.ran_at)) : Infinity;
         const statusOk = latest ? (latest.http_status ?? 0) >= 200 && (latest.http_status ?? 0) < 300 : false;
-        results[job] = {
-          lastRun: latest?.ran_at ?? null,
-          ok: statusOk && ageMinutes <= expectedMinutes * 2,
-          expectedMinutes,
-        };
+
+        let signal: Signal = 'red';
+        if (statusOk && ageMinutes <= expectedMinutes * 2) signal = 'green';
+        else if (statusOk && ageMinutes <= expectedMinutes * 4) signal = 'yellow';
+
+        results[job] = { lastRun: latest?.ran_at ?? null, signal, expectedMinutes, configMissing };
       }
       return results;
     },
@@ -457,11 +459,12 @@ export default function OpsMetrics() {
               const ageLabel = age !== null
                 ? age < 60 ? `${age}m ago` : `${Math.round(age / 60)}h ago`
                 : 'never';
-              const isOk = info.ok && age !== null && age < 26 * 60;
+              const dotColor = info.signal === 'green' ? 'bg-green-500' : info.signal === 'yellow' ? 'bg-yellow-500' : 'bg-red-500';
+              const suffix = info.configMissing ? ' (config missing)' : '';
               return (
                 <span key={job} className="flex items-center gap-1.5">
-                  <span className={`inline-block h-2 w-2 rounded-full ${isOk ? 'bg-green-500' : 'bg-red-500'}`} />
-                  {job}: {ageLabel}
+                  <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} />
+                  {job}: {ageLabel}{suffix}
                 </span>
               );
             })}
