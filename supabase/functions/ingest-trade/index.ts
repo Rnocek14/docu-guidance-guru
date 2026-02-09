@@ -162,76 +162,11 @@ function getTradingDayKeyET(d: Date, resetHourET = 17): string {
   }).format(etMidnightUTC)
 }
 
-// Check if we need a daily reset (DST-safe)
-// Returns true if trading day has changed since last reset
-function needsDailyReset(lastResetAt: string | null, resetHourET = 17): boolean {
-  if (!lastResetAt) return true
-
-  const now = new Date()
-  const last = new Date(lastResetAt)
-
-  // If trading day key changed since last reset, we must reset
-  return getTradingDayKeyET(now, resetHourET) !== getTradingDayKeyET(last, resetHourET)
-}
-
 // For violations.breach_day (DATE), use the trading day key
 function getBreachDay(d: Date): string {
   return getTradingDayKeyET(d, 17)
 }
-
-// ========== BREACH DETECTION ==========
-
-// Check for rule breaches using frozen rule_snapshot
-// PnL Source-of-Truth: Option A - We trust platform-provided PnL
-function detectBreaches(
-  account: { 
-    starting_balance: number
-    current_balance: number
-    highest_balance: number
-    daily_pnl: number
-    daily_pnl_start_balance: number | null
-    rule_snapshot: RuleSnapshot 
-  },
-  newPnl: number,
-  newBalance: number
-): BreachResult {
-  const rules = account.rule_snapshot
-  const startBalance = account.starting_balance
-  const dailyStartBalance = account.daily_pnl_start_balance || account.current_balance
-  const newDailyPnl = account.daily_pnl + newPnl
-
-  // Check max daily loss
-  // Daily loss = how much we've lost today from the day's starting balance
-  if (newDailyPnl < 0) {
-    const dailyLossPct = (Math.abs(newDailyPnl) / dailyStartBalance) * 100
-    if (dailyLossPct >= rules.max_daily_loss_percent) {
-      return {
-        breached: true,
-        rule_type: 'max_daily_loss',
-        description: `Daily loss limit exceeded: ${dailyLossPct.toFixed(2)}% loss (limit: ${rules.max_daily_loss_percent}%)`,
-        actual_value: dailyLossPct,
-        threshold: rules.max_daily_loss_percent
-      }
-    }
-  }
-
-  // Check max total drawdown (from starting balance, not trailing)
-  // Drawdown = how far we are below starting balance
-  if (newBalance < startBalance) {
-    const drawdownPct = ((startBalance - newBalance) / startBalance) * 100
-    if (drawdownPct >= rules.max_total_drawdown_percent) {
-      return {
-        breached: true,
-        rule_type: 'max_total_drawdown',
-        description: `Total drawdown limit exceeded: ${drawdownPct.toFixed(2)}% below start (limit: ${rules.max_total_drawdown_percent}%)`,
-        actual_value: drawdownPct,
-        threshold: rules.max_total_drawdown_percent
-      }
-    }
-  }
-
-  return { breached: false }
-}
+// Note: daily reset + breach detection now handled atomically by ingest_trade_atomic RPC
 
 // Check if account is eligible to be marked as 'passed' (deterministic server-side)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -502,350 +437,246 @@ Deno.serve(async (req) => {
 
     const accountId = platformAccount.account_id
 
-    // Fetch account with rule_snapshot
-    const { data: account, error: accountError } = await supabase
-      .from('accounts')
-      .select('*')
-      .eq('id', accountId)
-      .single()
-
-    if (accountError || !account) {
-      return new Response(
-        JSON.stringify({ error: 'Account not found', request_id: requestId }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Check if account is in a terminal state
-    const terminalStates = ['failed_confirmed', 'passed', 'closed']
-    if (terminalStates.includes(account.status)) {
-      return new Response(
-        JSON.stringify({ 
-          error: 'Account in terminal state', 
-          status: account.status,
-          request_id: requestId
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // PnL Source-of-Truth: Option A - Platform-provided PnL is authoritative
-    // We store the raw payload for audit trail
+    // PnL Source-of-Truth: Platform-provided PnL is authoritative (Option A)
     const tradePnl = payload.pnl ?? 0
     const commission = payload.commission ?? 0
     const netPnl = tradePnl - commission
+    const tradingDay = getTradingDayKeyET(new Date(payload.filled_at), 17)
 
-    // Insert trade with raw_payload for audit (idempotent via unique constraint)
-    const { data: insertedTrade, error: tradeError } = await supabase
-      .from('trades')
-      .insert({
+    // ── ATOMIC RPC: lock → insert trade → metrics → breach detect → update ──
+    // Eliminates non-atomic gap where trade INSERT succeeds but account UPDATE fails
+    const { data: result, error: rpcError } = await supabase.rpc('ingest_trade_atomic', {
+      p_account_id: accountId,
+      p_platform_trade_id: payload.platform_trade_id,
+      p_platform_account_id: payload.platform_account_id,
+      p_symbol: payload.symbol,
+      p_side: payload.side,
+      p_quantity: payload.qty,
+      p_entry_price: payload.price,
+      p_net_pnl: netPnl,
+      p_commission: commission,
+      p_opened_at: payload.filled_at,
+      p_raw_payload: payload,
+      p_trading_day: tradingDay,
+    })
+
+    if (rpcError) {
+      const errMsg = rpcError.message || ''
+
+      if (errMsg.includes('ACCOUNT_NOT_FOUND')) {
+        return new Response(
+          JSON.stringify({ error: 'Account not found', request_id: requestId }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      if (errMsg.includes('ACCOUNT_TERMINAL')) {
+        return new Response(
+          JSON.stringify({ error: 'Account in terminal state', request_id: requestId }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      if (errMsg.includes('MISSING_RULE_SNAPSHOT')) {
+        return new Response(
+          JSON.stringify({ error: 'Account missing rule snapshot', request_id: requestId }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Log RPC failure
+      await supabase.from('audit_logs').insert({
         account_id: accountId,
-        platform_trade_id: payload.platform_trade_id,
-        platform_account_id: payload.platform_account_id,
-        symbol: payload.symbol,
-        side: payload.side,
-        quantity: payload.qty,
-        entry_price: payload.price,
-        pnl: netPnl,
-        commission: commission,
-        opened_at: payload.filled_at,
-        status: 'closed',
-        raw_payload: payload // Store original for audit trail
-      })
-      .select()
-      .single()
+        action: 'status_changed' as const,
+        request_id: requestId,
+        idempotency_key: `audit.ingest:rpc_fail:${accountId}:${payload.platform_trade_id}`,
+        prev_hash: 'COMPUTED_BY_TRIGGER',
+        row_hash: 'COMPUTED_BY_TRIGGER',
+        details: {
+          type: 'atomic_ingestion_failed',
+          error: errMsg,
+          platform_trade_id: payload.platform_trade_id,
+        },
+        reason: 'Atomic trade ingestion RPC failed',
+      }).catch(() => {})
 
-    // IDEMPOTENCY CHECK: On conflict/duplicate, exit BEFORE updating metrics
-    if (tradeError?.code === '23505') {
+      throw new Error(`ingest_trade_atomic failed: ${errMsg}`)
+    }
+
+    // ── Idempotency: duplicate trade ──
+    if (result.duplicate) {
       return new Response(
-        JSON.stringify({ 
-          success: true, 
+        JSON.stringify({
+          success: true,
           duplicate: true,
           platform_trade_id: payload.platform_trade_id,
-          request_id: requestId
+          request_id: requestId,
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    if (tradeError) {
-      // Log processing failure
-      await supabase.from('audit_logs').insert({
-        account_id: accountId,
-        action: 'status_changed',
-        request_id: requestId,
-        idempotency_key: `audit.ingest:trade_fail:${accountId}:${payload.platform_trade_id}`,
-        prev_hash: 'COMPUTED_BY_TRIGGER',
-        row_hash: 'COMPUTED_BY_TRIGGER',
-        details: {
-          type: 'trade_insert_failed',
-          error: tradeError.message,
-          platform_trade_id: payload.platform_trade_id
-        },
-        reason: 'Trade insertion failed'
-      })
-      throw new Error(`Failed to insert trade: ${tradeError.message}`)
-    }
-
-    // --- UPSERT DAILY STATS (idempotent, powers consistency checks) ---
-    const tradingDay = getTradingDayKeyET(new Date(payload.filled_at), 17)
-    try {
-      await supabase.rpc('upsert_daily_stat', {
-        _account_id: accountId,
-        _trading_day: tradingDay,
-        _pnl: netPnl,
-        _commission: commission,
-      })
-    } catch (dailyStatErr) {
-      // Non-fatal: log but don't fail trade ingestion
-      console.error('upsert_daily_stat error:', dailyStatErr)
-    }
-
-    // --- METRICS UPDATE (only after successful trade insert) ---
-
-    // Check for daily reset (DST-safe)
-    const resetHour = 17 // 5 PM ET (CME close)
-    const shouldResetDaily = needsDailyReset(account.daily_reset_at, resetHour)
-
-    let dailyPnl = account.daily_pnl
-    let dailyPnlStartBalance = account.daily_pnl_start_balance
-
-    if (shouldResetDaily) {
-      // Reset daily counters
-      dailyPnl = 0
-      dailyPnlStartBalance = account.current_balance
-    }
-
-    // Calculate new metrics
-    const newBalance = account.current_balance + netPnl
-    const newTotalPnl = account.total_pnl + netPnl
-    const newDailyPnl = dailyPnl + netPnl
-    const newHighestBalance = Math.max(account.highest_balance, newBalance)
-
-    // Detect breaches using frozen rule_snapshot
-    const breachResult = detectBreaches({
-      starting_balance: account.starting_balance,
-      current_balance: account.current_balance,
-      highest_balance: account.highest_balance,
-      daily_pnl: dailyPnl,
-      daily_pnl_start_balance: dailyPnlStartBalance,
-      rule_snapshot: account.rule_snapshot as RuleSnapshot
-    }, netPnl, newBalance)
-
-    // Build update data
-    const updateData: Record<string, unknown> = {
-      current_balance: newBalance,
-      total_pnl: newTotalPnl,
-      daily_pnl: newDailyPnl,
-      highest_balance: newHighestBalance,
-      last_trade_at: payload.filled_at,
-      updated_at: new Date().toISOString()
-    }
-
-    // Handle daily reset
-    if (shouldResetDaily) {
-      updateData.daily_pnl_start_balance = dailyPnlStartBalance
-      updateData.daily_reset_at = new Date().toISOString()
-    } else if (!account.daily_pnl_start_balance) {
-      updateData.daily_pnl_start_balance = account.current_balance
-    }
-
-    // If breach detected, update status (Detection Only - no terminal action)
-    if (breachResult.breached) {
-      updateData.status = 'breached_detected'
-    }
-
-    const { error: updateError } = await supabase
-      .from('accounts')
-      .update(updateData)
-      .eq('id', accountId)
-
-    if (updateError) {
-      // Log failure but don't throw - trade is already recorded
-      await supabase.from('audit_logs').insert({
-        account_id: accountId,
-        action: 'status_changed',
-        request_id: requestId,
-        idempotency_key: `audit.ingest:update_fail:${accountId}:${insertedTrade?.id ?? requestId}`,
-        prev_hash: 'COMPUTED_BY_TRIGGER',
-        row_hash: 'COMPUTED_BY_TRIGGER',
-        details: {
-          type: 'account_update_failed',
-          error: updateError.message,
-          trade_id: insertedTrade?.id
-        },
-        reason: 'Account metrics update failed after trade insert'
-      })
-      console.error('Account update failed:', updateError)
-    }
-
-    // Handle breach detection
-    if (breachResult.breached) {
-      // Calculate breach_day from TRADE TIMESTAMP (filled_at), not webhook receipt time
-      // This prevents disputes when webhooks delay around 5pm ET boundary
-      // Uses trading day key with 5pm ET rollover for DST-safe behavior
+    // ── POST-ATOMIC: Breach event recording ──
+    if (result.breach_detected) {
       const tradeTimestamp = new Date(payload.filled_at)
-      const detectedAt = new Date()
-      const detectedAtISO = detectedAt.toISOString()
-      const breachDay = getBreachDay(tradeTimestamp) // Trade time, not receipt time
+      const breachDay = getBreachDay(tradeTimestamp)
 
-      // Insert violation with trade linkage for dispute defense
-      // Uses upsert with onConflict to handle idempotency via unique index
+      // Violation with trade linkage for dispute defense
       const { error: violationError } = await supabase.from('violations').upsert(
         {
           account_id: accountId,
-          trade_id: insertedTrade?.id ?? null,
+          trade_id: result.trade_id ?? null,
           platform_trade_id: payload.platform_trade_id ?? null,
           breach_day: breachDay,
-          rule_type: breachResult.rule_type!,
-          description: breachResult.description!,
-          actual_value: breachResult.actual_value,
-          rule_threshold: breachResult.threshold,
-          detected_at: detectedAtISO
+          rule_type: result.breach_type,
+          description: result.breach_description,
+          actual_value: result.breach_actual,
+          rule_threshold: result.breach_threshold,
+          detected_at: new Date().toISOString(),
         },
-        {
-          onConflict: 'account_id,rule_type,trade_id',
-          ignoreDuplicates: true
-        }
+        { onConflict: 'account_id,rule_type,trade_id', ignoreDuplicates: true }
       )
-
       if (violationError) {
         console.error('Violation upsert error:', violationError)
-        // Non-fatal: log but continue - the breach is still recorded in account status
       }
 
-      // Write trader-visible account event (transparency)
+      // Trader-visible account event
       await supabase.from('account_events').upsert(
         {
           account_id: accountId,
-          event_type: 'breach_detected',
+          event_type: 'breach_detected' as const,
           request_id: requestId,
-          idempotency_key: `acctevt.breach:${accountId}:${breachResult.rule_type}:${insertedTrade?.id ?? requestId}`,
+          idempotency_key: `acctevt.breach:${accountId}:${result.breach_type}:${result.trade_id}`,
           event_data: {
-            rule: breachResult.rule_type,
-            current_value_pct: breachResult.actual_value?.toFixed(2),
-            limit_pct: breachResult.threshold,
-            description: breachResult.description,
+            rule: result.breach_type,
+            current_value_pct: typeof result.breach_actual === 'number'
+              ? result.breach_actual.toFixed(2)
+              : result.breach_actual,
+            limit_pct: result.breach_threshold,
+            description: result.breach_description,
             threshold_crossed_at: payload.filled_at,
-            trade_id: insertedTrade?.id,
-            explanation: `Your account triggered a ${breachResult.rule_type === 'max_daily_loss' ? 'daily loss' : 'total drawdown'} limit. ` +
-              `Current: ${breachResult.actual_value?.toFixed(2)}% | Limit: ${breachResult.threshold}%. ` +
+            trade_id: result.trade_id,
+            explanation:
+              `Your account triggered a ${result.breach_type === 'max_daily_loss' ? 'daily loss' : 'total drawdown'} limit. ` +
+              `Current: ${typeof result.breach_actual === 'number' ? result.breach_actual.toFixed(2) : result.breach_actual}% | Limit: ${result.breach_threshold}%. ` +
               `This requires human review before any terminal decision.`,
-            next_step: 'Under review — human confirmation required'
-          }
+            next_step: 'Under review — human confirmation required',
+          },
         },
         { onConflict: 'idempotency_key', ignoreDuplicates: true }
       )
 
-      // Write internal audit log
+      // Internal audit log
       await supabase.from('audit_logs').upsert(
         {
           account_id: accountId,
-          action: 'breach_detected',
+          action: 'breach_detected' as const,
           request_id: requestId,
-          idempotency_key: `audit.ingest:breach:${accountId}:${breachResult.rule_type}:${insertedTrade?.id ?? requestId}`,
+          idempotency_key: `audit.ingest:breach:${accountId}:${result.breach_type}:${result.trade_id}`,
           prev_hash: 'COMPUTED_BY_TRIGGER',
           row_hash: 'COMPUTED_BY_TRIGGER',
           details: {
-            rule_type: breachResult.rule_type,
-            actual_value: breachResult.actual_value,
-            threshold: breachResult.threshold,
-            trade_id: insertedTrade?.id,
+            rule_type: result.breach_type,
+            actual_value: result.breach_actual,
+            threshold: result.breach_threshold,
+            trade_id: result.trade_id,
             platform_trade_id: payload.platform_trade_id,
             net_pnl: netPnl,
-            new_balance: newBalance
+            new_balance: result.new_balance,
           },
-          reason: breachResult.description
+          reason: result.breach_description,
         },
         { onConflict: 'idempotency_key', ignoreDuplicates: true }
       )
     }
 
-    // --- AUTO-PASS DETECTION (P0-3) ---
-    // Only check if no breach was detected and account is still active
+    // ── POST-ATOMIC: Auto-pass detection ──
     let passEligibility: PassEligibilityResult | null = null
     let accountPassed = false
-    
-    if (!breachResult.breached && account.status === 'active') {
+
+    if (!result.breach_detected && result.previous_status === 'active') {
       passEligibility = await checkPassEligibility(
         supabase,
         accountId,
         {
-          status: account.status,
-          starting_balance: account.starting_balance,
-          current_balance: account.current_balance,
-          trading_days_count: account.trading_days_count,
-          rule_snapshot: account.rule_snapshot as RuleSnapshot
+          status: 'active',
+          starting_balance: Number(result.starting_balance),
+          current_balance: Number(result.new_balance),
+          trading_days_count: Number(result.trading_days_count),
+          rule_snapshot: result.rule_snapshot as RuleSnapshot,
         },
-        newBalance
+        Number(result.new_balance)
       )
-      
+
       if (passEligibility.eligible) {
-        // Update account to 'passed' status
         const { error: passError } = await supabase
           .from('accounts')
           .update({
             status: 'passed',
             passed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
           })
           .eq('id', accountId)
           .eq('status', 'active') // Defensive: only if still active
-        
+
         if (!passError) {
           accountPassed = true
-          
-          // Determine phase-aware messaging
-          const cohortPhase = (account.rule_snapshot as RuleSnapshot & { cohort_phase?: string })?.cohort_phase || 'evaluation'
-          const phaseLabel = cohortPhase === 'evaluation' ? 'evaluation' : cohortPhase === 'verification' ? 'verification' : 'performance'
-          const nextStepMsg = cohortPhase === 'performance' 
-            ? 'You can now request a payout'
-            : `You'll be automatically enrolled in the next phase`
 
-          // Write trader-visible event (idempotent via request_id)
+          // Phase-aware messaging
+          const ruleSnapshot = result.rule_snapshot as RuleSnapshot & { cohort_phase?: string }
+          const cohortPhase = ruleSnapshot?.cohort_phase || 'evaluation'
+          const phaseLabel =
+            cohortPhase === 'evaluation'
+              ? 'evaluation'
+              : cohortPhase === 'verification'
+                ? 'verification'
+                : 'performance'
+          const nextStepMsg =
+            cohortPhase === 'performance'
+              ? 'You can now request a payout'
+              : `You'll be automatically enrolled in the next phase`
+
+          // Trader-visible pass event
           await supabase.from('account_events').upsert(
             {
               account_id: accountId,
-              event_type: 'passed',
+              event_type: 'passed' as const,
               request_id: requestId,
+              idempotency_key: `acctevt.passed:${accountId}:${requestId}`,
               event_data: {
                 profit_pct: passEligibility.metrics.profit_pct.toFixed(2),
                 profit_target_pct: passEligibility.metrics.profit_target_pct,
                 trading_days: passEligibility.metrics.trading_days,
                 min_trading_days: passEligibility.metrics.min_trading_days,
-                final_balance: newBalance,
+                final_balance: Number(result.new_balance),
                 phase: phaseLabel,
-                explanation: `Congratulations! You've successfully completed your ${phaseLabel}. ` +
+                explanation:
+                  `Congratulations! You've successfully completed your ${phaseLabel}. ` +
                   `Profit: ${passEligibility.metrics.profit_pct.toFixed(2)}% (target: ${passEligibility.metrics.profit_target_pct}%). ` +
                   `Trading days: ${passEligibility.metrics.trading_days} (minimum: ${passEligibility.metrics.min_trading_days}).`,
-                next_step: nextStepMsg
-              }
+                next_step: nextStepMsg,
+              },
             },
-            {
-              onConflict: 'account_id,request_id',
-              ignoreDuplicates: true
-            }
+            { onConflict: 'idempotency_key', ignoreDuplicates: true }
           )
-          
-          // Write internal audit log (idempotent)
+
+          // Internal audit log for pass
           await supabase.from('audit_logs').upsert(
             {
               account_id: accountId,
-              action: 'status_changed',
+              action: 'status_changed' as const,
               request_id: requestId,
+              idempotency_key: `audit.ingest:auto_pass:${accountId}:${requestId}`,
+              prev_hash: 'COMPUTED_BY_TRIGGER',
+              row_hash: 'COMPUTED_BY_TRIGGER',
               details: {
                 type: 'auto_pass',
                 previous_status: 'active',
                 new_status: 'passed',
                 phase: phaseLabel,
-                eligibility: passEligibility.metrics
+                eligibility: passEligibility.metrics,
               },
-              reason: `Account automatically passed ${phaseLabel} criteria`
+              reason: `Account automatically passed ${phaseLabel} criteria`,
             },
-            {
-              onConflict: 'account_id,request_id',
-              ignoreDuplicates: true
-            }
+            { onConflict: 'idempotency_key', ignoreDuplicates: true }
           )
 
           // Auto-spawn next phase account (idempotent via transition table)
@@ -859,11 +690,10 @@ Deno.serve(async (req) => {
             } else if (spawnResult?.spawned) {
               console.log(
                 `Phase transition: ${accountId} -> ${spawnResult.to_account_id}` +
-                ` (already_existed: ${spawnResult.already_existed})`
+                  ` (already_existed: ${spawnResult.already_existed})`
               )
             }
           } catch (spawnErr) {
-            // Non-fatal: log but don't fail the trade ingestion
             console.error('spawn_next_phase_account exception:', spawnErr)
           }
         } else {
@@ -878,24 +708,28 @@ Deno.serve(async (req) => {
         success: true,
         duplicate: false,
         request_id: requestId,
-        trade_id: insertedTrade?.id,
+        trade_id: result.trade_id,
         account_id: accountId,
-        new_balance: newBalance,
-        daily_pnl: newDailyPnl,
-        daily_reset_occurred: shouldResetDaily,
-        breach_detected: breachResult.breached,
-        breach_details: breachResult.breached ? {
-          rule: breachResult.rule_type,
-          actual_pct: breachResult.actual_value,
-          limit_pct: breachResult.threshold,
-          description: breachResult.description
-        } : undefined,
+        new_balance: result.new_balance,
+        daily_pnl: result.new_daily_pnl,
+        daily_reset_occurred: result.daily_reset_occurred,
+        breach_detected: result.breach_detected,
+        breach_details: result.breach_detected
+          ? {
+              rule: result.breach_type,
+              actual_pct: result.breach_actual,
+              limit_pct: result.breach_threshold,
+              description: result.breach_description,
+            }
+          : undefined,
         account_passed: accountPassed,
-        pass_eligibility: passEligibility ? {
-          eligible: passEligibility.eligible,
-          reason: passEligibility.reason,
-          metrics: passEligibility.metrics
-        } : undefined
+        pass_eligibility: passEligibility
+          ? {
+              eligible: passEligibility.eligible,
+              reason: passEligibility.reason,
+              metrics: passEligibility.metrics,
+            }
+          : undefined,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

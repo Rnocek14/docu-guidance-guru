@@ -855,6 +855,27 @@ export type Database = {
         }
         Relationships: []
       }
+      internal_secrets: {
+        Row: {
+          created_at: string
+          key: string
+          updated_at: string
+          value: string
+        }
+        Insert: {
+          created_at?: string
+          key: string
+          updated_at?: string
+          value: string
+        }
+        Update: {
+          created_at?: string
+          key?: string
+          updated_at?: string
+          value?: string
+        }
+        Relationships: []
+      }
       jurisdiction_rules: {
         Row: {
           allow_evaluation: boolean
@@ -2515,6 +2536,23 @@ export type Database = {
         Args: { curlopt: string; value: string }
         Returns: boolean
       }
+      ingest_trade_atomic: {
+        Args: {
+          p_account_id: string
+          p_commission: number
+          p_entry_price: number
+          p_net_pnl: number
+          p_opened_at: string
+          p_platform_account_id: string
+          p_platform_trade_id: string
+          p_quantity: number
+          p_raw_payload: Json
+          p_side: string
+          p_symbol: string
+          p_trading_day: string
+        }
+        Returns: Json
+      }
       initiate_payout_payment: {
         Args: {
           _amount: number
@@ -2651,6 +2689,10 @@ export type Database = {
           _reason: string
         }
         Returns: Json
+      }
+      trading_day_et: {
+        Args: { reset_hour?: number; ts: string }
+        Returns: string
       }
       upsert_daily_stat: {
         Args: {

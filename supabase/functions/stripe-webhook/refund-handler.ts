@@ -68,6 +68,106 @@ export async function handleChargeRefunded(
   const previousStatus = account.status
   const alreadyTerminal = TERMINAL_STATUSES.includes(previousStatus)
 
+  // ── Step 3.5: Cancel in-flight payouts (P0: refund-after-payout protection) ──
+  // Must run before account invalidation to prevent double-loss
+  const CANCELLABLE_STATUSES: Array<'pending' | 'under_review' | 'approved'> = ['pending', 'under_review', 'approved']
+  const { data: cancellablePayouts } = await supabase
+    .from('payouts')
+    .select('id, status, amount')
+    .eq('account_id', accountId)
+    .in('status', CANCELLABLE_STATUSES)
+
+  const { data: initiatedPayouts } = await supabase
+    .from('payouts')
+    .select('id, status, amount')
+    .eq('account_id', accountId)
+    .eq('status', 'payment_initiated')
+
+  // Auto-reject cancellable payouts (funds not yet sent)
+  if (cancellablePayouts && cancellablePayouts.length > 0) {
+    for (const payout of cancellablePayouts) {
+      await supabase
+        .from('payouts')
+        .update({
+          status: 'rejected',
+          review_notes: `Auto-rejected: payment refunded (charge ${charge.id})`,
+          reviewed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', payout.id)
+        .in('status', CANCELLABLE_STATUSES) // Defensive: only if still in cancellable state
+    }
+
+    const totalCancelled = cancellablePayouts.reduce((s, p) => s + Number(p.amount), 0)
+    console.log(
+      `Refund guard: auto-rejected ${cancellablePayouts.length} payout(s) totalling $${totalCancelled.toFixed(2)} ` +
+      `for account ${accountId} on charge ${charge.id}`
+    )
+
+    // Staff notification
+    const { error: cancelNotifErr } = await supabase.from('staff_notifications').insert({
+      notification_type: 'refund_payout_conflict',
+      title: `🚨 Refund auto-rejected ${cancellablePayouts.length} payout(s)`,
+      body: `Account ${account.account_number || accountId}: ${cancellablePayouts.length} payout(s) totalling $${totalCancelled.toFixed(2)} auto-rejected due to refund on charge ${charge.id}.`,
+      data: {
+        account_id: accountId,
+        charge_id: charge.id,
+        cancelled_payouts: cancellablePayouts.map(p => ({ id: p.id, status: p.status, amount: p.amount })),
+        user_id: account.user_id,
+      },
+      idempotency_key: `refund_payout_cancel:${charge.id}:${accountId}`,
+    })
+    if (cancelNotifErr && cancelNotifErr.code !== '23505') {
+      console.error('Cancel payout notification failed:', cancelNotifErr.message)
+    }
+
+    // Audit log per cancelled payout
+    for (const payout of cancellablePayouts) {
+      const { error: cancelAuditErr } = await supabase.from('audit_logs').insert({
+        account_id: accountId,
+        user_id: account.user_id,
+        action: 'status_changed' as const,
+        idempotency_key: `audit.refund_payout_cancel:${charge.id}:${payout.id}`,
+        details: {
+          type: 'refund_cancelled_payout',
+          payout_id: payout.id,
+          previous_payout_status: payout.status,
+          payout_amount: payout.amount,
+          charge_id: charge.id,
+        },
+        reason: `Payout auto-rejected due to payment refund on charge ${charge.id}`,
+      })
+      if (cancelAuditErr && cancelAuditErr.code !== '23505') {
+        console.error('Cancel payout audit failed:', cancelAuditErr.message)
+      }
+    }
+  }
+
+  // CRITICAL: payment_initiated payouts — funds may be in transit, cannot auto-cancel
+  if (initiatedPayouts && initiatedPayouts.length > 0) {
+    const totalAtRisk = initiatedPayouts.reduce((s, p) => s + Number(p.amount), 0)
+
+    await supabase.from('staff_notifications').insert({
+      notification_type: 'refund_funds_in_transit',
+      title: '🚨🚨 CRITICAL: Refund + funds in transit',
+      body: `Account ${account.account_number || accountId}: refund on charge ${charge.id} but ` +
+        `${initiatedPayouts.length} payout(s) totalling $${totalAtRisk.toFixed(2)} are in payment_initiated state. ` +
+        `FUNDS MAY ALREADY BE RELEASED. Manual reconciliation required immediately.`,
+      data: {
+        account_id: accountId,
+        charge_id: charge.id,
+        at_risk_payouts: initiatedPayouts.map(p => ({ id: p.id, amount: p.amount })),
+        user_id: account.user_id,
+      },
+      idempotency_key: `refund_in_transit:${charge.id}:${accountId}`,
+    }).catch(() => {})
+
+    console.error(
+      `CRITICAL: Refund ${charge.id} on account ${accountId} with ${initiatedPayouts.length} ` +
+      `payment_initiated payout(s). Total at risk: $${totalAtRisk.toFixed(2)}. Manual reconciliation required.`
+    )
+  }
+
   // ── Step 4: Invalidate account (only if not already terminal) ─
   if (!alreadyTerminal) {
     const { error: updateError } = await supabase
