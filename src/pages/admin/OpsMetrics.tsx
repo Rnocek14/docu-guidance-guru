@@ -47,6 +47,21 @@ function worstAlertSignal(level: string): Signal {
   return 'red'; // high, severe, emergency
 }
 
+/** Parse Postgres interval string to minutes. Handles "HH:MM:SS", "N day(s)", "N day(s) HH:MM:SS" */
+function parseIntervalToMinutes(interval: string): number {
+  if (!interval) return 24 * 60; // fallback: 1 day
+  let totalMinutes = 0;
+  // Match days
+  const dayMatch = interval.match(/(\d+)\s*day/i);
+  if (dayMatch) totalMinutes += parseInt(dayMatch[1], 10) * 24 * 60;
+  // Match HH:MM:SS
+  const timeMatch = interval.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (timeMatch) {
+    totalMinutes += parseInt(timeMatch[1], 10) * 60 + parseInt(timeMatch[2], 10);
+  }
+  return totalMinutes || 24 * 60; // fallback if unparseable
+}
+
 // ── Data hooks ──
 
 function useDisputeRate() {
@@ -103,25 +118,42 @@ function usePayoutPipeline() {
   return useQuery({
     queryKey: ['ops-payout-pipeline'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('payouts')
-        .select('status, amount, updated_at')
-        .in('status', ['pending', 'under_review', 'approved', 'payment_initiated', 'payment_failed']);
-      if (error) throw error;
+      // Fetch payouts + payout_payments for accurate stuck detection
+      const [payoutsRes, paymentsRes] = await Promise.all([
+        supabase
+          .from('payouts')
+          .select('id, status, amount, updated_at')
+          .in('status', ['pending', 'under_review', 'approved', 'payment_initiated', 'payment_failed']),
+        supabase
+          .from('payout_payments')
+          .select('payout_id, status, initiated_at')
+          .eq('status', 'initiated'),
+      ]);
+      if (payoutsRes.error) throw payoutsRes.error;
 
       const now = new Date();
       const buckets: Record<string, { count: number; total: number }> = {};
       let oldestInitiatedHours = 0;
 
-      for (const p of data || []) {
+      // Index payout_payments by payout_id for O(1) lookup
+      const paymentsByPayoutId = new Map<string, string>();
+      for (const pp of paymentsRes.data || []) {
+        paymentsByPayoutId.set(pp.payout_id, pp.initiated_at);
+      }
+
+      for (const p of payoutsRes.data || []) {
         if (!buckets[p.status]) buckets[p.status] = { count: 0, total: 0 };
         buckets[p.status].count++;
         buckets[p.status].total += Number(p.amount) || 0;
 
-        // Track how long the oldest payment_initiated has been stuck
-        if (p.status === 'payment_initiated' && p.updated_at) {
-          const hours = differenceInHours(now, new Date(p.updated_at));
-          if (hours > oldestInitiatedHours) oldestInitiatedHours = hours;
+        // Use payout_payments.initiated_at for accurate stuck detection,
+        // fall back to payouts.updated_at if no payment record
+        if (p.status === 'payment_initiated') {
+          const initiatedAt = paymentsByPayoutId.get(p.id) ?? p.updated_at;
+          if (initiatedAt) {
+            const hours = differenceInHours(now, new Date(initiatedAt));
+            if (hours > oldestInitiatedHours) oldestInitiatedHours = hours;
+          }
         }
       }
       return { buckets, oldestInitiatedHours };
@@ -152,18 +184,18 @@ function useCronHealth() {
         const successRate = recent.length > 0 ? (successCount / recent.length) * 100 : 0;
         const lastRun = jobRuns[0]?.ran_at;
 
-        // Staleness: if last run is older than 2x expected interval, it's stale
+        // Parse expected_interval (Postgres interval string e.g. "01:00:00", "1 day", "00:05:00")
+        const expectedMinutes = parseIntervalToMinutes(cfg.expected_interval as string);
         const lastRunDate = lastRun ? new Date(lastRun) : null;
         const minutesSinceLastRun = lastRunDate ? differenceInMinutes(now, lastRunDate) : Infinity;
-        // expected_interval is an interval type — we can't easily parse it client-side,
-        // so use a heuristic: if no run in 24h, mark stale
-        const isStale = minutesSinceLastRun > 24 * 60;
+        // Stale if no run in 2x the expected interval
+        const isStale = minutesSinceLastRun > expectedMinutes * 2;
 
         let signal: Signal = 'green';
         if (isStale || !lastRun || successRate < cfg.red_if_success_rate_below) signal = 'red';
         else if (successRate < cfg.yellow_if_success_rate_below) signal = 'yellow';
 
-        return { name: cfg.jobname, signal, successRate, lastRun, isStale };
+        return { name: cfg.jobname, signal, successRate, lastRun, isStale, expectedMinutes };
       });
 
       const worst: Signal = jobResults.some((j) => j.signal === 'red')
@@ -178,6 +210,32 @@ function useCronHealth() {
   });
 }
 
+function useDataFreshness() {
+  const MONITOR_JOBS = ['daily-risk-snapshot', 'check-dispute-rate', 'cron-health-monitor'];
+  return useQuery({
+    queryKey: ['ops-data-freshness'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('cron_http_runs')
+        .select('jobname, ran_at, http_status')
+        .in('jobname', MONITOR_JOBS)
+        .order('ran_at', { ascending: false })
+        .limit(50);
+
+      const results: Record<string, { lastRun: string | null; ok: boolean }> = {};
+      for (const job of MONITOR_JOBS) {
+        const latest = (data || []).find((r) => r.jobname === job);
+        results[job] = {
+          lastRun: latest?.ran_at ?? null,
+          ok: latest ? (latest.http_status ?? 0) >= 200 && (latest.http_status ?? 0) < 300 : false,
+        };
+      }
+      return results;
+    },
+    refetchInterval: 60_000,
+  });
+}
+
 // ── Component ──
 
 export default function OpsMetrics() {
@@ -186,6 +244,7 @@ export default function OpsMetrics() {
   const snapshot = useLatestSnapshot();
   const pipeline = usePayoutPipeline();
   const cron = useCronHealth();
+  const freshness = useDataFreshness();
 
   const isLoading = dispute.isLoading || breaker.isLoading || snapshot.isLoading || pipeline.isLoading || cron.isLoading;
   const isRefetching = dispute.isRefetching || breaker.isRefetching || snapshot.isRefetching || pipeline.isRefetching || cron.isRefetching;
@@ -196,6 +255,7 @@ export default function OpsMetrics() {
     snapshot.refetch();
     pipeline.refetch();
     cron.refetch();
+    freshness.refetch();
   };
 
   // ── Build cards ──
@@ -370,6 +430,26 @@ export default function OpsMetrics() {
             </button>
           </div>
         </div>
+
+        {/* Data freshness bar */}
+        {freshness.data && (
+          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground bg-muted/50 rounded-lg px-4 py-2.5 items-center">
+            <span className="font-medium text-foreground">Monitor health:</span>
+            {Object.entries(freshness.data).map(([job, info]) => {
+              const age = info.lastRun ? differenceInMinutes(new Date(), new Date(info.lastRun)) : null;
+              const ageLabel = age !== null
+                ? age < 60 ? `${age}m ago` : `${Math.round(age / 60)}h ago`
+                : 'never';
+              const isOk = info.ok && age !== null && age < 26 * 60;
+              return (
+                <span key={job} className="flex items-center gap-1.5">
+                  <span className={`inline-block h-2 w-2 rounded-full ${isOk ? 'bg-green-500' : 'bg-red-500'}`} />
+                  {job}: {ageLabel}
+                </span>
+              );
+            })}
+          </div>
+        )}
 
         {/* Cards grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
