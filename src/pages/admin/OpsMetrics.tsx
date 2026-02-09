@@ -49,17 +49,17 @@ function worstAlertSignal(level: string): Signal {
 
 /** Parse Postgres interval string to minutes. Handles "HH:MM:SS", "N day(s)", "N day(s) HH:MM:SS" */
 function parseIntervalToMinutes(interval: string): number {
-  if (!interval) return 24 * 60; // fallback: 1 day
+  if (!interval) return 60; // conservative fallback
   let totalMinutes = 0;
-  // Match days
-  const dayMatch = interval.match(/(\d+)\s*day/i);
+  // Match days (handles "day" and "days")
+  const dayMatch = interval.match(/(\d+)\s*days?/i);
   if (dayMatch) totalMinutes += parseInt(dayMatch[1], 10) * 24 * 60;
   // Match HH:MM:SS
   const timeMatch = interval.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
   if (timeMatch) {
     totalMinutes += parseInt(timeMatch[1], 10) * 60 + parseInt(timeMatch[2], 10);
   }
-  return totalMinutes || 24 * 60; // fallback if unparseable
+  return totalMinutes || 60; // conservative fallback if unparseable
 }
 
 // ── Data hooks ──
@@ -215,19 +215,36 @@ function useDataFreshness() {
   return useQuery({
     queryKey: ['ops-data-freshness'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('cron_http_runs')
-        .select('jobname, ran_at, http_status')
-        .in('jobname', MONITOR_JOBS)
-        .order('ran_at', { ascending: false })
-        .limit(50);
+      const [runsRes, configRes] = await Promise.all([
+        supabase
+          .from('cron_http_runs')
+          .select('jobname, ran_at, http_status')
+          .in('jobname', MONITOR_JOBS)
+          .order('ran_at', { ascending: false })
+          .limit(50),
+        supabase
+          .from('cron_health_config')
+          .select('jobname, expected_interval')
+          .in('jobname', MONITOR_JOBS),
+      ]);
 
-      const results: Record<string, { lastRun: string | null; ok: boolean }> = {};
+      // Build expected-interval lookup
+      const intervalMap = new Map<string, number>();
+      for (const cfg of configRes.data || []) {
+        intervalMap.set(cfg.jobname, parseIntervalToMinutes(cfg.expected_interval as string));
+      }
+
+      const now = new Date();
+      const results: Record<string, { lastRun: string | null; ok: boolean; expectedMinutes: number }> = {};
       for (const job of MONITOR_JOBS) {
-        const latest = (data || []).find((r) => r.jobname === job);
+        const latest = (runsRes.data || []).find((r) => r.jobname === job);
+        const expectedMinutes = intervalMap.get(job) ?? 60;
+        const ageMinutes = latest?.ran_at ? differenceInMinutes(now, new Date(latest.ran_at)) : Infinity;
+        const statusOk = latest ? (latest.http_status ?? 0) >= 200 && (latest.http_status ?? 0) < 300 : false;
         results[job] = {
           lastRun: latest?.ran_at ?? null,
-          ok: latest ? (latest.http_status ?? 0) >= 200 && (latest.http_status ?? 0) < 300 : false,
+          ok: statusOk && ageMinutes <= expectedMinutes * 2,
+          expectedMinutes,
         };
       }
       return results;
