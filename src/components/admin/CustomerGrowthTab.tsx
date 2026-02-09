@@ -43,7 +43,7 @@ export function CustomerGrowthTab({ cohortBands, accountsPerMonth, horizon }: Cu
 
   const stats = [
     { label: 'Total Customers', value: totalCustomers.toLocaleString(), icon: Users, desc: `${accountsPerMonth}/mo × ${horizon} months` },
-    { label: 'Peak Eligible Pool', value: peakEligible.toLocaleString(), icon: UserCheck, desc: 'Max funded accounts in any month' },
+    { label: 'Peak Eligible Pool', value: peakEligible.toLocaleString(), icon: UserCheck, desc: 'Max performance accounts in any month' },
     { label: 'Cap-Hit Rate', value: `${(capHitRate * 100).toFixed(1)}%`, icon: UserX, desc: `${finalCapHits.toLocaleString()} accounts hit lifetime cap` },
     { label: 'Avg Active Months', value: avgLifetime.toFixed(1), icon: TrendingUp, desc: 'Avg months an account stays eligible' },
   ];

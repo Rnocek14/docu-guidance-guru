@@ -1,5 +1,5 @@
 /**
- * Monte Carlo Simulation Engine for Prop Trading Platform Economics
+ * Monte Carlo Simulation Engine for Simulated Evaluation Platform Economics
  * 
  * Seeded by default for reproducible results (CI/regression-safe).
  * Pure functions, no side effects, no UI dependencies.
@@ -604,7 +604,7 @@ function simulateMonth(
     }
     
     // =====================================================================
-    // VELOCITY GATES: throttle repeat withdrawals (don't block first payouts)
+    // VELOCITY GATES: throttle repeat payout requests (don't block first payouts)
     // =====================================================================
     
     // Gate 1: Minimum winning days since last payout

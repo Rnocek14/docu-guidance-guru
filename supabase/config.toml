@@ -41,3 +41,6 @@ verify_jwt = false
 
 [functions.retry-fulfillment-queue]
 verify_jwt = false
+
+[functions.check-dispute-rate]
+verify_jwt = false
