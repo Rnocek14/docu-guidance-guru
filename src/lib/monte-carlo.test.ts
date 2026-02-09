@@ -26,6 +26,12 @@ const LONG_CONFIG: MonteCarloConfig = {
   seed: 42,
 };
 
+// Uncapped variant for tests that need to compare capped vs uncapped
+const UNCAPPED_ASSUMPTIONS = {
+  ...DEFAULT_ASSUMPTIONS,
+  knobs: { ...DEFAULT_ASSUMPTIONS.knobs, lifetimeCapPerUser: null as number | null },
+};
+
 // ============================================================================
 // MECHANICAL INVARIANTS
 // These tests verify the simulation engine works correctly, regardless of
@@ -74,7 +80,7 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
     });
 
     it('unlimited cap has zero binding rate', () => {
-      const result = runMonteCarlo(QUICK_CONFIG, DEFAULT_ASSUMPTIONS); // no lifetime cap
+      const result = runMonteCarlo(QUICK_CONFIG, UNCAPPED_ASSUMPTIONS);
       
       // Binding rate must be 0 when cap is null (not just completed count)
       // This verifies accountsHitLifetimeCap only increments for cap hits, not other exits
@@ -351,7 +357,7 @@ describe('Scenario Comparisons (Relative Behavior)', () => {
   }, 15000);
 
   it('lifetime cap improves economics vs uncapped', () => {
-    const uncapped = runMonteCarlo(FULL_CONFIG, DEFAULT_ASSUMPTIONS);
+    const uncapped = runMonteCarlo(FULL_CONFIG, UNCAPPED_ASSUMPTIONS);
     const capped = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withLifetimeCap7x);
     
     expect(capped.profit.mean).toBeGreaterThan(uncapped.profit.mean);
@@ -359,7 +365,10 @@ describe('Scenario Comparisons (Relative Behavior)', () => {
   }, 15000);
 
   it('lifetime cap mitigates attack damage', () => {
-    const attackNoCap = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.coordinatedAttack);
+    const attackNoCap = runMonteCarlo(FULL_CONFIG, {
+      ...SCENARIO_PRESETS.coordinatedAttack,
+      knobs: { ...SCENARIO_PRESETS.coordinatedAttack.knobs, lifetimeCapPerUser: null },
+    });
     const attackWithCap = runMonteCarlo(FULL_CONFIG, {
       ...SCENARIO_PRESETS.coordinatedAttack,
       knobs: { ...SCENARIO_PRESETS.coordinatedAttack.knobs, lifetimeCapPerUser: 1043 },
