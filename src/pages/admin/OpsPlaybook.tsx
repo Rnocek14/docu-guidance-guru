@@ -1,9 +1,10 @@
+import { useEffect, useRef } from 'react';
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { AlertTriangle, Shield, DollarSign, Clock, Zap, Globe, Activity, Users, ShoppingCart, TrendingUp, BookOpen } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 
 interface Runbook {
   id: string;
@@ -218,6 +219,21 @@ const killSwitches = [
 ];
 
 export default function OpsPlaybook() {
+  const location = useLocation();
+  const hash = location.hash?.replace('#', '');
+
+  // Auto-open and scroll to the targeted runbook section
+  const defaultOpen = hash ? [hash] : [];
+
+  useEffect(() => {
+    if (hash) {
+      const el = document.getElementById(hash);
+      if (el) {
+        setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+      }
+    }
+  }, [hash]);
+
   return (
     <DashboardLayout title="Ops Playbook" navItems={adminNavItems}>
       <div className="space-y-6 max-w-4xl">
@@ -256,11 +272,11 @@ export default function OpsPlaybook() {
         </Card>
 
         {/* Runbook accordion */}
-        <Accordion type="multiple" className="space-y-2">
+        <Accordion type="multiple" defaultValue={defaultOpen} className="space-y-2">
           {runbooks.map((rb) => {
             const sev = severityConfig[rb.severity];
             return (
-              <AccordionItem key={rb.id} value={rb.id} className="border rounded-lg px-1">
+              <AccordionItem key={rb.id} value={rb.id} id={rb.id} className="border rounded-lg px-1 scroll-mt-24">
                 <AccordionTrigger className="hover:no-underline py-3 px-3">
                   <div className="flex items-center gap-3 text-left">
                     {rb.icon}
