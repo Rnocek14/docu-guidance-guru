@@ -3,7 +3,7 @@ import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLay
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { AlertTriangle, Shield, DollarSign, Clock, Zap, Globe, Activity, Users, ShoppingCart, TrendingUp, BookOpen } from 'lucide-react';
+import { AlertTriangle, Shield, DollarSign, Clock, Zap, Globe, Activity, Users, ShoppingCart, TrendingUp, BookOpen, FileText } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
 interface Runbook {
@@ -208,6 +208,14 @@ const runbooks: Runbook[] = [
   },
 ];
 
+// ── Playbook version & audit trail ──
+const PLAYBOOK_VERSION = 'v1.0';
+const PLAYBOOK_LAST_REVIEWED = '2026-02-09';
+const PLAYBOOK_REVIEWED_BY = 'Launch team';
+const PLAYBOOK_CHANGELOG = [
+  { version: 'v1.0', date: '2026-02-09', note: 'Initial locked version — 10 runbooks, kill switch reference, crisis priority order' },
+];
+
 const killSwitches = [
   { name: 'Pause inbound payments', table: 'payment_system_state', column: 'is_paused_inbound', effect: 'Blocks all new checkouts' },
   { name: 'Pause outbound payments', table: 'payment_system_state', column: 'is_paused_outbound', effect: 'Blocks all payout disbursements' },
@@ -248,9 +256,19 @@ export default function OpsPlaybook() {
           <p className="text-muted-foreground">
             Incident runbooks for every automated alert. Follow step-by-step when things go wrong.
           </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Full version: <code>docs/OPS_PLAYBOOK.md</code> in the repository
-          </p>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            <Badge variant="outline" className="text-xs gap-1">
+              <FileText className="h-3 w-3" />
+              {PLAYBOOK_VERSION}
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              Last reviewed: {PLAYBOOK_LAST_REVIEWED} by {PLAYBOOK_REVIEWED_BY}
+            </span>
+            <span className="text-xs text-muted-foreground">·</span>
+            <span className="text-xs text-muted-foreground">
+              Full version: <code>docs/OPS_PLAYBOOK.md</code>
+            </span>
+          </div>
         </div>
 
         {/* Crisis priority order */}
@@ -361,6 +379,27 @@ export default function OpsPlaybook() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Changelog */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Playbook Changelog
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {PLAYBOOK_CHANGELOG.map((entry) => (
+                <div key={entry.version} className="flex items-start gap-3 text-sm">
+                  <Badge variant="outline" className="text-xs shrink-0">{entry.version}</Badge>
+                  <span className="text-xs text-muted-foreground shrink-0">{entry.date}</span>
+                  <span className="text-sm">{entry.note}</span>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
