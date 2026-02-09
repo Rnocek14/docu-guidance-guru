@@ -84,7 +84,7 @@ export default function TraderPayouts() {
   };
 
   const totalPaid = payouts?.filter((p) => isTerminalPaid(p.status)).reduce((sum, p) => sum + p.amount, 0) || 0;
-  const pendingAmount = payouts?.filter((p) => ['pending', 'under_review', 'approved'].includes(p.status)).reduce((sum, p) => sum + p.amount, 0) || 0;
+  const pendingAmount = payouts?.filter((p) => ['pending', 'under_review', 'approved', 'payment_initiated'].includes(p.status)).reduce((sum, p) => sum + p.amount, 0) || 0;
 
   return (
     <DashboardLayout title="My Payouts" navItems={traderNavItems}>
