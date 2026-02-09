@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -222,15 +222,18 @@ export default function OpsPlaybook() {
   const location = useLocation();
   const hash = location.hash?.replace('#', '');
 
-  // Auto-open and scroll to the targeted runbook section
-  const defaultOpen = hash ? [hash] : [];
+  // Controlled accordion state so hash navigation works after initial render
+  const [openItems, setOpenItems] = useState<string[]>(hash ? [hash] : []);
 
   useEffect(() => {
     if (hash) {
-      const el = document.getElementById(hash);
-      if (el) {
-        setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
-      }
+      // Ensure the targeted item is open
+      setOpenItems((prev) => (prev.includes(hash) ? prev : [...prev, hash]));
+      // Scroll after accordion animation
+      setTimeout(() => {
+        const el = document.getElementById(hash);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 250);
     }
   }, [hash]);
 
@@ -272,7 +275,7 @@ export default function OpsPlaybook() {
         </Card>
 
         {/* Runbook accordion */}
-        <Accordion type="multiple" defaultValue={defaultOpen} className="space-y-2">
+        <Accordion type="multiple" value={openItems} onValueChange={setOpenItems} className="space-y-2">
           {runbooks.map((rb) => {
             const sev = severityConfig[rb.severity];
             return (
