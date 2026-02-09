@@ -14,7 +14,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { DollarSign, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
-import { isTerminalPaid } from '@/lib/types';
+import { isTerminalPaid, IN_PROGRESS_PAYOUT_STATUSES } from '@/lib/types';
 
 interface Payout {
   id: string;
@@ -84,7 +84,7 @@ export default function TraderPayouts() {
   };
 
   const totalPaid = payouts?.filter((p) => isTerminalPaid(p.status)).reduce((sum, p) => sum + p.amount, 0) || 0;
-  const pendingAmount = payouts?.filter((p) => ['pending', 'under_review', 'approved', 'payment_initiated'].includes(p.status)).reduce((sum, p) => sum + p.amount, 0) || 0;
+  const pendingAmount = payouts?.filter((p) => (IN_PROGRESS_PAYOUT_STATUSES as readonly string[]).includes(p.status)).reduce((sum, p) => sum + p.amount, 0) || 0;
 
   return (
     <DashboardLayout title="My Payouts" navItems={traderNavItems}>

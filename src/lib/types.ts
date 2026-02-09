@@ -25,6 +25,9 @@ export type PayoutStatus =
 
 /** Terminal paid statuses — use everywhere to prevent drift */
 export const TERMINAL_PAID_STATUSES = ['paid', 'paid_confirmed'] as const;
+
+/** In-progress payout statuses — use everywhere to prevent drift */
+export const IN_PROGRESS_PAYOUT_STATUSES = ['pending', 'under_review', 'approved', 'payment_initiated'] as const;
 export type TerminalPaidStatus = (typeof TERMINAL_PAID_STATUSES)[number];
 export const isTerminalPaid = (s: string): s is TerminalPaidStatus =>
   (TERMINAL_PAID_STATUSES as readonly string[]).includes(s);
