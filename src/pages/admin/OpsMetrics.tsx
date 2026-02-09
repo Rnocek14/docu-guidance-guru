@@ -1,4 +1,5 @@
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { getSafeToSell, FreshnessInfo } from '@/lib/safe-to-sell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
@@ -462,38 +463,14 @@ export default function OpsMetrics() {
   const overallLabel = overallSignal === 'green' ? 'ALL CLEAR' : overallSignal === 'yellow' ? 'ATTENTION' : 'ACTION REQUIRED';
 
   // ── "Safe to Sell?" executive signal ──
-  // Safe = strictly proven, not inferred. Missing data = NOT SAFE.
-  const ps = paymentState.data;
-  type FreshnessInfo = { signal: Signal; configMissing?: boolean };
-  const fr = freshness.data as Record<string, FreshnessInfo> | undefined;
-
-  // Treat missing critical inputs as NOT SAFE (prevents false green)
-  const missingCriticalData = !ps || !fr || !breaker.data || !snapshot.data || !dispute.data?.d30;
-
-  // Freshness blockers: any red OR config drift
-  const freshnessRed = fr
-    ? Object.values(fr).some((j) => j.signal === 'red')
-    : true;
-  const freshnessConfigDrift = fr
-    ? Object.values(fr).some((j) => !!j.configMissing)
-    : true;
-
-  const inboundPaused = ps?.is_paused_inbound ?? true; // default to paused if missing
-  const breakerLevel = breaker.data?.breaker_level;
-  const breakerBlockingForSale = breakerLevel ? breakerLevel !== 'normal' : true; // elevated = NO-GO
-  const hasRedCard = cards.some((c) => c.signal === 'red');
-  const bufferNegative = snapshot.data ? Number(snapshot.data.net_buffer ?? 0) <= 0 : true;
-
-  const safeReasons: string[] = [];
-  if (missingCriticalData) safeReasons.push('Metrics incomplete');
-  if (hasRedCard) safeReasons.push('Red metric(s) active');
-  if (freshnessRed) safeReasons.push('Data freshness RED');
-  if (freshnessConfigDrift) safeReasons.push('Cron config drift');
-  if (inboundPaused) safeReasons.push(ps?.pause_reason ? `Inbound paused: ${ps.pause_reason}` : 'Inbound payments paused');
-  if (breakerBlockingForSale) safeReasons.push(`Breaker: ${breakerLevel ?? 'unknown'}`);
-  if (bufferNegative) safeReasons.push('Net buffer ≤ 0');
-
-  const safeToSell = safeReasons.length === 0;
+  const { safe: safeToSell, reasons: safeReasons } = getSafeToSell({
+    paymentState: paymentState.data ?? undefined,
+    freshness: freshness.data as Record<string, FreshnessInfo> | undefined,
+    breakerLevel: breaker.data?.breaker_level,
+    snapshotNetBuffer: snapshot.data ? Number(snapshot.data.net_buffer ?? null) : undefined,
+    hasDisputeData: !!dispute.data?.d30,
+    hasRedCard: cards.some((c) => c.signal === 'red'),
+  });
 
   return (
     <DashboardLayout title="Morning Checks" navItems={adminNavItems}>
