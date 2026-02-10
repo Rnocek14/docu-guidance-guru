@@ -72,18 +72,26 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
       ? losingDays.reduce((s, d) => s + Number(d.net_pnl), 0) / losingDays.length
       : 0;
 
-    // Variance Score: CV of daily P&L (stdev / |mean|)
+    // Volatility Score: stdev of daily P&L relative to daily loss limit
+    // This doesn't blow up at mean≈0 and aligns with the risk rails traders actually have
     const dailyPnls = dailyStats?.map((d) => Number(d.net_pnl)) ?? [];
     let varianceLevel: 'low' | 'moderate' | 'high' = 'low';
-    let coefficientOfVariation = 0;
+    let volatilityRatio = 0;
     if (dailyPnls.length >= 3) {
       const mean = dailyPnls.reduce((s, v) => s + v, 0) / dailyPnls.length;
       const variance = dailyPnls.reduce((s, v) => s + (v - mean) ** 2, 0) / dailyPnls.length;
       const stdev = Math.sqrt(variance);
-      coefficientOfVariation = Math.abs(mean) > 0 ? stdev / Math.abs(mean) : stdev > 0 ? Infinity : 0;
-      if (coefficientOfVariation > 3) varianceLevel = 'high';
-      else if (coefficientOfVariation > 1.5) varianceLevel = 'moderate';
+      // Normalize against daily loss limit — stable even when mean ≈ 0
+      volatilityRatio = dailyLossLimit > 0 ? stdev / dailyLossLimit : 0;
+      if (volatilityRatio > 0.6) varianceLevel = 'high';
+      else if (volatilityRatio > 0.3) varianceLevel = 'moderate';
     }
+
+    // Spike Day Ratio: best day as % of total positive P&L — the anti-luck metric
+    const positivePnls = dailyPnls.filter((p) => p > 0);
+    const totalPositivePnl = positivePnls.reduce((s, v) => s + v, 0);
+    const bestDayPnl2 = positivePnls.length > 0 ? Math.max(...positivePnls) : 0;
+    const spikeDayRatio = totalPositivePnl > 0 ? (bestDayPnl2 / totalPositivePnl) * 100 : 0;
 
     // Overall health
     let health: HealthLevel = 'stable';
@@ -104,7 +112,8 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
       avgLossDay,
       health,
       varianceLevel,
-      coefficientOfVariation,
+      volatilityRatio,
+      spikeDayRatio,
     };
   }, [account, dailyStats, maxDailyLossPct, maxDrawdownPct]);
 
@@ -212,23 +221,42 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
             </div>
           </div>
 
-          {/* Variance Score */}
-          <div className="border-t border-border pt-3 space-y-1.5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground" title="Coefficient of variation of daily P&L. Lower is more consistent.">
-                Variance Score
-              </span>
-              <Badge
-                variant={analysis.varianceLevel === 'high' ? 'destructive' : analysis.varianceLevel === 'moderate' ? 'outline' : 'default'}
-                className="text-xs"
-              >
-                {analysis.varianceLevel === 'low' ? 'Low' : analysis.varianceLevel === 'moderate' ? 'Moderate' : 'High'}
-              </Badge>
+          {/* Volatility + Spike Day */}
+          <div className="border-t border-border pt-3 space-y-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground" title="Standard deviation of daily P&L relative to your daily loss limit. Lower means more consistent sessions.">
+                  Volatility Score
+                </span>
+                <Badge
+                  variant={analysis.varianceLevel === 'high' ? 'destructive' : analysis.varianceLevel === 'moderate' ? 'outline' : 'default'}
+                  className="text-xs"
+                >
+                  {analysis.varianceLevel === 'low' ? 'Low' : analysis.varianceLevel === 'moderate' ? 'Moderate' : 'High'}
+                </Badge>
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {analysis.varianceLevel === 'low' && 'Consistent daily results — this is what reviewers look for.'}
+                {analysis.varianceLevel === 'moderate' && 'Some daily swings — tighter risk per session can help.'}
+                {analysis.varianceLevel === 'high' && 'Highly variable results — consider smaller position sizes.'}
+              </div>
             </div>
-            <div className="text-[11px] text-muted-foreground">
-              {analysis.varianceLevel === 'low' && 'Consistent daily results — this is what reviewers look for.'}
-              {analysis.varianceLevel === 'moderate' && 'Some daily swings — tighter risk per session can help.'}
-              {analysis.varianceLevel === 'high' && 'Highly variable results — consider smaller position sizes.'}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground" title="What percentage of your total profit came from your single best day. High concentration suggests luck over consistency.">
+                  Spike Day Ratio
+                </span>
+                <span className="font-mono text-sm font-medium">
+                  {analysis.spikeDayRatio > 0 ? `${analysis.spikeDayRatio.toFixed(0)}%` : '—'}
+                </span>
+              </div>
+              {analysis.spikeDayRatio > 0 && (
+                <div className="text-[11px] text-muted-foreground">
+                  {analysis.spikeDayRatio <= 30 && 'Well-distributed profits — strong consistency signal.'}
+                  {analysis.spikeDayRatio > 30 && analysis.spikeDayRatio <= 50 && 'Moderate concentration — diversifying winning days strengthens your case.'}
+                  {analysis.spikeDayRatio > 50 && 'Most profit from one day — reviewers flag this as luck-dependent.'}
+                </div>
+              )}
             </div>
           </div>
         </div>

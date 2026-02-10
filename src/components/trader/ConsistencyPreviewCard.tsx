@@ -66,30 +66,47 @@ export function ConsistencyPreviewCard({ account }: ConsistencyPreviewCardProps)
   const minProfitableDays = nextCohort.min_profitable_days ?? 5;
   const wouldPassMinDays = profitableDays >= minProfitableDays;
 
+  // Non-binary status: Good / Watch / Risky with quantified gap
+  type RuleStatus = 'good' | 'watch' | 'risky';
+  const getBestDayStatus = (): RuleStatus => {
+    if (bestDayPct <= bestDayCap * 0.8) return 'good';
+    if (bestDayPct <= bestDayCap) return 'watch';
+    return 'risky';
+  };
+  const getMinDaysStatus = (): RuleStatus => {
+    if (profitableDays >= minProfitableDays) return 'good';
+    if (profitableDays >= minProfitableDays * 0.6) return 'watch';
+    return 'risky';
+  };
+
   const rules = [
     {
       label: `Best Day Cap (${bestDayCap}%)`,
-      description: `No single day can exceed ${bestDayCap}% of total profit`,
-      current: `Your best day: ${bestDayPct.toFixed(0)}%`,
-      met: wouldPassBestDay,
+      description: `No single day can exceed ${bestDayCap}% of positive net P\u0026L`,
+      current: `Your best day: ${bestDayPct.toFixed(0)}% (cap: ${bestDayCap}%)`,
+      status: getBestDayStatus(),
+      tooltip: 'Calculated from daily net P&L (not trade-level).',
     },
     {
       label: `Min Profitable Days (${minProfitableDays})`,
       description: `At least ${minProfitableDays} winning days required`,
-      current: `You have: ${profitableDays}`,
-      met: wouldPassMinDays,
+      current: `You have: ${profitableDays} (need: ${minProfitableDays})`,
+      status: getMinDaysStatus(),
+      tooltip: null,
     },
     {
       label: `Profit Target: ${nextCohort.profit_target_percent}%`,
       description: 'Separate target for verification phase',
       current: null,
-      met: null,
+      status: null as RuleStatus | null,
+      tooltip: null,
     },
     {
       label: `Min Trading Days: ${nextCohort.min_trading_days}`,
       description: 'More trading days required in verification',
       current: null,
-      met: null,
+      status: null as RuleStatus | null,
+      tooltip: null,
     },
   ];
 
@@ -117,13 +134,18 @@ export function ConsistencyPreviewCard({ account }: ConsistencyPreviewCardProps)
                 <div className="font-medium">{rule.label}</div>
                 <div className="text-xs text-muted-foreground">{rule.description}</div>
               </div>
-              {rule.met !== null ? (
+              {rule.status !== null ? (
                 <div className="flex flex-col items-end shrink-0">
-                  <Badge variant={rule.met ? 'default' : 'destructive'} className="text-xs">
-                    {rule.met ? 'On track' : 'Needs work'}
+                  <Badge
+                    variant={rule.status === 'good' ? 'default' : rule.status === 'risky' ? 'destructive' : 'outline'}
+                    className="text-xs"
+                  >
+                    {rule.status === 'good' ? 'Good' : rule.status === 'watch' ? 'Watch' : 'Risky'}
                   </Badge>
                   {rule.current && (
-                    <span className="text-[11px] text-muted-foreground mt-0.5">{rule.current}</span>
+                    <span className="text-[11px] text-muted-foreground mt-0.5" title={rule.tooltip ?? undefined}>
+                      {rule.current}
+                    </span>
                   )}
                 </div>
               ) : (
