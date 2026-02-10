@@ -186,7 +186,7 @@ export default function TierReadiness() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => { setDeepMode(true); refetch(); }}
+              onClick={() => setDeepMode(true)}
               disabled={isFetching}
             >
               <ShieldCheck className="h-4 w-4 mr-1.5" />
