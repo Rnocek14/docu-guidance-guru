@@ -10,13 +10,14 @@ export interface ChecklistRow {
   progress?: string;
 }
 
-/** Status priority for sorting — lower = more urgent */
-const STATUS_PRIORITY: Record<RowStatus, number> = {
+/** Status priority for sorting — lower = more urgent.
+ *  `satisfies` ensures compile error if a new RowStatus is added without a priority. */
+const STATUS_PRIORITY = {
   blocked: 0,
   in_progress: 1,
   info: 2,
   met: 3,
-};
+} as const satisfies Record<RowStatus, number>;
 
 /**
  * Derives eligibility checklist rows from payout eligibility data.
@@ -130,20 +131,23 @@ export function deriveEligibilityRows(e: PayoutEligibility): ChecklistRow[] {
 }
 
 /** Returns the top blocker row (most urgent non-met row), or null if all met.
- *  Uses severity priority as primary sort, original row order as tie-breaker. */
+ *  Single-pass scan — deterministic by severity priority then original row order. */
 export function getTopBlocker(rows: ChecklistRow[]): ChecklistRow | null {
-  const indexed = rows
-    .map((r, idx) => ({ r, idx }))
-    .filter(({ r }) => r.status !== 'met');
+  let best: { row: ChecklistRow; idx: number } | null = null;
 
-  if (indexed.length === 0) return null;
-
-  indexed.sort((a, b) => {
-    const p = STATUS_PRIORITY[a.r.status] - STATUS_PRIORITY[b.r.status];
-    return p !== 0 ? p : a.idx - b.idx;
+  rows.forEach((row, idx) => {
+    if (row.status === 'met') return;
+    if (!best) {
+      best = { row, idx };
+      return;
+    }
+    const p = STATUS_PRIORITY[row.status] - STATUS_PRIORITY[best.row.status];
+    if (p < 0 || (p === 0 && idx < best.idx)) {
+      best = { row, idx };
+    }
   });
 
-  return indexed[0].r;
+  return best?.row ?? null;
 }
 
 export type ReadinessState = 'eligible' | 'in_progress' | 'blocked' | 'waiting';
