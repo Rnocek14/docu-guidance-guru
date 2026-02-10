@@ -8,7 +8,7 @@ import { TierCard } from "@/components/checkout/TierCard";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { TIERS, getLiveTiers } from "@/lib/pricing-data";
+import { TIERS } from "@/lib/pricing-data";
 
 // Map shared pricing data to checkout TierCard format
 const CHECKOUT_TIERS = TIERS.map((t) => ({
@@ -46,6 +46,15 @@ export default function Checkout() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const tier = CHECKOUT_TIERS.find((t) => t.id === selectedTier)!;
+
+  // Normalize URL if tier param is non-live (stale bookmark/deep link)
+  useEffect(() => {
+    const t = searchParams.get("tier");
+    if (t && !LIVE_CHECKOUT_TIERS.some((x) => x.id === t)) {
+      setSearchParams({ tier: DEFAULT_TIER }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync state when URL changes (back/forward nav, manual edits)
   useEffect(() => {
