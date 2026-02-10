@@ -2870,6 +2870,10 @@ export type Database = {
         | "payment_system_paused"
         | "payment_system_resumed"
         | "payout_paid"
+        | "ingest_blocked"
+        | "ingest_quarantined"
+        | "ingest_error"
+        | "ingest_rejected"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -3082,6 +3086,10 @@ export const Constants = {
         "payment_system_paused",
         "payment_system_resumed",
         "payout_paid",
+        "ingest_blocked",
+        "ingest_quarantined",
+        "ingest_error",
+        "ingest_rejected",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [

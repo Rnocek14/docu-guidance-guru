@@ -1,11 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { crypto } from 'https://deno.land/std@0.177.0/crypto/mod.ts'
 import { getAdapter } from '../_shared/brokers/adapter.ts'
-import type { BrokerWebhookContext, BrokerId, CanonicalTrade } from '../_shared/brokers/types.ts'
+import type { BrokerWebhookContext, BrokerId } from '../_shared/brokers/types.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-signature, x-webhook-timestamp, x-tv-signature, x-tv-timestamp, x-broker-id',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-tv-signature, x-tv-timestamp, x-broker-id',
 }
 
 interface RuleSnapshot {
@@ -137,13 +136,14 @@ async function checkPassEligibility(
 }
 
 // ── Determine broker from request headers ──
-function detectBroker(req: Request): BrokerId {
+// Returns null for unknown brokers — caller must reject.
+function detectBroker(req: Request): BrokerId | null {
   const explicit = req.headers.get('x-broker-id')
   if (explicit === 'tradovate') return 'tradovate'
-  // Tradovate-specific headers
-  if (req.headers.get('x-tv-signature') || req.headers.get('x-tv-timestamp')) return 'tradovate'
-  // Default: legacy path (existing HMAC with x-webhook-* headers)
-  return 'tradovate'
+  // Tradovate canonical headers
+  if (req.headers.get('x-tv-signature') && req.headers.get('x-tv-timestamp')) return 'tradovate'
+  // Unknown broker — do NOT default
+  return null
 }
 
 Deno.serve(async (req) => {
@@ -172,15 +172,18 @@ Deno.serve(async (req) => {
     const ingestEnabled = ingestSetting?.value === true || ingestSetting?.value === 'true'
     if (!ingestEnabled) {
       const brokerId = detectBroker(req)
-      await supabase.from('cron_http_runs').insert({
-        jobname: 'ingest-trade-blocked',
-        http_status: 503,
-        http_content: JSON.stringify({
+      await supabase.from('audit_logs').insert({
+        action: 'ingest_blocked',
+        request_id: requestId,
+        idempotency_key: `audit.ingest:blocked:${requestId}`,
+        prev_hash: 'COMPUTED_BY_TRIGGER',
+        row_hash: 'COMPUTED_BY_TRIGGER',
+        details: {
           reason: 'platform_ingest_disabled',
-          broker: brokerId,
-          has_signature: !!(req.headers.get('x-tv-signature') || req.headers.get('x-webhook-signature')),
-          request_id: requestId,
-        }),
+          broker: brokerId ?? 'unknown',
+          has_signature: !!req.headers.get('x-tv-signature'),
+        },
+        reason: 'Ingest blocked: platform_ingest_enabled=false',
       }).catch(() => {})
 
       return new Response(
@@ -192,13 +195,35 @@ Deno.serve(async (req) => {
     // ── 2. READ RAW BODY (once) ──
     const rawBody = await req.text()
 
-    // ── 3. RESOLVE ADAPTER ──
+    // ── 3. RESOLVE BROKER + ADAPTER ──
     const brokerId = detectBroker(req)
+
+    if (!brokerId) {
+      await supabase.from('audit_logs').insert({
+        action: 'ingest_rejected',
+        request_id: requestId,
+        idempotency_key: `audit.ingest:unknown_broker:${requestId}`,
+        prev_hash: 'COMPUTED_BY_TRIGGER',
+        row_hash: 'COMPUTED_BY_TRIGGER',
+        details: {
+          reason: 'unknown_broker',
+          broker_header: req.headers.get('x-broker-id') ?? null,
+          has_tv_headers: !!(req.headers.get('x-tv-signature') || req.headers.get('x-tv-timestamp')),
+        },
+        reason: 'Ingest rejected: could not detect broker from request headers',
+      }).catch(() => {})
+
+      return new Response(
+        JSON.stringify({ error: 'Unknown broker. Set x-broker-id header or use broker-specific signature headers.', request_id: requestId, decision: 'REJECTED_SCHEMA' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const adapter = await getAdapter(brokerId)
 
     if (!adapter) {
       return new Response(
-        JSON.stringify({ error: `Unknown broker: ${brokerId}`, request_id: requestId }),
+        JSON.stringify({ error: `Broker '${brokerId}' is not supported`, request_id: requestId }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -214,22 +239,23 @@ Deno.serve(async (req) => {
     // ── 4. VERIFY (signature + anti-replay) ──
     const verifyResult = await adapter.verify(req, rawBody, ctx)
     if (!verifyResult.ok) {
-      // Audit blocked attempt
-      await supabase.from('cron_http_runs').insert({
-        jobname: 'ingest-trade-blocked',
-        http_status: 401,
-        http_content: JSON.stringify({
+      await supabase.from('audit_logs').insert({
+        action: 'ingest_rejected',
+        request_id: requestId,
+        idempotency_key: `audit.ingest:verify_fail:${requestId}`,
+        prev_hash: 'COMPUTED_BY_TRIGGER',
+        row_hash: 'COMPUTED_BY_TRIGGER',
+        details: {
           reason: verifyResult.reason,
           decision: verifyResult.decision,
           broker: brokerId,
-          request_id: requestId,
-        }),
+        },
+        reason: `Ingest rejected: ${verifyResult.decision}`,
       }).catch(() => {})
 
-      const status = verifyResult.decision === 'REJECTED_TIME_SKEW' ? 401 : 401
       return new Response(
         JSON.stringify({ error: verifyResult.reason, decision: verifyResult.decision, request_id: requestId }),
-        { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -244,6 +270,21 @@ Deno.serve(async (req) => {
 
     const trade = parseResult.canonical
 
+    // ── 5b. VALIDATE ECONOMICS FOR FILLS ──
+    // For fill events, require either explicit pnl or price to prevent silent zero-PnL accounting
+    if (trade.eventType === 'fill') {
+      if (trade.pnl === null && trade.price === null) {
+        return new Response(
+          JSON.stringify({
+            error: 'Fill events require either pnl or price field for accounting integrity',
+            decision: 'REJECTED_SCHEMA',
+            request_id: requestId,
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
     // ── 6. PLATFORM ACCOUNT MAPPING ──
     const { data: platformAccount, error: mappingError } = await supabase
       .from('platform_accounts')
@@ -254,7 +295,7 @@ Deno.serve(async (req) => {
 
     if (mappingError || !platformAccount) {
       await supabase.from('audit_logs').insert({
-        action: 'status_changed',
+        action: 'ingest_quarantined',
         request_id: requestId,
         idempotency_key: `audit.ingest:unknown_acct:${trade.externalAccountId}:${trade.externalTradeId}`,
         prev_hash: 'COMPUTED_BY_TRIGGER',
@@ -283,6 +324,8 @@ Deno.serve(async (req) => {
     const accountId = platformAccount.account_id
 
     // ── 7. ATOMIC RPC ──
+    // Use explicit pnl if provided; if missing, pass 0 but only when price is available
+    // (fills without pnl AND without price were already rejected above)
     const netPnl = (trade.pnl ?? 0) - (trade.commission ?? 0) - (trade.fees ?? 0)
     const tradingDay = getTradingDayKeyET(new Date(trade.occurredAt), 17)
 
@@ -315,7 +358,7 @@ Deno.serve(async (req) => {
 
       await supabase.from('audit_logs').insert({
         account_id: accountId,
-        action: 'status_changed' as const,
+        action: 'ingest_error',
         request_id: requestId,
         idempotency_key: `audit.ingest:rpc_fail:${accountId}:${trade.externalTradeId}`,
         prev_hash: 'COMPUTED_BY_TRIGGER',
@@ -442,7 +485,7 @@ Deno.serve(async (req) => {
     console.error('Trade ingestion error:', error)
     try {
       await supabase.from('audit_logs').insert({
-        action: 'status_changed', request_id: requestId,
+        action: 'ingest_error', request_id: requestId,
         idempotency_key: `audit.ingest:error:${requestId}`,
         prev_hash: 'COMPUTED_BY_TRIGGER', row_hash: 'COMPUTED_BY_TRIGGER',
         details: { type: 'ingestion_error', error: error.message },
