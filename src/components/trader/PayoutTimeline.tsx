@@ -106,6 +106,9 @@ export function PayoutTimeline({ status, className }: PayoutTimelineProps) {
       <p className="text-xs text-muted-foreground text-center">
         {statusCopy.description}
       </p>
+      <p className="text-[10px] text-muted-foreground/50 text-center">
+        Timing varies by volume and review requirements.
+      </p>
     </div>
   );
 }

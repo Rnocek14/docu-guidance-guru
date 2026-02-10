@@ -17,6 +17,7 @@ import { ArrowLeft, DollarSign, AlertTriangle, CheckCircle2, Info, Clock } from 
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { getReasonCopy } from '@/lib/payout-copy';
+import { cn } from '@/lib/utils';
 import type { Account, PayoutEligibility } from '@/lib/types';
 
 export default function PayoutRequest() {
@@ -194,8 +195,14 @@ export default function PayoutRequest() {
         {eligibility && !eligibility.eligible && isWindowOpen && !isDedicatedGate && (() => {
           const copy = getReasonCopy(reasonCode);
           const isBlocking = copy.severity === 'blocking';
+          const isInfo = copy.severity === 'info';
           return (
-            <Alert variant={isBlocking ? "destructive" : "default"}>
+            <Alert
+              variant={isBlocking ? "destructive" : "default"}
+              className={cn(
+                !isBlocking && !isInfo && "border-amber-500/40 bg-amber-500/5 [&>svg]:text-amber-600",
+              )}
+            >
               {isBlocking ? <AlertTriangle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
               <AlertTitle>{copy.headline}</AlertTitle>
               <AlertDescription>
