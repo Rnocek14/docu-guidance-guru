@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { track } from '@/lib/track';
 import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -36,6 +37,11 @@ interface Payout {
 export default function TraderPayouts() {
   const { user } = useAuth();
   const [expandedPayoutId, setExpandedPayoutId] = useState<string | null>(null);
+  const tracked = useRef(false);
+
+  useEffect(() => {
+    if (!tracked.current) { tracked.current = true; track('payouts_view'); }
+  }, []);
 
   const { data: payouts, isLoading } = useQuery({
     queryKey: ['trader-payouts', user?.id],

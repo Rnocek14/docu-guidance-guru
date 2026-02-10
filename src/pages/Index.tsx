@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { track } from '@/lib/track';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,11 +20,14 @@ const compareItems = [
 ];
 
 export default function Index() {
+  const tracked = useRef(false);
+
   // Force dark mode on the landing page
   useEffect(() => {
     const root = document.documentElement;
     const hadDark = root.classList.contains('dark');
     root.classList.add('dark');
+    if (!tracked.current) { tracked.current = true; track('lp_view'); }
     return () => {
       if (!hadDark) root.classList.remove('dark');
     };
@@ -47,7 +51,7 @@ export default function Index() {
             <Button asChild variant="ghost" size="sm">
               <Link to="/login">Sign In</Link>
             </Button>
-            <Button asChild size="sm" className="gap-1.5">
+            <Button asChild size="sm" className="gap-1.5" onClick={() => track('lp_click_cta', { cta: 'nav_get_started' })}>
               <Link to="/checkout">
                 Get Started <ArrowRight className="h-3.5 w-3.5" />
               </Link>
@@ -125,7 +129,7 @@ export default function Index() {
             Transparent rules. Human decisions. Clear caps.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button asChild size="lg" className="gap-2 h-12 px-8 text-base font-semibold">
+            <Button asChild size="lg" className="gap-2 h-12 px-8 text-base font-semibold" onClick={() => track('lp_click_cta', { cta: 'final_primary', tier: 'pro' })}>
               <Link to="/checkout?tier=pro">
                 Start Pro Evaluation <ArrowRight className="h-4 w-4" />
               </Link>
