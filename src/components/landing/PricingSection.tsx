@@ -49,7 +49,7 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
               <RuleRow label="First Payout Cap" value={`$${tier.firstPayoutCap}`} />
               <RuleRow label="Lifetime Cap" value={`$${tier.lifetimeCapAmount.toLocaleString()}`} />
               <RuleRow label="Cooldown Period" value={`${tier.payoutCooldown} days`} />
-              <RuleRow label="Human Review" value="Always" highlight />
+              <RuleRow label="Human Review" value="For Flags" highlight />
             </>
           )}
         </div>

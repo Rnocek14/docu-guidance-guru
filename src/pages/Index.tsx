@@ -12,10 +12,10 @@ import { FAQ } from '@/components/landing/FAQ';
 import { Footer } from '@/components/landing/Footer';
 
 const compareItems = [
-  { label: 'Rules frozen at purchase', us: true },
-  { label: 'Human review (never auto-deny)', us: true },
-  { label: 'Full audit trail on every decision', us: true },
-  { label: 'Lifetime caps disclosed upfront', us: true },
+  'Rules frozen at purchase',
+  'Flagged accounts reviewed by humans',
+  'Audit trail for key decisions',
+  'Lifetime caps disclosed upfront',
 ];
 
 export default function Index() {
@@ -72,9 +72,9 @@ export default function Index() {
               <div>
                 <h3 className="text-lg font-semibold mb-1">What If I Fail?</h3>
                 <p className="text-sm text-muted-foreground leading-relaxed mb-3">
-                  It happens. If you breach a rule, your account is flagged for human review — not
-                  auto-failed. If confirmed, you can reset for <strong>$99</strong> and start fresh
-                  with the same tier and rules. No waiting period. No penalty beyond the reset fee.
+                  It happens. If you breach a rule, your account is flagged for review — outcomes are
+                  confirmed by staff. If your account is closed, you can typically reset for{' '}
+                  <strong>$99</strong> and start fresh with the same tier and rules.
                 </p>
                 <Link to="/rules" className="text-sm text-primary font-medium hover:underline">
                   Read the full rules →
@@ -92,7 +92,7 @@ export default function Index() {
             What Sets Us Apart
           </h2>
           <div className="grid sm:grid-cols-2 gap-4">
-            {compareItems.map(({ label }) => (
+            {compareItems.map((label) => (
               <div
                 key={label}
                 className="flex items-center gap-3 rounded-lg border border-border bg-card p-4"
