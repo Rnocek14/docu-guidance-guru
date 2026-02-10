@@ -14,6 +14,14 @@ const STEP_LABELS: Record<string, string> = {
   paid: "Paid",
 };
 
+/** Duration hints — guidance, not guarantees */
+const STEP_DURATION_HINTS: Record<string, string> = {
+  pending: "Queued for review",
+  under_review: "Typically 1–3 business days",
+  approved: "Usually same or next business day",
+  paid: "",
+};
+
 /**
  * Visual step progression: Requested → Reviewing → Approved → Paid
  * Shows the trader exactly where their payout is in the pipeline.
@@ -73,6 +81,11 @@ export function PayoutTimeline({ status, className }: PayoutTimelineProps) {
                 >
                   {STEP_LABELS[step]}
                 </span>
+                {isCurrent && STEP_DURATION_HINTS[step] && (
+                  <span className="text-[10px] text-muted-foreground/60 whitespace-nowrap">
+                    {STEP_DURATION_HINTS[step]}
+                  </span>
+                )}
               </div>
 
               {/* Connector line (not after last step) */}

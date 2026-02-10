@@ -193,9 +193,10 @@ export default function PayoutRequest() {
         {/* Eligibility Status (dedicated gates get their own card instead) */}
         {eligibility && !eligibility.eligible && isWindowOpen && !isDedicatedGate && (() => {
           const copy = getReasonCopy(reasonCode);
+          const isBlocking = copy.severity === 'blocking';
           return (
-            <Alert variant="destructive">
-              <AlertTriangle className="h-4 w-4" />
+            <Alert variant={isBlocking ? "destructive" : "default"}>
+              {isBlocking ? <AlertTriangle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
               <AlertTitle>{copy.headline}</AlertTitle>
               <AlertDescription>
                 <p>{copy.explanation}</p>
