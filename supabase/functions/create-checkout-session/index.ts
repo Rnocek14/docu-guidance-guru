@@ -122,13 +122,45 @@ Deno.serve(async (req) => {
       customerId = customers.data[0].id
     }
 
-    // ── 4. Create checkout session ──────────────────────────
-    const origin = req.headers.get('origin')
-    if (!origin) {
-      return new Response(JSON.stringify({ error: 'Missing Origin header' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    // ── 4. Resolve redirect origin (fail-closed) ──────────
+    // Priority: APP_ORIGIN env > Origin header (validated against allowlist)
+    const APP_ORIGIN = Deno.env.get('APP_ORIGIN')
+    
+    // Build allowlist from APP_ORIGIN (always) + known domains
+    const ALLOWED_ORIGINS: string[] = []
+    if (APP_ORIGIN) ALLOWED_ORIGINS.push(APP_ORIGIN)
+    // Add any additional known production domains here
+    
+    const requestOrigin = req.headers.get('origin')
+    
+    let resolvedOrigin: string | null = null
+    
+    if (APP_ORIGIN) {
+      // Production mode: always use APP_ORIGIN regardless of request origin
+      resolvedOrigin = APP_ORIGIN
+    } else if (requestOrigin && ALLOWED_ORIGINS.length > 0 && ALLOWED_ORIGINS.includes(requestOrigin)) {
+      // Allowlisted origin
+      resolvedOrigin = requestOrigin
+    } else if (requestOrigin && ALLOWED_ORIGINS.length === 0) {
+      // No allowlist configured and no APP_ORIGIN — development fallback
+      // Still reject preview domains
+      if (requestOrigin.includes('id-preview--') || requestOrigin.includes('localhost')) {
+        console.warn(`Checkout origin rejected (preview/localhost): ${requestOrigin}`)
+        resolvedOrigin = null
+      } else {
+        resolvedOrigin = requestOrigin
+      }
+    }
+    
+    if (!resolvedOrigin) {
+      console.error(`Checkout origin resolution failed. APP_ORIGIN=${APP_ORIGIN || 'unset'}, request_origin=${requestOrigin || 'absent'}`)
+      return new Response(
+        JSON.stringify({ 
+          error: 'Unable to determine redirect origin',
+          hint: APP_ORIGIN ? undefined : 'Set APP_ORIGIN env var for production deployments'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -151,11 +183,11 @@ Deno.serve(async (req) => {
           tier_id: tierId,
         },
       },
-      success_url: `${origin}/trader?session_id={CHECKOUT_SESSION_ID}&payment=success`,
-      cancel_url: `${origin}/checkout?payment=cancelled`,
+      success_url: `${resolvedOrigin}/trader?session_id={CHECKOUT_SESSION_ID}&payment=success`,
+      cancel_url: `${resolvedOrigin}/checkout?payment=cancelled`,
     })
 
-    console.log(`Checkout session created: ${session.id} for user=${userId || 'guest'} tier=${tierId}`)
+    console.log(`Checkout session created: ${session.id} for user=${userId} tier=${tierId} origin=${resolvedOrigin}`)
 
     return new Response(JSON.stringify({ url: session.url }), {
       status: 200,

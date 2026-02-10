@@ -1,16 +1,16 @@
 project_id = "sfxmgwkrjwuerfkqxokq"
 
 [functions.admin-actions]
-verify_jwt = true
+verify_jwt = false
 
 [functions.ingest-trade]
 verify_jwt = false
 
 [functions.review-actions]
-verify_jwt = true
+verify_jwt = false
 
 [functions.payout-actions]
-verify_jwt = true
+verify_jwt = false
 
 [functions.evidence-pack]
 verify_jwt = false
