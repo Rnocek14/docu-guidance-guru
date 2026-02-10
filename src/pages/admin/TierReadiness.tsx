@@ -11,6 +11,7 @@ import { useState } from 'react';
 interface CheckResult {
   ok: boolean;
   detail: string;
+  verifyUnavailable?: boolean;
 }
 
 interface TierData {
@@ -39,8 +40,9 @@ const CHECK_LABELS: Record<CheckKey, { label: string; description: string }> = {
   serverGateOk: { label: 'Server Gate', description: 'create-checkout-session will accept requests' },
 };
 
-function CheckIcon({ ok, isLive }: { ok: boolean; isLive: boolean }) {
+function CheckIcon({ ok, isLive, verifyUnavailable }: { ok: boolean; isLive: boolean; verifyUnavailable?: boolean }) {
   if (ok) return <CheckCircle2 className="h-5 w-5 text-emerald-500" />;
+  if (verifyUnavailable) return <AlertTriangle className="h-5 w-5 text-amber-500" />;
   if (!isLive) return <AlertTriangle className="h-5 w-5 text-amber-500" />;
   return <XCircle className="h-5 w-5 text-destructive" />;
 }
@@ -104,7 +106,7 @@ function TierReadinessCard({ tier }: { tier: TierData }) {
             const meta = CHECK_LABELS[key];
             return (
               <div key={key} className="flex items-start gap-3 p-2 rounded-md bg-muted/50">
-                <CheckIcon ok={check.ok} isLive={tier.isLive} />
+                <CheckIcon ok={check.ok} isLive={tier.isLive} verifyUnavailable={check.verifyUnavailable} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium">{meta.label}</p>
                   <p className="text-xs text-muted-foreground">{check.detail}</p>
@@ -210,8 +212,12 @@ export default function TierReadiness() {
             <Badge variant={isDeepResult ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0">
               {isDeepResult ? 'Deep Stripe Verify (live API)' : 'Config Only'}
             </Badge>
-            <span>
-              Checked at {new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            <span title={checkedAt}>
+              Checked {new Date(checkedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              {' · '}
+              {new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {' '}
+              {Intl.DateTimeFormat().resolvedOptions().timeZone.replace(/_/g, ' ')}
             </span>
             {isDeepResult && (
               <span className="flex items-center gap-1">

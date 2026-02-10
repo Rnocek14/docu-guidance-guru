@@ -53,6 +53,12 @@ const TIER_CONFIG: Record<string, {
   },
 }
 
+interface CheckResult {
+  ok: boolean
+  detail: string
+  verifyUnavailable?: boolean
+}
+
 interface TierReadiness {
   id: string
   name: string
@@ -63,10 +69,10 @@ interface TierReadiness {
   splitPercent: number
   lifetimeCapMultiple: number
   checks: {
-    purchasable: { ok: boolean; detail: string }
-    stripeWired: { ok: boolean; detail: string }
-    cohortReady: { ok: boolean; detail: string }
-    serverGateOk: { ok: boolean; detail: string }
+    purchasable: CheckResult
+    stripeWired: CheckResult
+    cohortReady: CheckResult
+    serverGateOk: CheckResult
   }
 }
 
@@ -185,12 +191,14 @@ Deno.serve(async (req) => {
 
       let stripeDetail: string
       let stripeOk: boolean
+      let stripeWired: CheckResult
 
       if (deep && stripeDeepResults[id]) {
         const dr = stripeDeepResults[id]
         stripeOk = dr.priceValid && dr.productValid && dr.priceMatchesProduct && stripeKeyPresent
+        const verifyUnavailable = !!dr.error
         if (dr.error) {
-          stripeDetail = `Stripe API error: ${dr.error}`
+          stripeDetail = `Could not verify via Stripe API: ${dr.error}. Config looks valid.`
         } else if (!dr.priceValid && !dr.productValid) {
           stripeDetail = 'Price and product not found or inactive in Stripe'
         } else if (!dr.priceValid) {
@@ -202,6 +210,7 @@ Deno.serve(async (req) => {
         } else {
           stripeDetail = 'Price and product verified active in Stripe'
         }
+        stripeWired = { ok: stripeOk, detail: stripeDetail, verifyUnavailable }
       } else {
         stripeOk = hasPriceId && hasProductId && stripeKeyPresent
         stripeDetail = !stripeKeyPresent
@@ -211,9 +220,8 @@ Deno.serve(async (req) => {
             : !hasProductId
               ? 'Missing or invalid productId'
               : 'Price and product IDs configured (use deep verify to confirm in Stripe)'
+        stripeWired = { ok: stripeOk, detail: stripeDetail }
       }
-
-      const stripeWired = { ok: stripeOk, detail: stripeDetail }
 
       // Cohort ready check — prefer tier_id match, fallback to entry_fee
       const matchingCohort = activeCohorts.find(
