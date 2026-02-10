@@ -242,6 +242,17 @@ export default function TierReadiness() {
           </Card>
         )}
 
+        {!isLoading && !error && isDeepResult && tiers.some(t =>
+          Object.values(t.checks).some(c => c.verifyUnavailable)
+        ) && (
+          <div className="flex items-center gap-2 text-sm bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+            <span className="text-amber-700">
+              Stripe verification unavailable (rate limit / network). Flip is locked until verification succeeds.
+            </span>
+          </div>
+        )}
+
         {!isLoading && !error && (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {tiers.map((tier) => (

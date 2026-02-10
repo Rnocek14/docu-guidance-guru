@@ -237,24 +237,29 @@ Deno.serve(async (req) => {
       }
 
       // Server gate check — uses deep Stripe results when available
-      const deepStripeOk = deep && stripeDeepResults[id]
-        ? stripeDeepResults[id].priceValid && stripeDeepResults[id].productValid && stripeDeepResults[id].priceMatchesProduct
+      const deepResult = deep ? stripeDeepResults[id] : null
+      const deepStripeOk = deepResult
+        ? deepResult.priceValid && deepResult.productValid && deepResult.priceMatchesProduct
         : null
+      const deepVerifyUnavailable = !!deepResult?.error
       const gateStripeOk = deepStripeOk !== null ? deepStripeOk : (hasPriceId && hasProductId && stripeKeyPresent)
       const gateInputsPresent = cfg.isLive && gateStripeOk
-      const serverGateOk = {
+      const serverGateOk: CheckResult = {
         ok: gateInputsPresent,
         detail: !cfg.isLive
           ? 'Server returns 400: TIER_NOT_LIVE'
           : !stripeKeyPresent
             ? 'Server will fail: STRIPE_CONFIG_MISSING'
-            : deep && deepStripeOk === false
-              ? 'Server will fail: Stripe verification failed (see Stripe Wired check)'
-              : !hasPriceId || !hasProductId
-                ? 'Server will fail: STRIPE_CONFIG_MISSING'
-                : deep
-                  ? 'Stripe Gate (verified) — all inputs validated against live Stripe'
-                  : 'All gate inputs present — server will accept checkout requests',
+            : deepVerifyUnavailable
+              ? 'Verification unavailable — flip locked until Stripe verification succeeds'
+              : deep && deepStripeOk === false
+                ? 'Server will fail: Stripe verification failed (see Stripe Wired check)'
+                : !hasPriceId || !hasProductId
+                  ? 'Server will fail: STRIPE_CONFIG_MISSING'
+                  : deep
+                    ? 'Stripe Gate (verified) — all inputs validated against live Stripe'
+                    : 'All gate inputs present — server will accept checkout requests',
+        verifyUnavailable: deepVerifyUnavailable,
       }
 
       return {
