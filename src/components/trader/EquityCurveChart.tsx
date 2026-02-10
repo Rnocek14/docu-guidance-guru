@@ -16,6 +16,7 @@ const chartConfig = {
 
 interface TradePoint {
   date: string;
+  fullDate: string;
   balance: number;
   symbol?: string;
   side?: string;
@@ -42,16 +43,18 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
       )}
       {point.symbol && (
         <div className="text-muted-foreground mt-0.5">
-          {point.symbol} {point.side} × {point.quantity}
+          {point.symbol} · {point.side} · {point.quantity} ct{Number(point.quantity) !== 1 ? 's' : ''}
         </div>
       )}
-      <div className="text-muted-foreground/60">{point.date}</div>
+      <div className="text-muted-foreground/60 mt-0.5" title={point.fullDate}>
+        {point.fullDate || point.date}
+      </div>
     </div>
   );
 }
 
 export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChartProps) {
-  const { data: trades } = useQuery({
+  const { data: trades, dataUpdatedAt } = useQuery({
     queryKey: ['equity-curve-trades', accountId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -72,17 +75,19 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
   const chartData = useMemo(() => {
     if (!trades?.length) return [];
 
-    const points: TradePoint[] = [{ date: 'Start', balance: startingBalance }];
+    const points: TradePoint[] = [{ date: 'Start', fullDate: '', balance: startingBalance }];
     let cumulative = startingBalance;
 
     trades.forEach((trade) => {
       const pnl = Number(trade.pnl);
       cumulative += pnl;
+      const closedDate = new Date(trade.closed_at!);
       points.push({
-        date: format(new Date(trade.closed_at!), 'MMM d'),
+        date: format(closedDate, 'MMM d'),
+        fullDate: format(closedDate, 'MMM d, h:mma'),
         balance: Math.round(cumulative * 100) / 100,
         symbol: trade.symbol,
-        side: trade.side === 'buy' ? 'Long' : 'Short',
+        side: trade.side === 'buy' ? 'Buy' : 'Sell',
         pnl,
         quantity: Number(trade.quantity),
       });
@@ -96,6 +101,16 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
   const currentBalance = chartData[chartData.length - 1]?.balance ?? startingBalance;
   const totalReturn = ((currentBalance - startingBalance) / startingBalance) * 100;
 
+  // "Last updated" relative time
+  const lastUpdatedLabel = dataUpdatedAt
+    ? (() => {
+        const diffMs = Date.now() - dataUpdatedAt;
+        if (diffMs < 60_000) return 'Checked just now';
+        const mins = Math.floor(diffMs / 60_000);
+        return `Checked ${mins}m ago`;
+      })()
+    : null;
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -105,13 +120,16 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
               <TrendingUp className="h-5 w-5 text-primary" />
               Equity Curve
             </CardTitle>
-            <CardDescription>Cumulative balance — hover for trade details</CardDescription>
+            <CardDescription>Cumulative balance — each point is a closed trade</CardDescription>
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold">${currentBalance.toLocaleString()}</div>
             <div className={`text-sm font-medium ${totalReturn >= 0 ? 'text-success' : 'text-destructive'}`}>
               {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
             </div>
+            {lastUpdatedLabel && (
+              <div className="text-[10px] text-muted-foreground/50 mt-0.5">{lastUpdatedLabel}</div>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -139,7 +157,7 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
               tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
               domain={['dataMin - 500', 'dataMax + 500']}
             />
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }} />
             <ReferenceLine
               y={startingBalance}
               stroke="hsl(var(--muted-foreground))"

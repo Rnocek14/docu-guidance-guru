@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Compass, CheckCircle2, Circle, ArrowRight } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Compass, CheckCircle2, Circle, ArrowRight, Calendar, Target, Send } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import type { Account, Cohort } from '@/lib/types';
 
 interface WhatsNextCardProps {
@@ -22,7 +24,6 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
     const targetMet = currentReturn >= profitTarget;
     const daysMet = daysCompleted >= minTradingDays;
 
-    // Estimate days to target based on average daily P&L from existing trades
     const avgDailyPnl = daysCompleted > 0 ? account.total_pnl / daysCompleted : 0;
     const estimatedDaysToTarget = avgDailyPnl > 0 && !targetMet
       ? Math.ceil(remainingDollars / avgDailyPnl)
@@ -65,6 +66,31 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
     },
   ];
 
+  // Contextual next action
+  const nextAction = useMemo(() => {
+    if (!analysis.daysMet) {
+      return {
+        icon: Calendar,
+        text: `Trade ${analysis.daysRemaining} more day${analysis.daysRemaining !== 1 ? 's' : ''} to meet the minimum`,
+        variant: 'info' as const,
+      };
+    }
+    if (!analysis.targetMet) {
+      return {
+        icon: Target,
+        text: `You're ${analysis.remainingPercent.toFixed(1)}% away from the target — stay consistent`,
+        variant: 'info' as const,
+      };
+    }
+    return {
+      icon: Send,
+      text: 'All milestones met — your account will be reviewed by staff',
+      variant: 'success' as const,
+    };
+  }, [analysis]);
+
+  const NextIcon = nextAction.icon;
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -95,24 +121,32 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
           ))}
         </div>
 
-        {/* Projection */}
-        {analysis.estimatedDaysToTarget && !analysis.targetMet && (
-          <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3">
-            <div className="flex items-center gap-2 text-sm">
-              <ArrowRight className="h-4 w-4 text-primary shrink-0" />
-              <span className="text-muted-foreground">
-                At your current pace (~${Math.round(analysis.avgDailyPnl).toLocaleString()}/day), 
-                you may reach the target in approximately{' '}
-                <span className="font-semibold text-foreground">
-                  {analysis.estimatedDaysToTarget} trading day{analysis.estimatedDaysToTarget !== 1 ? 's' : ''}
-                </span>
-              </span>
-            </div>
-            <p className="text-[10px] text-muted-foreground/60 mt-1.5">
-              This is a projection based on past performance and is not a guarantee of future results.
-            </p>
+        {/* Contextual next action */}
+        <div className={`mt-4 rounded-lg border p-3 ${
+          nextAction.variant === 'success' 
+            ? 'border-success/30 bg-success/5' 
+            : 'border-border bg-muted/30'
+        }`}>
+          <div className="flex items-center gap-2 text-sm">
+            <NextIcon className={`h-4 w-4 shrink-0 ${
+              nextAction.variant === 'success' ? 'text-success' : 'text-primary'
+            }`} />
+            <span className={nextAction.variant === 'success' ? 'font-medium text-foreground' : 'text-muted-foreground'}>
+              {nextAction.text}
+            </span>
           </div>
-        )}
+
+          {/* Pace projection (only when not yet at target) */}
+          {analysis.estimatedDaysToTarget && !analysis.targetMet && (
+            <p className="text-xs text-muted-foreground/70 mt-2 ml-6">
+              At your current pace (~${Math.round(analysis.avgDailyPnl).toLocaleString()}/day), 
+              you may reach the target in ~{analysis.estimatedDaysToTarget} trading day{analysis.estimatedDaysToTarget !== 1 ? 's' : ''}.
+              <span className="block text-[10px] text-muted-foreground/50 mt-0.5">
+                Projection based on past performance — not a guarantee.
+              </span>
+            </p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
