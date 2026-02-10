@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Shield, Lock, Eye, Scale } from 'lucide-react';
+import { track } from '@/lib/track';
 
 const badges = [
   { icon: Lock, label: 'Frozen Rules' },
@@ -49,7 +50,7 @@ export function Hero() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button asChild size="lg" className="gap-2 h-12 px-8 text-base font-semibold">
+            <Button asChild size="lg" className="gap-2 h-12 px-8 text-base font-semibold" onClick={() => track('lp_click_cta', { cta: 'hero_primary' })}>
               <a href="#pricing">
                 Start Your Evaluation <ArrowRight className="h-4 w-4" />
               </a>

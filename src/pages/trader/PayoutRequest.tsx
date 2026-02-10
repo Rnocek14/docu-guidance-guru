@@ -137,10 +137,15 @@ export default function PayoutRequest() {
   const isWindowOpen = eligibility?.payout_window_opened === true;
   const canRequestPayout = eligibility?.eligible === true && isWindowOpen;
 
-  // Track payout blocked with reason
+  // Track payout blocked with reason — dedupe by (account_id, reason_code)
+  const lastBlockedRef = useRef<string | null>(null);
   useEffect(() => {
     if (eligibility && !eligibility.eligible && eligibility.reason_code) {
-      track('payout_blocked', { reason_code: eligibility.reason_code, account_id: id ?? '' });
+      const key = `${id}:${eligibility.reason_code}`;
+      if (lastBlockedRef.current !== key) {
+        lastBlockedRef.current = key;
+        track('payout_blocked', { reason_code: eligibility.reason_code, account_id: id ?? '' });
+      }
     }
   }, [eligibility, id]);
 
