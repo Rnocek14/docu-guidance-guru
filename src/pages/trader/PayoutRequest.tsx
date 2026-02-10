@@ -237,15 +237,11 @@ export default function PayoutRequest() {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-6">
-                {/* Eligibility Summary */}
+                {/* Eligibility Summary — B2 hardened: max eligible shown (required for form), no intermediate breakdowns */}
                 <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Simulated Performance</span>
-                    <span className="font-medium">${eligibility?.realized_profit?.toFixed(2) ?? '0.00'}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Payout Rate ({eligibility?.payout_split_percent ?? 80}%)</span>
-                    <span className="font-medium">${eligibility?.total_eligible_by_split?.toFixed(2) ?? '0.00'}</span>
+                    <span className="text-muted-foreground">Payout Rate</span>
+                    <span className="font-medium">{eligibility?.payout_split_percent ?? 80}%</span>
                   </div>
                   <div className="flex justify-between text-sm border-t pt-2 mt-2">
                     <span className="font-medium">Maximum Eligible</span>
@@ -254,13 +250,13 @@ export default function PayoutRequest() {
                   {eligibility?.first_payout_cap_applied && (
                     <div className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
                       <Info className="h-3 w-3" />
-                      First payout cap of ${eligibility.first_payout_cap_amount} applied
+                      First payout cap applies
                     </div>
                   )}
                   {eligibility?.lifetime_cap_applied && (
                     <div className="text-xs text-warning flex items-center gap-1 mt-1">
                       <AlertTriangle className="h-3 w-3" />
-                      Limited by lifetime cap headroom
+                      Limited by lifetime cap
                     </div>
                   )}
                 </div>

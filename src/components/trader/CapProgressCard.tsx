@@ -1,7 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Shield, TrendingUp, Award, Info } from 'lucide-react';
+import { TrendingUp, Award, Info } from 'lucide-react';
 
 interface CapProgressCardProps {
   lifetimeCapAmount: number | null;
@@ -12,10 +11,17 @@ interface CapProgressCardProps {
   payoutSplitPercent: number;
 }
 
+/** Qualitative band for lifetime cap usage — no exact percentages. */
+function getCapBand(paidPct: number): { label: string; variant: 'default' | 'secondary' | 'destructive' } {
+  if (paidPct >= 90) return { label: 'Nearing Limit', variant: 'destructive' };
+  if (paidPct >= 60) return { label: 'Well Used', variant: 'secondary' };
+  return { label: 'Plenty Available', variant: 'default' };
+}
+
 /**
  * Brand-safe cap progress card for trader-facing UI.
+ * B2 HARDENED: No exact dollar amounts, percentages, or progress bars.
  * Frames caps as achievement milestones, not restrictions.
- * Part of hardening item D (reputation armor).
  */
 export function CapProgressCard({
   lifetimeCapAmount,
@@ -33,6 +39,7 @@ export function CapProgressCard({
   const hasLifetimeCap = lifetimeCapAmount !== null && lifetimeHeadroom !== null;
   const paidPercentage = hasLifetimeCap ? (lifetimePaidTotal / lifetimeCapAmount) * 100 : 0;
   const firstPayoutComplete = !isFirstPayoutInCycle;
+  const capBand = hasLifetimeCap ? getCapBand(paidPercentage) : null;
 
   return (
     <Card>
@@ -63,30 +70,27 @@ export function CapProgressCard({
                 {firstPayoutComplete ? (
                   <Badge variant="default" className="text-xs">✓ Complete</Badge>
                 ) : (
-                  <span>${firstPayoutCapAmount.toLocaleString()} max</span>
+                  <Badge variant="outline" className="text-xs">First payout cap applies</Badge>
                 )}
               </span>
             </div>
             {isFirstPayoutInCycle && (
               <p className="text-xs text-muted-foreground">
-                Your first payout is capped at ${firstPayoutCapAmount.toLocaleString()} to establish your track record. 
+                Your first payout has a cap to establish your track record. 
                 Subsequent payouts follow your standard rate.
               </p>
             )}
           </div>
         )}
 
-        {/* Lifetime Progress */}
-        {hasLifetimeCap && (
+        {/* Lifetime Progress — qualitative band only */}
+        {hasLifetimeCap && capBand && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Lifetime Reward Capacity</span>
-              <span className="font-medium">{Math.round(paidPercentage)}%</span>
-            </div>
-            <Progress value={paidPercentage} className="h-2" />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>${lifetimePaidTotal.toLocaleString()} earned</span>
-              <span>${lifetimeHeadroom!.toLocaleString()} remaining</span>
+              <Badge variant={capBand.variant} className="text-xs">
+                {capBand.label}
+              </Badge>
             </div>
           </div>
         )}

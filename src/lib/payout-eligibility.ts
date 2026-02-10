@@ -7,6 +7,7 @@ export interface ChecklistRow {
   label: string;
   status: RowStatus;
   detail: string;
+  /** Qualitative progress label — never exact numbers in trader view */
   progress?: string;
 }
 
@@ -19,10 +20,30 @@ const STATUS_PRIORITY = {
   met: 3,
 } as const satisfies Record<RowStatus, number>;
 
+// ── Banding helpers (B2 hardening) ──────────────────────────
+
+/** Convert a 0-100 progress percentage into a qualitative band label. */
+function bandProgress(pct: number): string {
+  if (pct >= 100) return 'Complete';
+  if (pct >= 75) return 'Almost there';
+  if (pct >= 40) return 'On track';
+  return 'Getting started';
+}
+
+/** Band lifetime cap usage into qualitative tiers. */
+function bandCapUsage(pct: number): string {
+  if (pct >= 90) return 'Nearing limit';
+  if (pct >= 60) return 'Well used';
+  if (pct >= 25) return 'Early stage';
+  return 'Plenty remaining';
+}
+
 /**
  * Derives eligibility checklist rows from payout eligibility data.
  * Deterministic ordering: phase → timing → requirements → review → cap.
- * Reused by EligibilityChecklist (full view) and PayoutReadinessCard (summary).
+ * 
+ * B2 HARDENING: All exact dollar amounts, percentages, and day counts
+ * are replaced with qualitative bands. Exact values remain admin-only.
  */
 export function deriveEligibilityRows(e: PayoutEligibility): ChecklistRow[] {
   const rows: ChecklistRow[] = [];
@@ -47,10 +68,8 @@ export function deriveEligibilityRows(e: PayoutEligibility): ChecklistRow[] {
       status: isOpen ? 'met' : 'info',
       detail: isOpen
         ? 'Your payout window is open.'
-        : `Opens in ${e.days_remaining ?? '—'} day${(e.days_remaining ?? 0) !== 1 ? 's' : ''}. No action required.`,
-      progress: !isOpen && e.days_since_pass != null && e.cooling_period_days
-        ? `${e.days_since_pass} / ${e.cooling_period_days} days`
-        : undefined,
+        : 'A waiting period applies before your first payout. No action required.',
+      progress: !isOpen ? 'Waiting' : undefined,
     });
   }
 
@@ -60,7 +79,7 @@ export function deriveEligibilityRows(e: PayoutEligibility): ChecklistRow[] {
       key: 'cooldown',
       label: 'Payout Cooldown',
       status: 'info',
-      detail: `A cooldown applies between payout requests. ${e.days_remaining ? `${e.days_remaining} day${e.days_remaining !== 1 ? 's' : ''} remaining.` : 'Check back soon.'}`,
+      detail: 'A cooldown applies between payout requests. Check back soon.',
     });
   } else if (e.has_prior_payout && e.reason_code !== 'COOLDOWN') {
     rows.push({
@@ -71,34 +90,38 @@ export function deriveEligibilityRows(e: PayoutEligibility): ChecklistRow[] {
     });
   }
 
-  // 4. Winning days
+  // 4. Winning days — banded, no exact counts
   if ((e.required_winning_days ?? 0) > 0) {
+    const total = e.required_winning_days ?? 1;
+    const achieved = (e.winning_days_since_payout ?? 0);
     const isMet = (e.winning_days_remaining ?? 0) <= 0;
+    const pct = Math.min(100, (achieved / total) * 100);
     rows.push({
       key: 'winning_days',
       label: 'Winning Trading Days',
       status: isMet ? 'met' : 'in_progress',
       detail: isMet
         ? 'Minimum winning days requirement met.'
-        : `${e.winning_days_remaining} more winning day${(e.winning_days_remaining ?? 0) !== 1 ? 's' : ''} needed.`,
-      progress: `${e.winning_days_since_payout ?? 0} / ${e.required_winning_days}`,
+        : 'Additional winning trading days needed before next payout.',
+      progress: isMet ? undefined : bandProgress(pct),
     });
   }
 
-  // 5. Profit buffer
+  // 5. Profit buffer — banded, no exact dollars
   if (e.profit_buffer_required != null && e.profit_buffer_required > 0) {
     const isMet = e.profit_buffer_met === true;
-    const required = e.profit_buffer_required;
     const remaining = e.profit_buffer_remaining ?? 0;
+    const required = e.profit_buffer_required;
     const achieved = Math.max(0, required - remaining);
+    const pct = required > 0 ? Math.min(100, (achieved / required) * 100) : 100;
     rows.push({
       key: 'profit_buffer',
       label: 'Profit Buffer',
       status: isMet ? 'met' : 'in_progress',
       detail: isMet
         ? 'Profit buffer requirement met.'
-        : `$${remaining.toFixed(0)} more profit needed above the buffer threshold.`,
-      progress: `$${achieved.toFixed(0)} / $${required.toFixed(0)}`,
+        : 'Additional profit needed above the buffer threshold.',
+      progress: isMet ? undefined : bandProgress(pct),
     });
   }
 
@@ -112,18 +135,18 @@ export function deriveEligibilityRows(e: PayoutEligibility): ChecklistRow[] {
     });
   }
 
-  // 7. Lifetime cap
+  // 7. Lifetime cap — banded, no exact dollars/percentages
   if (e.lifetime_cap_amount != null) {
     const isExhausted = e.reason_code === 'LIFETIME_CAP';
-    const paidPct = Math.round(((e.lifetime_paid_total ?? 0) / e.lifetime_cap_amount) * 100);
+    const paidPct = (e.lifetime_paid_total ?? 0) / e.lifetime_cap_amount * 100;
     rows.push({
       key: 'lifetime_cap',
       label: 'Lifetime Earnings',
       status: isExhausted ? 'blocked' : 'met',
       detail: isExhausted
         ? 'Lifetime earnings limit reached. Start a new evaluation to continue earning.'
-        : `$${(e.lifetime_headroom ?? 0).toLocaleString()} remaining of $${e.lifetime_cap_amount.toLocaleString()} total.`,
-      progress: !isExhausted ? `${paidPct}% used` : undefined,
+        : 'Lifetime earnings capacity available.',
+      progress: !isExhausted ? bandCapUsage(paidPct) : undefined,
     });
   }
 
