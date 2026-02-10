@@ -42,11 +42,13 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
       )}
       <CardHeader className="text-center pb-2 pt-8">
         <CardTitle className="text-lg font-medium text-muted-foreground">{tier.name}</CardTitle>
+        <p className="text-2xl font-bold text-primary mt-1">{tier.accountSize}</p>
+        <p className="text-xs text-muted-foreground">Simulated Account</p>
         <div className="mt-2">
           <span className="text-5xl font-extrabold">${tier.price}</span>
           <span className="text-muted-foreground ml-1">one-time</span>
         </div>
-        <p className="text-sm text-primary font-medium mt-2">{tier.accountSize} Simulated Account</p>
+        <p className="text-xs text-success font-semibold mt-2">Earn up to ${tier.lifetimeCapAmount.toLocaleString()}</p>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col pt-4">
         <div className="space-y-3 flex-1">

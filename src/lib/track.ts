@@ -34,6 +34,14 @@ export type AnalyticsEvent =
   | 'tier_upcoming_view'
   | 'tier_upcoming_click'
   | 'tier_live_flip'
+  // Landing page engagement
+  | 'promo_view'
+  | 'promo_click'
+  | 'promo_dismiss'
+  | 'compare_view'
+  | 'testimonial_view'
+  | 'platform_logos_view'
+  | 'stats_counter_view'
   // Escape hatch for ad-hoc dev debugging (never use in prod paths)
   | `debug_${string}`;
 
