@@ -13,9 +13,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { ArrowLeft, DollarSign, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { ArrowLeft, DollarSign, AlertTriangle, CheckCircle2, Info, Clock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { getReasonCopy } from '@/lib/payout-copy';
 import type { Account, PayoutEligibility } from '@/lib/types';
 
 export default function PayoutRequest() {
@@ -190,16 +191,19 @@ export default function PayoutRequest() {
         )}
 
         {/* Eligibility Status (dedicated gates get their own card instead) */}
-        {eligibility && !eligibility.eligible && isWindowOpen && !isDedicatedGate && (
-          <Alert variant="destructive">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Not Eligible for Payout</AlertTitle>
-            <AlertDescription>
-              {eligibility.reason}
-              {eligibility.hint && <p className="mt-1 text-sm">{eligibility.hint}</p>}
-            </AlertDescription>
-          </Alert>
-        )}
+        {eligibility && !eligibility.eligible && isWindowOpen && !isDedicatedGate && (() => {
+          const copy = getReasonCopy(reasonCode);
+          return (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>{copy.headline}</AlertTitle>
+              <AlertDescription>
+                <p>{copy.explanation}</p>
+                <p className="mt-1.5 text-sm font-medium">{copy.nextAction}</p>
+              </AlertDescription>
+            </Alert>
+          );
+        })()}
 
         {/* Winning Trading Days Card — show when has prior payout and required_winning_days > 0 */}
         {eligibility && isWindowOpen && eligibility.has_prior_payout && (eligibility.required_winning_days ?? 0) > 0 && (
@@ -325,24 +329,23 @@ export default function PayoutRequest() {
         )}
 
         {/* Window Open but not eligible for other reasons */}
-        {isWindowOpen && !canRequestPayout && eligibility && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-muted-foreground">
-                <AlertTriangle className="h-5 w-5" />
-                Payout Unavailable
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">
-                {eligibility.reason || 'You are not currently eligible to request a payout.'}
-              </p>
-              {eligibility.hint && (
-                <p className="text-sm text-muted-foreground mt-2">{eligibility.hint}</p>
-              )}
-            </CardContent>
-          </Card>
-        )}
+        {isWindowOpen && !canRequestPayout && eligibility && (() => {
+          const copy = getReasonCopy(reasonCode);
+          return (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-muted-foreground">
+                  <Clock className="h-5 w-5" />
+                  {copy.headline}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-muted-foreground">{copy.explanation}</p>
+                <p className="text-sm font-medium text-foreground">{copy.nextAction}</p>
+              </CardContent>
+            </Card>
+          );
+        })()}
       </div>
     </DashboardLayout>
   );

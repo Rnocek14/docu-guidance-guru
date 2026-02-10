@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,8 +14,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { DollarSign, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { DollarSign, Clock, CheckCircle, XCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { isTerminalPaid, IN_PROGRESS_PAYOUT_STATUSES } from '@/lib/types';
+import { getStatusCopy, getTimelineIndex } from '@/lib/payout-copy';
+import { PayoutTimeline } from '@/components/trader/PayoutTimeline';
 
 interface Payout {
   id: string;
@@ -32,6 +35,7 @@ interface Payout {
 
 export default function TraderPayouts() {
   const { user } = useAuth();
+  const [expandedPayoutId, setExpandedPayoutId] = useState<string | null>(null);
 
   const { data: payouts, isLoading } = useQuery({
     queryKey: ['trader-payouts', user?.id],
@@ -64,6 +68,7 @@ export default function TraderPayouts() {
   });
 
   const getStatusBadge = (status: string) => {
+    const statusCopy = getStatusCopy(status);
     const config: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ReactNode }> = {
       pending: { variant: 'outline', icon: <Clock className="h-3 w-3" /> },
       under_review: { variant: 'outline', icon: <Loader2 className="h-3 w-3 animate-spin" /> },
@@ -78,7 +83,7 @@ export default function TraderPayouts() {
     return (
       <Badge variant={variant} className="flex items-center gap-1 w-fit">
         {icon}
-        {status.replace(/_/g, ' ')}
+        {statusCopy.label}
       </Badge>
     );
   };
@@ -150,34 +155,56 @@ export default function TraderPayouts() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {payouts.map((payout) => (
-                      <TableRow key={payout.id}>
-                        <TableCell className="font-mono text-xs">
-                          #{payout.account.account_number}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          ${payout.amount.toLocaleString()}
-                        </TableCell>
-                        <TableCell>{getStatusBadge(payout.status)}</TableCell>
-                        <TableCell className="text-muted-foreground text-xs">
-                          {format(new Date(payout.requested_at), 'MMM d, yyyy')}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground text-xs">
-                          {payout.paid_at
-                            ? format(new Date(payout.paid_at), 'MMM d, yyyy')
-                            : '-'}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {payout.payment_reference || '-'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {payouts.map((payout) => {
+                      const isExpanded = expandedPayoutId === payout.id;
+                      const hasTimeline = getTimelineIndex(payout.status) >= 0;
+                      return (
+                        <>
+                          <TableRow
+                            key={payout.id}
+                            className={hasTimeline ? "cursor-pointer hover:bg-muted/50" : ""}
+                            onClick={() => hasTimeline && setExpandedPayoutId(isExpanded ? null : payout.id)}
+                          >
+                            <TableCell className="font-mono text-xs">
+                              #{payout.account.account_number}
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              ${payout.amount.toLocaleString()}
+                            </TableCell>
+                            <TableCell>{getStatusBadge(payout.status)}</TableCell>
+                            <TableCell className="text-muted-foreground text-xs">
+                              {format(new Date(payout.requested_at), 'MMM d, yyyy')}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-xs">
+                              {payout.paid_at
+                                ? format(new Date(payout.paid_at), 'MMM d, yyyy')
+                                : '-'}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">
+                              {payout.payment_reference || '-'}
+                            </TableCell>
+                            {hasTimeline && (
+                              <TableCell className="w-8">
+                                {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                              </TableCell>
+                            )}
+                          </TableRow>
+                          {isExpanded && hasTimeline && (
+                            <TableRow key={`${payout.id}-timeline`}>
+                              <TableCell colSpan={7} className="bg-muted/30 py-4 px-6">
+                                <PayoutTimeline status={payout.status} />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
             ) : (
               <p className="text-muted-foreground text-center py-8">
-                No payout requests yet. Complete a challenge to request a payout.
+                No payout requests yet. Once your account reaches the Performance phase, you can request payouts here.
               </p>
             )}
           </CardContent>
