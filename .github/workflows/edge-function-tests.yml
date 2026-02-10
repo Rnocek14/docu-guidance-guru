@@ -29,11 +29,27 @@ on:
     branches: [main]
     paths:
       - 'supabase/functions/**'
+      - 'src/components/landing/**'
+      - 'src/components/checkout/**'
+      - 'src/pages/Index.tsx'
+      - 'src/pages/Rules.tsx'
+      - 'src/pages/Checkout.tsx'
+      - 'src/lib/claims.ts'
+      - 'src/lib/payout-copy.ts'
+      - 'scripts/lint-copy.sh'
       - '.github/workflows/edge-function-tests.yml'
   pull_request:
     branches: [main]
     paths:
       - 'supabase/functions/**'
+      - 'src/components/landing/**'
+      - 'src/components/checkout/**'
+      - 'src/pages/Index.tsx'
+      - 'src/pages/Rules.tsx'
+      - 'src/pages/Checkout.tsx'
+      - 'src/lib/claims.ts'
+      - 'src/lib/payout-copy.ts'
+      - 'scripts/lint-copy.sh'
       - '.github/workflows/edge-function-tests.yml'
   workflow_dispatch:
     inputs:
@@ -48,9 +64,22 @@ concurrency:
   cancel-in-progress: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tier 1 — Pure unit tests (no secrets, no network dependencies)
+# Tier 0 — Copy lint (no secrets, no Deno — pure bash)
+# Flags absolutist/unverifiable language in marketing copy.
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
+  tier0_copy_lint:
+    name: "Tier 0 — Copy Lint (absolutist words)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Lint marketing copy for banned words"
+        run: bash scripts/lint-copy.sh
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier 1 — Pure unit tests (no secrets, no network dependencies)
+# ─────────────────────────────────────────────────────────────────────────────
   tier1_unit:
     name: "Tier 1 — Unit (no secrets)"
     runs-on: ubuntu-latest
