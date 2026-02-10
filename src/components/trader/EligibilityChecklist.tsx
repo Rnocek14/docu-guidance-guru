@@ -77,14 +77,17 @@ function deriveRows(e: PayoutEligibility): ChecklistRow[] {
   // 5. Profit buffer
   if (e.profit_buffer_required != null && e.profit_buffer_required > 0) {
     const isMet = e.profit_buffer_met === true;
+    const required = e.profit_buffer_required;
+    const remaining = e.profit_buffer_remaining ?? 0;
+    const achieved = Math.max(0, required - remaining);
     rows.push({
       key: 'profit_buffer',
       label: 'Profit Buffer',
       status: isMet ? 'met' : 'in_progress',
       detail: isMet
         ? 'Profit buffer requirement met.'
-        : `$${(e.profit_buffer_remaining ?? 0).toFixed(0)} more profit needed above the buffer threshold.`,
-      progress: `$${(e.realized_profit ?? 0).toFixed(0)} / $${(e.profit_buffer_required + (e.realized_profit ?? 0) - (e.profit_buffer_remaining ?? 0)).toFixed(0)}`,
+        : `$${remaining.toFixed(0)} more profit needed above the buffer threshold.`,
+      progress: `$${achieved.toFixed(0)} / $${required.toFixed(0)}`,
     });
   }
 
