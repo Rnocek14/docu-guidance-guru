@@ -138,24 +138,29 @@ Deno.serve(async (req) => {
     const stripeKeyPresent = !!stripeKey && stripeKey.length > 10
 
     // Optional deep Stripe verification
-    let stripeDeepResults: Record<string, { priceValid: boolean; productValid: boolean; error?: string }> = {}
+    let stripeDeepResults: Record<string, { priceValid: boolean; productValid: boolean; priceMatchesProduct: boolean; error?: string }> = {}
     if (deep && stripeKeyPresent) {
       try {
-        const stripe = new Stripe(stripeKey!, { apiVersion: '2025-08-27.basil' })
+        const stripe = new Stripe(stripeKey!)
         for (const [id, cfg] of Object.entries(TIER_CONFIG)) {
           try {
             const [price, product] = await Promise.all([
               stripe.prices.retrieve(cfg.priceId).catch(() => null),
               stripe.products.retrieve(cfg.productId).catch(() => null),
             ])
+            const priceProductId = price
+              ? (typeof price.product === 'string' ? price.product : (price.product as { id: string })?.id)
+              : null
             stripeDeepResults[id] = {
               priceValid: !!price && price.active === true,
-              productValid: !!product && product.active === true,
+              productValid: !!product,
+              priceMatchesProduct: priceProductId === cfg.productId,
             }
           } catch (e) {
             stripeDeepResults[id] = {
               priceValid: false,
               productValid: false,
+              priceMatchesProduct: false,
               error: (e as Error).message,
             }
           }
@@ -182,7 +187,7 @@ Deno.serve(async (req) => {
 
       if (deep && stripeDeepResults[id]) {
         const dr = stripeDeepResults[id]
-        stripeOk = dr.priceValid && dr.productValid && stripeKeyPresent
+        stripeOk = dr.priceValid && dr.productValid && dr.priceMatchesProduct && stripeKeyPresent
         if (dr.error) {
           stripeDetail = `Stripe API error: ${dr.error}`
         } else if (!dr.priceValid && !dr.productValid) {
@@ -191,6 +196,8 @@ Deno.serve(async (req) => {
           stripeDetail = 'Price not found or inactive in Stripe'
         } else if (!dr.productValid) {
           stripeDetail = 'Product not found or inactive in Stripe'
+        } else if (!dr.priceMatchesProduct) {
+          stripeDetail = 'Price exists but belongs to a different product — check for copy/paste error'
         } else {
           stripeDetail = 'Price and product verified active in Stripe'
         }
