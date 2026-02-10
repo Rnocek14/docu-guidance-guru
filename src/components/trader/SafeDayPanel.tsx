@@ -1,11 +1,32 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ShieldCheck, CheckCircle2, XCircle } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import type { Account, Cohort } from '@/lib/types';
 
 interface SafeDayPanelProps {
   account: Account & { cohort: Cohort };
 }
+
+type RiskBand = 'low' | 'medium' | 'high';
+
+const BAND_CONFIG: Record<RiskBand, { label: string; badgeVariant: 'default' | 'outline' | 'destructive'; description: string }> = {
+  low: {
+    label: 'Low Risk',
+    badgeVariant: 'default',
+    description: 'You have comfortable headroom. Normal trading activity is unlikely to trigger a breach.',
+  },
+  medium: {
+    label: 'Medium Risk',
+    badgeVariant: 'outline',
+    description: 'Headroom is tightening. Consider smaller position sizes to protect your progress.',
+  },
+  high: {
+    label: 'High Risk',
+    badgeVariant: 'destructive',
+    description: 'Very limited headroom remaining. Large swings could trigger a breach — trade cautiously.',
+  },
+};
 
 export function SafeDayPanel({ account }: SafeDayPanelProps) {
   const analysis = useMemo(() => {
@@ -19,23 +40,32 @@ export function SafeDayPanel({ account }: SafeDayPanelProps) {
 
     const dailyLossLimit = account.starting_balance * (maxDailyLossPct / 100);
 
-    // Drawdown headroom: how much can balance drop before breach
     const maxDrawdownPct = account.cohort?.max_total_drawdown_percent ?? 10;
     const drawdownFloor = account.highest_balance * (1 - maxDrawdownPct / 100);
     const drawdownHeadroom = Math.max(0, account.current_balance - drawdownFloor);
 
-    // Safe day size = min(daily loss limit, drawdown headroom)
     const safeDaySize = Math.min(dailyLossLimit, drawdownHeadroom);
+
+    // Compute risk band based on headroom ratio (safeDaySize / dailyLossLimit)
+    const headroomRatio = dailyLossLimit > 0 ? safeDaySize / dailyLossLimit : 0;
+    let riskBand: RiskBand;
+    if (headroomRatio >= 0.6) {
+      riskBand = 'low';
+    } else if (headroomRatio >= 0.3) {
+      riskBand = 'medium';
+    } else {
+      riskBand = 'high';
+    }
 
     return {
       targetMet,
       daysMet,
-      dailyLossLimit,
-      drawdownHeadroom,
-      safeDaySize,
+      riskBand,
       allMet: targetMet && daysMet,
     };
   }, [account]);
+
+  const bandConfig = BAND_CONFIG[analysis.riskBand];
 
   const checks = [
     { label: 'Min trading days', met: analysis.daysMet },
@@ -66,16 +96,16 @@ export function SafeDayPanel({ account }: SafeDayPanelProps) {
         </div>
 
         <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Safe day guidance
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Session risk level
+            </div>
+            <Badge variant={bandConfig.badgeVariant} className="text-xs">
+              {bandConfig.label}
+            </Badge>
           </div>
-          <div className="text-sm">
-            <span className="text-muted-foreground">Max loss per day to stay safe: </span>
-            <span className="font-mono font-bold">${Math.round(analysis.safeDaySize).toLocaleString()}</span>
-          </div>
-          <p className="text-[11px] text-muted-foreground/60">
-            Based on whichever is tighter: your daily loss limit (${Math.round(analysis.dailyLossLimit).toLocaleString()}) 
-            or remaining drawdown headroom (${Math.round(analysis.drawdownHeadroom).toLocaleString()}).
+          <p className="text-sm text-muted-foreground">
+            {bandConfig.description}
           </p>
         </div>
 
