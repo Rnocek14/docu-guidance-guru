@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Shield, ArrowRight, RotateCcw, Lock, Users, FileText } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { PromoBanner } from '@/components/landing/PromoBanner';
 import { Hero } from '@/components/landing/Hero';
 import { StatsCounter } from '@/components/landing/StatsCounter';
@@ -20,13 +21,7 @@ export default function Index() {
 
   // Force dark mode on the landing page
   useEffect(() => {
-    const root = document.documentElement;
-    const hadDark = root.classList.contains('dark');
-    root.classList.add('dark');
     if (!tracked.current) { tracked.current = true; track('lp_view'); }
-    return () => {
-      if (!hadDark) root.classList.remove('dark');
-    };
   }, []);
 
   return (
@@ -48,6 +43,7 @@ export default function Index() {
             <a href="#faq" className="hover:text-foreground transition-colors">FAQ</a>
           </nav>
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <Button asChild variant="ghost" size="sm">
               <Link to="/login">Sign In</Link>
             </Button>
