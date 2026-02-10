@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Shield, Lock, Eye, Scale } from 'lucide-react';
 import { track } from '@/lib/track';
+import heroDashboard from '@/assets/hero-dashboard.jpg';
 
 const badges = [
   { icon: Lock, label: 'Frozen Rules' },
@@ -11,7 +12,7 @@ const badges = [
 
 export function Hero() {
   return (
-    <section className="relative overflow-hidden pt-20 pb-28 lg:pt-32 lg:pb-40">
+    <section className="relative overflow-hidden pt-20 pb-16 lg:pt-32 lg:pb-24">
       {/* Animated background gradient effects */}
       <div className="absolute inset-0 -z-10">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[600px] rounded-full bg-primary/5 blur-3xl animate-pulse" />
@@ -62,6 +63,20 @@ export function Hero() {
             <Button asChild size="lg" variant="outline" className="h-12 px-8 text-base">
               <Link to="/login">Sign In</Link>
             </Button>
+          </div>
+        </div>
+
+        {/* Hero dashboard screenshot */}
+        <div className="max-w-5xl mx-auto mt-16 animate-in fade-in slide-in-from-bottom-6 duration-1000 [animation-delay:800ms]">
+          <div className="relative rounded-xl border border-border/50 bg-card/30 backdrop-blur p-2 shadow-2xl shadow-primary/5">
+            <img
+              src={heroDashboard}
+              alt="Trader dashboard showing account balance chart, payout readiness checklist, and performance gauges"
+              className="w-full rounded-lg"
+              loading="eager"
+            />
+            {/* Gradient fade at bottom */}
+            <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent rounded-b-xl" />
           </div>
         </div>
       </div>
