@@ -2337,6 +2337,17 @@ export type Database = {
     }
     Functions: {
       apply_geo_mismatch_hold: { Args: { _user_id: string }; Returns: Json }
+      approve_payout_atomic: {
+        Args: {
+          _approved_by: string
+          _calculated_eligible_amount?: number
+          _fraud_review_id?: string
+          _payout_id: string
+          _review_notes?: string
+          _submitted_amount?: number
+        }
+        Returns: Json
+      }
       approve_safety_setting_change: {
         Args: { _change_id: string; _reason?: string }
         Returns: Json
@@ -2794,6 +2805,10 @@ export type Database = {
           _source?: string
           _user_id: string
         }
+        Returns: Json
+      }
+      reject_payout_atomic: {
+        Args: { _payout_id: string; _reason: string; _rejected_by: string }
         Returns: Json
       }
       reject_safety_setting_change: {
