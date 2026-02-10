@@ -2,9 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Gauge } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
-import { subDays, format } from 'date-fns';
-import { TIERS } from '@/lib/pricing-data';
+import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 
 interface TierPassRate {
   tierName: string;
@@ -19,67 +17,23 @@ export function PassRateBreakEvenCard() {
   const { data: tierStats, isLoading } = useQuery({
     queryKey: ['admin-pass-rate-by-tier'],
     queryFn: async () => {
-      const thirtyDaysAgo = format(subDays(new Date(), 30), 'yyyy-MM-dd');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not authenticated');
 
-      // Get cohorts with tier_id to map to pricing tiers
-      const { data: cohorts, error: cohortErr } = await supabase
-        .from('cohorts')
-        .select('id, name, tier_id, cohort_phase')
-        .eq('is_active', true);
-      if (cohortErr) throw cohortErr;
-
-      // Get accounts resolved in last 30 days
-      const { data: accounts, error: accErr } = await supabase
-        .from('accounts')
-        .select('cohort_id, status, updated_at')
-        .in('status', ['passed', 'failed_confirmed'])
-        .gte('updated_at', thirtyDaysAgo);
-      if (accErr) throw accErr;
-
-      // Group by tier
-      const tierMap = new Map<string, { passed: number; total: number }>();
-
-      // Initialize from pricing tiers
-      for (const tier of TIERS) {
-        tierMap.set(tier.id, { passed: 0, total: 0 });
-      }
-
-      // Map cohorts to tiers
-      const cohortToTier = new Map<string, string>();
-      for (const c of cohorts ?? []) {
-        if (c.tier_id) {
-          cohortToTier.set(c.id, c.tier_id);
-        } else {
-          // Fallback: map evaluation cohorts to starter
-          if (c.cohort_phase === 'evaluation') {
-            cohortToTier.set(c.id, 'starter');
-          }
-        }
-      }
-
-      for (const acc of accounts ?? []) {
-        const tierId = cohortToTier.get(acc.cohort_id);
-        if (!tierId) continue;
-        const entry = tierMap.get(tierId) ?? { passed: 0, total: 0 };
-        entry.total++;
-        if (acc.status === 'passed') entry.passed++;
-        tierMap.set(tierId, entry);
-      }
-
-      const results: TierPassRate[] = TIERS.map((tier) => {
-        const stats = tierMap.get(tier.id) ?? { passed: 0, total: 0 };
-        const passRate = stats.total > 0 ? (stats.passed / stats.total) * 100 : 0;
-        return {
-          tierName: tier.name,
-          passRate,
-          breakEven: 17, // ~16-18% midpoint
-          inversion: 22,
-          passed: stats.passed,
-          total: stats.total,
-        };
+      const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/get-pass-rate-stats`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
       });
 
-      return results;
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+
+      const json = await res.json();
+      return json.tiers as TierPassRate[];
     },
     refetchInterval: 60000,
   });
@@ -121,16 +75,16 @@ export function PassRateBreakEvenCard() {
                     </span>
                   </div>
                   <div className="relative h-2 rounded-full bg-muted overflow-hidden">
-                    {/* Break-even marker */}
+                    {/* Break-even marker — scaled to inversion as 100% */}
                     <div
                       className="absolute top-0 h-full w-px bg-warning z-10"
-                      style={{ left: `${Math.min(100, (tier.breakEven / 30) * 100)}%` }}
+                      style={{ left: `${Math.min(100, (tier.breakEven / tier.inversion) * 100)}%` }}
                       title={`Break-even: ${tier.breakEven}%`}
                     />
-                    {/* Inversion marker */}
+                    {/* Inversion marker — right edge */}
                     <div
-                      className="absolute top-0 h-full w-px bg-destructive z-10"
-                      style={{ left: `${Math.min(100, (tier.inversion / 30) * 100)}%` }}
+                      className="absolute top-0 h-full w-0.5 bg-destructive z-10"
+                      style={{ left: '100%' }}
                       title={`Inversion: ${tier.inversion}%`}
                     />
                     {/* Current rate bar */}
@@ -143,10 +97,13 @@ export function PassRateBreakEvenCard() {
                               ? 'bg-warning'
                               : 'bg-success'
                         }`}
-                        style={{ width: `${Math.min(100, (tier.passRate / 30) * 100)}%` }}
+                        style={{ width: `${Math.min(100, (tier.passRate / tier.inversion) * 100)}%` }}
                       />
                     )}
                   </div>
+                  {tier.total < 50 && tier.total > 0 && (
+                    <div className="text-[10px] text-warning mt-0.5">⚠ Low sample size ({tier.total} accounts)</div>
+                  )}
                 </div>
               );
             })}

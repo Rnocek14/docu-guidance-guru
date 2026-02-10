@@ -50,3 +50,6 @@ verify_jwt = false
 
 [functions.get-admin-readiness]
 verify_jwt = false
+
+[functions.get-pass-rate-stats]
+verify_jwt = false
