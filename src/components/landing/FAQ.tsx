@@ -31,12 +31,12 @@ const faqs = [
     a: 'If you breach your account and want to try again, you can reset for $99. This gives you a fresh account with the same rules and tier.',
   },
   {
-    q: 'What is the lifetime cap?',
-    a: 'Each tier has a maximum total payout amount (lifetime cap), which is a multiple of the entry fee. For example, the Pro tier has a 9× lifetime cap of $1,791. This is disclosed upfront before purchase.',
+    q: 'What is the lifetime payout limit?',
+    a: 'Each tier has a maximum lifetime earnings amount, expressed as a multiple of your entry fee (e.g., up to 7× on the Starter tier). This is disclosed upfront before purchase and ensures the platform can reliably pay every approved request.',
   },
   {
     q: 'How fast are payouts processed?',
-    a: 'Payout requests are reviewed within 1-3 business days. Once approved, payment is typically processed within 5 business days depending on your payout method.',
+    a: 'Payout requests are typically reviewed within 3–5 business days. Once approved, payment is usually processed within 1–5 business days depending on your payout method.',
   },
 ];
 
