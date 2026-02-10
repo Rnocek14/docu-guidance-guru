@@ -217,6 +217,7 @@ export const adminNavItems: NavItem[] = [
   { label: 'Audit Logs', href: '/admin/audit', icon: <FileText className="h-5 w-5" /> },
   { label: 'Morning Checks', href: '/admin/ops-metrics', icon: <Activity className="h-5 w-5" /> },
   { label: 'Ops Playbook', href: '/admin/ops-playbook', icon: <FileText className="h-5 w-5" /> },
+  { label: 'Tier Readiness', href: '/admin/tier-readiness', icon: <Shield className="h-5 w-5" /> },
 ];
 
 export const supportNavItems: NavItem[] = [
