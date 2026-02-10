@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Shield, ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import { TIERS } from '@/lib/pricing-data';
+import { cn } from '@/lib/utils';
 import { Footer } from '@/components/landing/Footer';
 
 const evaluationRules = [
@@ -114,10 +115,10 @@ export default function Rules() {
                   <tr className="border-b border-border">
                     <th className="text-left p-4 text-muted-foreground font-medium">Rule</th>
                     {TIERS.map((t) => (
-                      <th key={t.id} className="text-center p-4 font-medium">
+                      <th key={t.id} className={cn("text-center p-4 font-medium", !t.isLive && "bg-muted/30")}>
                         <div className="flex items-center justify-center gap-2 flex-wrap">
                           {t.name}
-                          {t.popular && (
+                          {t.isLive && t.popular && (
                             <Badge variant="secondary" className="text-xs">Popular</Badge>
                           )}
                           {!t.isLive && (
