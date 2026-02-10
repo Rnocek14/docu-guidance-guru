@@ -1,6 +1,6 @@
 import { 
   TrendingUp, Shield, CheckCircle2, AlertTriangle, Calendar, 
-  DollarSign, Target, Compass, Activity, ChevronRight,
+  DollarSign, Target, Compass, ShieldCheck, ChevronRight,
   XCircle
 } from 'lucide-react';
 
@@ -78,13 +78,13 @@ export function HeroDashboardPreview() {
             <MiniStatCard
               title="Current Drawdown"
               value="1.02%"
-              subtitle="Max allowed: 6%"
+              subtitle="Max allowed: 10%"
               icon={<AlertTriangle className="h-3 w-3 text-muted-foreground" />}
             />
             <MiniStatCard
               title="Trading Days"
               value="18"
-              subtitle="Minimum: 10 days"
+              subtitle="Minimum: 5 days"
               icon={<Calendar className="h-3 w-3 text-muted-foreground" />}
             />
           </div>
@@ -95,7 +95,7 @@ export function HeroDashboardPreview() {
               <span className="text-[10px] font-medium text-foreground">Equity Curve</span>
               <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
                 <span className="flex items-center gap-1">
-                  <span className="w-2 h-0.5 bg-success inline-block rounded" /> Balance
+                  <span className="w-2 h-0.5 bg-primary inline-block rounded" /> Balance
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="w-2 h-0.5 bg-primary inline-block rounded opacity-50" /> Target
@@ -117,19 +117,19 @@ export function HeroDashboardPreview() {
               {/* Fill */}
               <defs>
                 <linearGradient id="heroEqGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--success))" stopOpacity="0.2" />
-                  <stop offset="100%" stopColor="hsl(var(--success))" stopOpacity="0" />
+                  <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.2" />
+                  <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
                 </linearGradient>
               </defs>
               <path d={`${pathD} L 100 100 L 0 100 Z`} fill="url(#heroEqGrad)" />
               {/* Line */}
-              <path d={pathD} fill="none" stroke="hsl(var(--success))" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d={pathD} fill="none" stroke="hsl(var(--primary))" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
               {/* Current price dot */}
-              <circle cx="100" cy={equityPoints.length > 0 ? (100 - ((equityPoints[equityPoints.length - 1] - minY) / (maxY - minY)) * 100).toFixed(1) : '50'} r="2" fill="hsl(var(--success))" />
+              <circle cx="100" cy={equityPoints.length > 0 ? (100 - ((equityPoints[equityPoints.length - 1] - minY) / (maxY - minY)) * 100).toFixed(1) : '50'} r="2" fill="hsl(var(--primary))" />
             </svg>
           </div>
 
-          {/* 3-column grid: Rule Health / What's Next / Safe Day — matches real layout */}
+          {/* 3-column grid: Rule Health / What's Next / Review Readiness — matches real layout */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
             {/* Rule Health */}
             <MiniCard title="Rule Health" icon={<Shield className="h-3.5 w-3.5 text-primary" />} badge={{ label: 'Stable', color: 'success' }}>
@@ -153,6 +153,17 @@ export function HeroDashboardPreview() {
                     </div>
                   </div>
                 </div>
+                {/* Volatility + Profit Distribution */}
+                <div className="border-t border-border/30 pt-1.5 mt-1.5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] text-muted-foreground">Volatility Score</span>
+                    <span className="text-[9px] px-1 py-0.5 rounded bg-success/10 text-success font-medium">Low</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] text-muted-foreground">Profit Distribution</span>
+                    <span className="text-[9px] px-1 py-0.5 rounded bg-success/10 text-success font-medium">Good</span>
+                  </div>
+                </div>
               </div>
             </MiniCard>
 
@@ -161,7 +172,7 @@ export function HeroDashboardPreview() {
               <div className="space-y-1.5">
                 <MiniCheckItem label="Minimum trading days" done={true} />
                 <MiniCheckItem label="Profit target" done={true} />
-                <MiniCheckItem label="Staff review" done={false} />
+                <MiniCheckItem label="Staff review of results" done={false} />
               </div>
               <div className="mt-2 rounded border border-success/20 bg-success/5 p-1.5">
                 <div className="flex items-center gap-1 text-[10px] text-success font-medium">
@@ -171,18 +182,26 @@ export function HeroDashboardPreview() {
               </div>
             </MiniCard>
 
-            {/* Review Readiness / Safe Day */}
-            <MiniCard title="Review Readiness" icon={<Activity className="h-3.5 w-3.5 text-primary" />} badge={{ label: 'Low Risk', color: 'success' }}>
+            {/* Review Readiness Snapshot */}
+            <MiniCard title="Review Readiness Snapshot" icon={<ShieldCheck className="h-3.5 w-3.5 text-primary" />} badge={{ label: 'Low Risk', color: 'success' }}>
               <div className="space-y-1.5">
-                <div className="text-[10px] text-muted-foreground">Session risk level</div>
-                <div className="flex items-center gap-1.5">
-                  <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
-                    <div className="h-full rounded-full bg-success" style={{ width: '15%' }} />
-                  </div>
-                  <span className="text-[9px] font-medium text-success">Low</span>
+                {/* Checklist items */}
+                <div className="space-y-1">
+                  <MiniCheckItem label="Min trading days" done={true} />
+                  <MiniCheckItem label="Profit target" done={true} />
                 </div>
-                <div className="text-[9px] text-muted-foreground mt-1">
-                  Drawdown headroom is comfortable. Continue trading within your plan.
+                {/* Session risk level */}
+                <div className="rounded border border-border/30 bg-muted/20 p-1.5 space-y-1 mt-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Session risk level</span>
+                    <span className="text-[9px] px-1 py-0.5 rounded bg-success/10 text-success font-medium">Low Risk</span>
+                  </div>
+                  <div className="text-[9px] text-muted-foreground">
+                    Comfortable headroom. Normal trading is unlikely to trigger a breach.
+                  </div>
+                  <div className="text-[8px] text-muted-foreground/60 italic">
+                    Drawdown headroom is your tightest rail today.
+                  </div>
                 </div>
               </div>
             </MiniCard>
