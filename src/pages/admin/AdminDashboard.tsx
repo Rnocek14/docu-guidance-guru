@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, CreditCard, Shield, Settings, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { DisputeRateCard } from '@/components/admin/DisputeRateCard';
+import { RiskThrottlePanel } from '@/components/admin/RiskThrottlePanel';
 
 export default function AdminDashboard() {
   const queryClient = useQueryClient();
@@ -132,6 +133,9 @@ export default function AdminDashboard() {
 
         {/* Dispute Rate Monitor — processor threshold defense */}
         <DisputeRateCard />
+
+        {/* Pass-Rate Throttle — automated liquidity control */}
+        <RiskThrottlePanel />
 
         {/* Stats grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

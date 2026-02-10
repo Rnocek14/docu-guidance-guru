@@ -108,6 +108,26 @@ Deno.serve(async (req) => {
       )
     }
 
+    // ── 2b. Risk throttle gate ─────────────────────────────
+    const serviceClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    )
+
+    const { data: throttle } = await serviceClient
+      .from('risk_throttle_state')
+      .select('purchase_enabled, state')
+      .eq('id', '00000000-0000-0000-0000-000000000002')
+      .single()
+
+    if (throttle && !throttle.purchase_enabled) {
+      console.warn(`Checkout blocked by risk throttle: state=${throttle.state}`)
+      return new Response(
+        JSON.stringify({ error: 'New purchases are temporarily paused. Please try again later.' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // ── 3. Stripe customer lookup / reuse ────────────────────
     const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
       apiVersion: '2025-08-27.basil',
@@ -176,7 +196,7 @@ Deno.serve(async (req) => {
       cancel_url: `${APP_ORIGIN}/checkout?payment=cancelled`,
     })
 
-    console.log(`Checkout session created: ${session.id} for user=${userId} tier=${tierId} origin=${resolvedOrigin}`)
+    console.log(`Checkout session created: ${session.id} for user=${userId} tier=${tierId} origin=${APP_ORIGIN}`)
 
     return new Response(JSON.stringify({ url: session.url }), {
       status: 200,

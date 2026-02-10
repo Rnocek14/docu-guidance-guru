@@ -451,6 +451,39 @@ Deno.serve(async (req) => {
     }
 
     // =============================================
+    // RISK THROTTLE: Eligibility delay enforcement
+    // =============================================
+
+    if (body.action === 'approve') {
+      const { data: throttle } = await supabaseAdmin
+        .from('risk_throttle_state')
+        .select('eligibility_delay_bonus_days, state')
+        .eq('id', '00000000-0000-0000-0000-000000000002')
+        .single()
+
+      if (throttle && throttle.eligibility_delay_bonus_days > 0) {
+        // Check if the payout request is old enough to satisfy the bonus delay
+        const requestedAt = new Date(payout.requested_at)
+        const now = new Date()
+        const daysSinceRequest = (now.getTime() - requestedAt.getTime()) / (1000 * 60 * 60 * 24)
+
+        if (daysSinceRequest < throttle.eligibility_delay_bonus_days) {
+          const daysRemaining = Math.ceil(throttle.eligibility_delay_bonus_days - daysSinceRequest)
+          return new Response(
+            JSON.stringify({
+              error: 'Payout approval delayed by risk throttle',
+              throttle_state: throttle.state,
+              bonus_delay_days: throttle.eligibility_delay_bonus_days,
+              days_remaining: daysRemaining,
+              hint: `Extended verification period active (${throttle.state}). Approval available in ~${daysRemaining} day(s).`,
+            }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+    }
+
+    // =============================================
     // P0 BLOCKER: SERVER-SIDE ELIGIBILITY VERIFICATION
     // =============================================
     
