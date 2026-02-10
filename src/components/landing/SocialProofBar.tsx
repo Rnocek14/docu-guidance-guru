@@ -3,7 +3,7 @@ import { Shield, FileText, Eye, Lock } from 'lucide-react';
 const stats = [
   { icon: Shield, label: 'Simulated Environment', value: 'Fully Sim' },
   { icon: FileText, label: 'Key Decisions', value: 'Audit Logged' },
-  { icon: Eye, label: 'Flagged Accounts', value: 'Human Reviewed' },
+  { icon: Eye, label: 'Flag Reviews', value: 'By Staff' },
   { icon: Lock, label: 'Rules at Purchase', value: 'Locked' },
 ];
 

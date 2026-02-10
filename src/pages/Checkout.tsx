@@ -48,7 +48,7 @@ export default function Checkout() {
     if (t && CHECKOUT_TIERS.some((x) => x.id === t) && t !== selectedTier) {
       setSelectedTier(t);
     }
-  }, [searchParams]);
+  }, [searchParams, selectedTier]);
 
   const handleSelectTier = (id: string) => {
     setSelectedTier(id);
@@ -152,7 +152,7 @@ export default function Checkout() {
 
           <p className="text-xs text-muted-foreground text-center">
             Secure payment processed by Stripe. Refund eligibility is subject to
-            our <Link to="/rules" className="underline hover:text-foreground">refund policy</Link>.
+            our <Link to="/rules#refunds" className="underline hover:text-foreground">refund policy</Link>.
           </p>
         </section>
       </main>
