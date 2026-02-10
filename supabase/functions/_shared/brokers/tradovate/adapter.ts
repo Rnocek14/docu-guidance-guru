@@ -30,14 +30,18 @@ async function sha256Hex(data: string): Promise<string> {
     .join('');
 }
 
+const HEX_RE = /^[0-9a-f]+$/;
+
 /**
  * Constant-time comparison of two hex strings.
- * Compares decoded bytes to avoid timing leaks from string operations.
+ * Validates hex format first, then compares decoded bytes to avoid timing leaks.
  */
 function constantTimeEqual(a: string, b: string): boolean {
   const aLower = a.toLowerCase();
   const bLower = b.toLowerCase();
-  if (aLower.length !== bLower.length || aLower.length % 2 !== 0) return false;
+  if (aLower.length !== bLower.length || aLower.length === 0 || aLower.length % 2 !== 0) return false;
+  // Reject non-hex chars to prevent NaN from parseInt
+  if (!HEX_RE.test(aLower) || !HEX_RE.test(bLower)) return false;
 
   // Decode hex to bytes and compare
   let result = 0;
