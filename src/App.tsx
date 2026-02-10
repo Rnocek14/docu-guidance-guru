@@ -13,6 +13,7 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
 import Checkout from "./pages/Checkout";
+import Rules from "./pages/Rules";
 
 // Role-specific dashboards
 import TraderDashboard from "./pages/trader/TraderDashboard";
@@ -49,6 +50,7 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/checkout" element={<Checkout />} />
+            <Route path="/rules" element={<Rules />} />
 
             {/* Protected dashboard router */}
             <Route

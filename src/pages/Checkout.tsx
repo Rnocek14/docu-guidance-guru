@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ArrowLeft } from "lucide-react";
@@ -63,7 +63,12 @@ const TIERS: PricingTier[] = [
 
 export default function Checkout() {
   const navigate = useNavigate();
-  const [selectedTier, setSelectedTier] = useState<string>("pro");
+  const [searchParams] = useSearchParams();
+  const [selectedTier, setSelectedTier] = useState<string>(
+    searchParams.get("tier") && TIERS.some((t) => t.id === searchParams.get("tier"))
+      ? searchParams.get("tier")!
+      : "pro"
+  );
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
