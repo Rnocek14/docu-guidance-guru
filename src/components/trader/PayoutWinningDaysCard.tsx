@@ -1,5 +1,4 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { CalendarDays, CheckCircle2 } from 'lucide-react';
 
 interface PayoutWinningDaysCardProps {
@@ -8,6 +7,13 @@ interface PayoutWinningDaysCardProps {
   winningDaysRemaining: number;
   progressPct: number;
   isMet: boolean;
+}
+
+function bandProgress(pct: number): string {
+  if (pct >= 100) return 'Complete';
+  if (pct >= 75) return 'Almost there';
+  if (pct >= 40) return 'On track';
+  return 'Getting started';
 }
 
 export function PayoutWinningDaysCard({
@@ -28,8 +34,7 @@ export function PayoutWinningDaysCard({
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            You've completed {tradingDaysSincePayout} winning trading day{tradingDaysSincePayout !== 1 ? 's' : ''} since
-            your last payout, meeting the {requiredTradingDays}-day requirement.
+            You've completed enough winning trading days since your last payout to meet the requirement.
           </p>
         </CardContent>
       </Card>
@@ -45,19 +50,11 @@ export function PayoutWinningDaysCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-3">
-          <Progress value={progressPct} className="h-2" />
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">
-              {tradingDaysSincePayout} / {requiredTradingDays} days
-            </span>
-            <span className="font-medium">
-              {winningDaysRemaining} remaining
-            </span>
-          </div>
+        <div className="space-y-2">
+          <p className="text-sm font-medium">{bandProgress(progressPct)}</p>
           <p className="text-xs text-muted-foreground">
-            You need at least {requiredTradingDays} winning trading day{requiredTradingDays !== 1 ? 's' : ''} since
-            your last payout before requesting another.
+            Additional winning trading days are needed since your last payout
+            before requesting another.
           </p>
         </div>
       </CardContent>

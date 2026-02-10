@@ -47,14 +47,14 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
 
   const milestones = [
     {
-      label: `Minimum trading days (${analysis.minTradingDays})`,
+      label: 'Minimum trading days',
       done: analysis.daysMet,
       detail: analysis.daysMet
-        ? `Completed ${analysis.daysCompleted} days`
-        : `${analysis.daysRemaining} more day${analysis.daysRemaining !== 1 ? 's' : ''} needed`,
+        ? 'Trading days requirement met'
+        : 'Additional trading days needed',
     },
     {
-      label: `Profit target (${analysis.profitTarget}%)`,
+      label: 'Profit target',
       done: analysis.targetMet,
       detail: analysis.targetMet
         ? 'Target reached'
@@ -72,7 +72,7 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
     if (!analysis.daysMet) {
       return {
         icon: Calendar,
-        text: `Trade ${analysis.daysRemaining} more day${analysis.daysRemaining !== 1 ? 's' : ''} to meet the minimum`,
+        text: 'Continue trading to meet the minimum days requirement',
       };
     }
     if (!analysis.targetMet) {
