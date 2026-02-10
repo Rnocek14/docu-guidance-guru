@@ -1,10 +1,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, ShieldAlert, ShoppingCart, Clock } from 'lucide-react';
+import { Activity, ShieldAlert, ShoppingCart, Clock, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useState } from 'react';
 
@@ -31,7 +30,7 @@ export function RiskThrottlePanel() {
       if (error) throw error;
       return data;
     },
-    refetchInterval: 60_000, // Refresh every minute
+    refetchInterval: 60_000,
   });
 
   const overrideMutation = useMutation({
@@ -57,6 +56,23 @@ export function RiskThrottlePanel() {
     },
   });
 
+  const runNowMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('evaluate-risk-throttle', {
+        method: 'POST',
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['risk-throttle-state'] });
+      toast.success(`Evaluation complete — state: ${data?.state ?? 'unknown'}`);
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to run evaluation');
+    },
+  });
+
   if (isLoading || !throttle) {
     return (
       <Card>
@@ -75,6 +91,22 @@ export function RiskThrottlePanel() {
 
   const stateConfig = STATE_CONFIG[throttle.state as keyof typeof STATE_CONFIG] || STATE_CONFIG.green;
   const hasOverride = !!throttle.manual_override_at;
+
+  // Calculate override expiry
+  let overrideExpiresLabel: string | null = null;
+  if (hasOverride && throttle.manual_override_at) {
+    const overrideAt = new Date(throttle.manual_override_at);
+    const expiresAt = new Date(overrideAt.getTime() + 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const remainingMs = expiresAt.getTime() - now.getTime();
+    if (remainingMs > 0) {
+      const hours = Math.floor(remainingMs / (60 * 60 * 1000));
+      const mins = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
+      overrideExpiresLabel = `Expires in ${hours}h ${mins}m`;
+    } else {
+      overrideExpiresLabel = 'Expired — next auto-eval will re-assess';
+    }
+  }
 
   return (
     <Card className="border-primary/50">
@@ -137,12 +169,33 @@ export function RiskThrottlePanel() {
           </p>
         )}
 
+        {/* Override expiry */}
+        {overrideExpiresLabel && (
+          <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+            ⏱ Override: {overrideExpiresLabel}
+          </p>
+        )}
+
         {/* Last evaluated */}
         {throttle.auto_updated_at && (
           <p className="text-xs text-muted-foreground">
             Last auto-eval: {new Date(throttle.auto_updated_at).toLocaleString()}
           </p>
         )}
+
+        {/* Run evaluation now */}
+        <div className="pt-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full"
+            disabled={runNowMutation.isPending}
+            onClick={() => runNowMutation.mutate()}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${runNowMutation.isPending ? 'animate-spin' : ''}`} />
+            {runNowMutation.isPending ? 'Evaluating…' : 'Run Evaluation Now'}
+          </Button>
+        </div>
 
         {/* Manual override controls */}
         <div className="pt-3 border-t border-border space-y-3">

@@ -74,13 +74,35 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Auth: cron secret or service role
+    // Auth: cron secret OR admin JWT (for "Run now" button)
     const authHeader = req.headers.get('Authorization') ?? ''
     const cronSecret = Deno.env.get('CRON_SECRET') ?? ''
     const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`
-    const isServiceRole = authHeader.includes(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '__never__')
 
-    if (!isCron && !isServiceRole) {
+    let isAdmin = false
+    if (!isCron && authHeader.startsWith('Bearer ')) {
+      // Check if caller is an authenticated admin
+      const jwt = authHeader.replace('Bearer ', '')
+      const supabaseAuth = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_ANON_KEY')!,
+        { global: { headers: { Authorization: `Bearer ${jwt}` } } }
+      )
+      const { data: userData } = await supabaseAuth.auth.getUser()
+      if (userData?.user) {
+        const adminClient = createClient(
+          Deno.env.get('SUPABASE_URL')!,
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+        )
+        const { data: hasAdminRole } = await adminClient.rpc('has_role', {
+          _user_id: userData.user.id,
+          _role: 'admin',
+        })
+        isAdmin = hasAdminRole === true
+      }
+    }
+
+    if (!isCron && !isAdmin) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -102,21 +124,23 @@ Deno.serve(async (req) => {
       const windowStart = new Date(now)
       windowStart.setDate(windowStart.getDate() - days)
 
-      // Count resolved accounts (passed or failed_confirmed) in window
-      const { count: totalCount } = await supabase
-        .from('accounts')
-        .select('*', { count: 'exact', head: true })
-        .in('status', ['passed', 'failed_confirmed'])
-        .gte('updated_at', windowStart.toISOString())
-
+      // Count resolved accounts using resolution timestamps (not updated_at which drifts)
+      // Passed: use passed_at; Failed: use failed_at
       const { count: passedCount } = await supabase
         .from('accounts')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'passed')
         .gte('passed_at', windowStart.toISOString())
 
-      const total = totalCount ?? 0
+      const { count: failedCount } = await supabase
+        .from('accounts')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'failed_confirmed')
+        .gte('failed_at', windowStart.toISOString())
+
       const passed = passedCount ?? 0
+      const failed = failedCount ?? 0
+      const total = passed + failed
       const rate = total > 0 ? (passed / total) * 100 : 0
 
       rates[days] = { passed, total, rate }
