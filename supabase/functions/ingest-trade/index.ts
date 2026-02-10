@@ -259,6 +259,31 @@ Deno.serve(async (req) => {
       )
     }
 
+    // ── 4b. PAYLOAD CAPTURE (temporary, for schema discovery) ──
+    try {
+      const { data: captureSetting } = await supabase
+        .from('system_settings').select('value').eq('key', `${brokerId}_payload_capture_enabled`).single()
+
+      if (captureSetting?.value === true || captureSetting?.value === 'true') {
+        const encoder = new TextEncoder()
+        const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(rawBody))
+        const rawHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('')
+
+        await supabase.from('broker_payload_samples').insert({
+          broker: brokerId,
+          request_id: requestId,
+          raw_body: rawBody,
+          raw_hash: rawHash,
+          headers_subset: {
+            content_type: req.headers.get('content-type'),
+            timestamp_header: req.headers.get('x-tv-timestamp'),
+            user_agent: req.headers.get('user-agent'),
+          },
+          notes: 'auto-captured for schema discovery',
+        }).catch(e => console.error('Payload capture insert error:', e))
+      }
+    } catch { /* capture is best-effort, never block ingestion */ }
+
     // ── 5. PARSE (to CanonicalTrade) ──
     const parseResult = await adapter.parse(req, rawBody, ctx)
     if (!parseResult.ok || !parseResult.canonical) {
@@ -277,6 +302,34 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           error: 'Fill events require explicit pnl field. Price alone is insufficient without a position engine.',
+          decision: 'REJECTED_SCHEMA',
+          request_id: requestId,
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // ── 5c. DEFENSIVE VALIDATION (last line of defense before RPC) ──
+    const validationErrors: string[] = []
+    if (trade.qty !== undefined && trade.qty !== null && (trade.qty <= 0 || !Number.isFinite(trade.qty))) {
+      validationErrors.push('qty must be positive finite number')
+    }
+    if (trade.pnl !== null && trade.pnl !== undefined && !Number.isFinite(trade.pnl)) {
+      validationErrors.push('pnl must be finite number')
+    }
+    if (trade.commission !== null && trade.commission !== undefined && !Number.isFinite(trade.commission)) {
+      validationErrors.push('commission must be finite number')
+    }
+    if (trade.fees !== null && trade.fees !== undefined && !Number.isFinite(trade.fees)) {
+      validationErrors.push('fees must be finite number')
+    }
+    if (!trade.symbolNormalized || trade.symbolNormalized.trim() === '' || trade.symbolNormalized !== trade.symbolNormalized.toUpperCase()) {
+      validationErrors.push('symbolNormalized must be non-empty uppercase')
+    }
+    if (validationErrors.length > 0) {
+      return new Response(
+        JSON.stringify({
+          error: `Canonical validation failed: ${validationErrors.join('; ')}`,
           decision: 'REJECTED_SCHEMA',
           request_id: requestId,
         }),
