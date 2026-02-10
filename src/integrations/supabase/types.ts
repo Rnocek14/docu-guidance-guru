@@ -1857,6 +1857,60 @@ export type Database = {
         }
         Relationships: []
       }
+      risk_throttle_state: {
+        Row: {
+          auto_updated_at: string | null
+          created_at: string
+          eligibility_delay_bonus_days: number
+          id: string
+          manual_override_at: string | null
+          manual_override_by: string | null
+          manual_override_reason: string | null
+          metrics_snapshot: Json
+          pass_rate_14d: number
+          pass_rate_30d: number
+          pass_rate_7d: number
+          purchase_enabled: boolean
+          reason: string | null
+          state: string
+          updated_at: string
+        }
+        Insert: {
+          auto_updated_at?: string | null
+          created_at?: string
+          eligibility_delay_bonus_days?: number
+          id?: string
+          manual_override_at?: string | null
+          manual_override_by?: string | null
+          manual_override_reason?: string | null
+          metrics_snapshot?: Json
+          pass_rate_14d?: number
+          pass_rate_30d?: number
+          pass_rate_7d?: number
+          purchase_enabled?: boolean
+          reason?: string | null
+          state?: string
+          updated_at?: string
+        }
+        Update: {
+          auto_updated_at?: string | null
+          created_at?: string
+          eligibility_delay_bonus_days?: number
+          id?: string
+          manual_override_at?: string | null
+          manual_override_by?: string | null
+          manual_override_reason?: string | null
+          metrics_snapshot?: Json
+          pass_rate_14d?: number
+          pass_rate_30d?: number
+          pass_rate_7d?: number
+          purchase_enabled?: boolean
+          reason?: string | null
+          state?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       safety_setting_changes: {
         Row: {
           approved_at: string | null
@@ -2756,6 +2810,14 @@ export type Database = {
         }
         Returns: Json
       }
+      manual_risk_throttle_override: {
+        Args: {
+          p_eligibility_delay_bonus_days: number
+          p_purchase_enabled: boolean
+          p_reason: string
+        }
+        Returns: undefined
+      }
       mark_payout_paid: {
         Args: {
           _payment_reference: string
@@ -2876,6 +2938,19 @@ export type Database = {
       try_auto_pass: {
         Args: { _account_id: string; _request_id: string }
         Returns: Json
+      }
+      update_risk_throttle: {
+        Args: {
+          p_eligibility_delay_bonus_days: number
+          p_metrics_snapshot: Json
+          p_pass_rate_14d: number
+          p_pass_rate_30d: number
+          p_pass_rate_7d: number
+          p_purchase_enabled: boolean
+          p_reason: string
+          p_state: string
+        }
+        Returns: undefined
       }
       upsert_daily_stat: {
         Args: {

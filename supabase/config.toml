@@ -53,3 +53,6 @@ verify_jwt = false
 
 [functions.get-pass-rate-stats]
 verify_jwt = false
+
+[functions.evaluate-risk-throttle]
+verify_jwt = false
