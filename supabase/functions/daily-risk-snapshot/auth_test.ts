@@ -13,8 +13,10 @@
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 import 'https://deno.land/std@0.224.0/dotenv/load.ts'
 
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? 'https://sfxmgwkrjwuerfkqxokq.supabase.co'
-const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG1nd2tyand1ZXJma3F4b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTE0MTUsImV4cCI6MjA4NTUyNzQxNX0.uKTtbs9vWdtAJLDFod4evkVj1DLjJkRloIRWnbu5GoM'
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
+if (!SUPABASE_URL) throw new Error('SUPABASE_URL env var is required for tests')
+const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
+if (!ANON_KEY) throw new Error('SUPABASE_ANON_KEY env var is required for tests')
 const CRON_SECRET = Deno.env.get('CRON_SECRET') ?? ''
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 
