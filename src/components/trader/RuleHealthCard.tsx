@@ -126,8 +126,19 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
   const config = healthConfig[analysis.health];
   const HealthIcon = config.icon;
 
+  // Quantize bar widths into bands to prevent visual precision
+  const quantizeBand = (usagePct: number) => {
+    if (usagePct <= 5) return 5;
+    if (usagePct <= 33) return 33;
+    if (usagePct <= 66) return 66;
+    return 100;
+  };
+
   const barColor = (usagePct: number) =>
     usagePct > 70 ? 'bg-destructive' : usagePct > 50 ? 'bg-warning' : 'bg-success';
+
+  const usageLabel = (usagePct: number) =>
+    usagePct > 70 ? 'High' : usagePct > 50 ? 'Moderate' : 'Low';
 
   const formatPF = (pf: number) => {
     if (pf === Infinity) return '∞';
@@ -157,18 +168,18 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
           {/* Drawdown usage */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Drawdown used</span>
-              <span className="font-mono font-medium">
-                {analysis.drawdownPct.toFixed(2)}%
-                <span className="text-muted-foreground ml-1">
-                  ({analysis.drawdownUsagePct.toFixed(0)}% of {maxDrawdownPct}% limit)
-                </span>
-              </span>
+              <span className="text-muted-foreground">Drawdown Usage</span>
+              <Badge
+                variant={analysis.drawdownUsagePct > 70 ? 'destructive' : analysis.drawdownUsagePct > 50 ? 'outline' : 'default'}
+                className="text-xs"
+              >
+                {usageLabel(analysis.drawdownUsagePct)}
+              </Badge>
             </div>
             <div className="h-2 rounded-full bg-muted overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${barColor(analysis.drawdownUsagePct)}`}
-                style={{ width: `${Math.max(2, analysis.drawdownUsagePct)}%` }}
+                style={{ width: `${quantizeBand(analysis.drawdownUsagePct)}%` }}
               />
             </div>
           </div>
@@ -176,23 +187,23 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
           {/* Worst day */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Worst single day</span>
+              <span className="text-muted-foreground">Worst Single Day</span>
               {analysis.hasLosingDays ? (
-                <span className="font-mono font-medium">
-                  -${Math.abs(analysis.worstDayPnl!).toLocaleString()}
-                  <span className="text-muted-foreground ml-1">
-                    ({analysis.worstDayUsagePct.toFixed(0)}% of limit)
-                  </span>
-                </span>
+                <Badge
+                  variant={analysis.worstDayUsagePct > 70 ? 'destructive' : analysis.worstDayUsagePct > 50 ? 'outline' : 'default'}
+                  className="text-xs"
+                >
+                  {usageLabel(analysis.worstDayUsagePct)}
+                </Badge>
               ) : (
-                <span className="font-medium text-success">No losing days yet</span>
+                <Badge variant="default" className="text-xs">No losses yet</Badge>
               )}
             </div>
             {analysis.hasLosingDays && (
               <div className="h-2 rounded-full bg-muted overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all ${barColor(analysis.worstDayUsagePct)}`}
-                  style={{ width: `${Math.max(2, analysis.worstDayUsagePct)}%` }}
+                  style={{ width: `${quantizeBand(analysis.worstDayUsagePct)}%` }}
                 />
               </div>
             )}
