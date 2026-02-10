@@ -4,6 +4,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
+  "Cache-Control": "private, max-age=30",
 };
 
 Deno.serve(async (req) => {
@@ -12,7 +13,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Verify caller is authenticated admin/risk_officer
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -24,83 +24,95 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Verify the user's JWT and check role
-    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authErr } = await userClient.auth.getUser();
+    // 1) Authenticate: verify JWT via Supabase auth
+    const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Extract token and verify via admin API
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authErr } = await serviceClient.auth.getUser(token);
     if (authErr || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Check admin role
-    const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
-    const { data: profile } = await serviceClient
-      .from("profiles")
-      .select("user_id")
+    // 2) Authorize: check role from user_roles table via service role (bypasses RLS)
+    const { data: roleRows, error: roleErr } = await serviceClient
+      .from("user_roles")
+      .select("role")
       .eq("user_id", user.id)
-      .single();
+      .in("role", ["admin", "risk_officer"]);
 
-    const userRole = user.app_metadata?.user_role;
-    if (!["admin", "risk_officer"].includes(userRole)) {
+    if (roleErr) throw roleErr;
+    if (!roleRows || roleRows.length === 0) {
       return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Compute rolling 30-day pass rate per tier using service role (bypasses RLS)
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    // 3) Compute rolling 30-day pass rate per tier
+    const sinceIso = new Date(Date.now() - 30 * 86400000).toISOString();
 
-    const { data: cohorts, error: cohortErr } = await serviceClient
-      .from("cohorts")
-      .select("id, name, tier_id, cohort_phase")
-      .eq("is_active", true);
-    if (cohortErr) throw cohortErr;
+    const [cohortsRes, accountsRes] = await Promise.all([
+      serviceClient
+        .from("cohorts")
+        .select("id, name, tier_id, cohort_phase")
+        .eq("is_active", true),
+      serviceClient
+        .from("accounts")
+        .select("cohort_id, status, updated_at")
+        .in("status", ["passed", "failed_confirmed"])
+        .gte("updated_at", sinceIso),
+    ]);
 
-    const { data: accounts, error: accErr } = await serviceClient
-      .from("accounts")
-      .select("cohort_id, status, updated_at")
-      .in("status", ["passed", "failed_confirmed"])
-      .gte("updated_at", thirtyDaysAgo);
-    if (accErr) throw accErr;
+    if (cohortsRes.error) throw cohortsRes.error;
+    if (accountsRes.error) throw accountsRes.error;
 
-    // Map cohorts to tiers
+    const cohorts = cohortsRes.data ?? [];
+    const accounts = accountsRes.data ?? [];
+
+    // 4) Map cohorts to tiers — track unmapped cohorts for ops visibility
     const cohortToTier = new Map<string, string>();
-    for (const c of cohorts ?? []) {
-      if (c.tier_id) cohortToTier.set(c.id, c.tier_id);
-      else if (c.cohort_phase === "evaluation") cohortToTier.set(c.id, "starter");
+    const unmappedCohorts: string[] = [];
+
+    for (const c of cohorts) {
+      if (c.tier_id) {
+        cohortToTier.set(c.id, c.tier_id);
+      } else {
+        unmappedCohorts.push(c.name || c.id);
+      }
     }
 
-    const tierMap = new Map<string, { passed: number; total: number; tierName: string }>();
-    // Initialize known tiers
     const knownTiers = [
       { id: "starter", name: "Starter" },
       { id: "pro", name: "Pro" },
       { id: "elite", name: "Elite" },
     ];
+
+    const tierMap = new Map<string, { passed: number; total: number }>();
     for (const t of knownTiers) {
-      tierMap.set(t.id, { passed: 0, total: 0, tierName: t.name });
+      tierMap.set(t.id, { passed: 0, total: 0 });
     }
 
-    for (const acc of accounts ?? []) {
+    for (const acc of accounts) {
       const tierId = cohortToTier.get(acc.cohort_id);
       if (!tierId) continue;
-      const entry = tierMap.get(tierId) ?? { passed: 0, total: 0, tierName: tierId };
+      const entry = tierMap.get(tierId);
+      if (!entry) continue;
       entry.total++;
       if (acc.status === "passed") entry.passed++;
-      tierMap.set(tierId, entry);
     }
 
-    const results = knownTiers.map((t) => {
+    const tiers = knownTiers.map((t) => {
       const stats = tierMap.get(t.id)!;
-      const passRate = stats.total > 0 ? (stats.passed / stats.total) * 100 : 0;
+      const passRate = stats.total > 0
+        ? Math.round((stats.passed / stats.total) * 1000) / 10
+        : 0;
       return {
-        tierName: stats.tierName,
-        passRate: Math.round(passRate * 10) / 10,
+        tierName: t.name,
+        passRate,
         breakEven: 17,
         inversion: 22,
         passed: stats.passed,
@@ -108,10 +120,13 @@ Deno.serve(async (req) => {
       };
     });
 
-    return new Response(JSON.stringify({ tiers: results }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ tiers, unmappedCohorts }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   } catch (err) {
     console.error("get-pass-rate-stats error:", err);
     return new Response(JSON.stringify({ error: (err as Error).message }), {
