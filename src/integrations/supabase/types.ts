@@ -2033,7 +2033,7 @@ export type Database = {
           account_id: string
           closed_at: string | null
           commission: number | null
-          entry_price: number
+          entry_price: number | null
           exit_price: number | null
           id: string
           opened_at: string
@@ -2050,7 +2050,7 @@ export type Database = {
           account_id: string
           closed_at?: string | null
           commission?: number | null
-          entry_price: number
+          entry_price?: number | null
           exit_price?: number | null
           id?: string
           opened_at?: string
@@ -2067,7 +2067,7 @@ export type Database = {
           account_id?: string
           closed_at?: string | null
           commission?: number | null
-          entry_price?: number
+          entry_price?: number | null
           exit_price?: number | null
           id?: string
           opened_at?: string
