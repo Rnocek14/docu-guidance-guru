@@ -45,7 +45,10 @@ const RAIL_LABELS: Record<TightRail, string> = {
 };
 
 export function SafeDayPanel({ account }: SafeDayPanelProps) {
-  const [acknowledged, setAcknowledged] = useState(false);
+  const ackKey = `risk_ack:${account.id}:${new Date().toISOString().slice(0, 10)}`;
+  const [acknowledged, setAcknowledged] = useState(() => {
+    try { return localStorage.getItem(ackKey) === '1'; } catch { return false; }
+  });
   const [showAckDialog, setShowAckDialog] = useState(false);
 
   const analysis = useMemo(() => {
@@ -64,9 +67,11 @@ export function SafeDayPanel({ account }: SafeDayPanelProps) {
     const drawdownHeadroom = Math.max(0, account.current_balance - drawdownFloor);
 
     // Determine which rail is the tighter constraint
-    const drawdownRatio = dailyLossLimit > 0 ? drawdownHeadroom / dailyLossLimit : 0;
+    const minRail = Math.min(drawdownHeadroom, dailyLossLimit);
+    const maxRail = Math.max(drawdownHeadroom, dailyLossLimit);
+    const railRatio = maxRail > 0 ? minRail / maxRail : 1;
     let tightRail: TightRail;
-    if (Math.abs(drawdownHeadroom - dailyLossLimit) < dailyLossLimit * 0.05) {
+    if (railRatio >= 0.95) {
       tightRail = 'both';
     } else if (drawdownHeadroom < dailyLossLimit) {
       tightRail = 'drawdown';
@@ -198,6 +203,7 @@ export function SafeDayPanel({ account }: SafeDayPanelProps) {
               variant="destructive"
               onClick={() => {
                 setAcknowledged(true);
+                try { localStorage.setItem(ackKey, '1'); } catch {}
                 setShowAckDialog(false);
               }}
             >

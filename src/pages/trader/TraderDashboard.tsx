@@ -3,7 +3,7 @@ import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLa
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
+
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
@@ -218,26 +218,29 @@ export default function TraderDashboard() {
             {/* Consistency Preview (Challenge phase only) */}
             <ConsistencyPreviewCard account={activeAccount} />
 
-            {/* Progress section */}
+            {/* Progress section — binary status only */}
             <div className="grid gap-4 md:grid-cols-2">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Target className="h-5 w-5" />
-                    Performance Target Progress
+                    Performance Target
                   </CardTitle>
                   <CardDescription>
                     Target: {activeAccount.cohort?.profit_target_percent}% profit
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <Progress value={calculateProgress(activeAccount)} className="h-3" />
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">
-                      Current: {((activeAccount.total_pnl / activeAccount.starting_balance) * 100).toFixed(2)}%
-                    </span>
-                    <span className="font-medium">
-                      {calculateProgress(activeAccount).toFixed(0)}% complete
+                <CardContent>
+                  <div className="flex items-center gap-3">
+                    {calculateProgress(activeAccount) >= 100 ? (
+                      <Badge variant="default" className="text-sm">Target Met</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-sm">In Progress</Badge>
+                    )}
+                    <span className="text-sm text-muted-foreground">
+                    {calculateProgress(activeAccount) >= 100
+                        ? "You've reached the profit target."
+                        : 'Keep trading — target not yet reached.'}
                     </span>
                   </div>
                 </CardContent>
@@ -253,25 +256,20 @@ export default function TraderDashboard() {
                     Maximum allowed: {activeAccount.cohort?.max_total_drawdown_percent}%
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="relative">
-                    <Progress
-                      value={(calculateDrawdown(activeAccount) / (activeAccount.cohort?.max_total_drawdown_percent || 10)) * 100}
-                      className="h-3"
-                    />
-                    {/* Warning threshold line at 80% */}
-                    <div
-                      className="absolute top-0 h-3 w-0.5 bg-warning"
-                      style={{ left: '80%' }}
-                    />
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">
-                      Current: {calculateDrawdown(activeAccount).toFixed(2)}%
-                    </span>
-                    {calculateDrawdown(activeAccount) > (activeAccount.cohort?.max_total_drawdown_percent || 10) * 0.8 && (
-                      <span className="text-warning font-medium">⚠️ Approaching limit</span>
+                <CardContent>
+                  <div className="flex items-center gap-3">
+                    {calculateDrawdown(activeAccount) > (activeAccount.cohort?.max_total_drawdown_percent || 10) * 0.8 ? (
+                      <Badge variant="destructive" className="text-sm">⚠️ Approaching Limit</Badge>
+                    ) : calculateDrawdown(activeAccount) > (activeAccount.cohort?.max_total_drawdown_percent || 10) * 0.5 ? (
+                      <Badge variant="outline" className="text-sm">Moderate</Badge>
+                    ) : (
+                      <Badge variant="default" className="text-sm">Comfortable</Badge>
                     )}
+                    <span className="text-sm text-muted-foreground">
+                      {calculateDrawdown(activeAccount) > (activeAccount.cohort?.max_total_drawdown_percent || 10) * 0.8
+                        ? 'Close to your drawdown limit — trade cautiously.'
+                        : 'Drawdown within acceptable range.'}
+                    </span>
                   </div>
                 </CardContent>
               </Card>
