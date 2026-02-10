@@ -33,6 +33,7 @@ import MonteCarloAnalytics from "./pages/admin/MonteCarloAnalytics";
 import LiabilityDashboard from "./pages/admin/LiabilityDashboard";
 import OpsPlaybook from "./pages/admin/OpsPlaybook";
 import OpsMetrics from "./pages/admin/OpsMetrics";
+import TierReadiness from "./pages/admin/TierReadiness";
 import SupportDashboard from "./pages/support/SupportDashboard";
 import AccountDetails from "./pages/trader/AccountDetails";
 
@@ -210,6 +211,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <OpsMetrics />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/tier-readiness"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <TierReadiness />
                 </ProtectedRoute>
               }
             />

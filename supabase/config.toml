@@ -44,3 +44,6 @@ verify_jwt = false
 
 [functions.check-dispute-rate]
 verify_jwt = false
+
+[functions.get-tier-readiness]
+verify_jwt = false
