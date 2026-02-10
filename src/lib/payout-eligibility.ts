@@ -129,19 +129,31 @@ export function deriveEligibilityRows(e: PayoutEligibility): ChecklistRow[] {
   return rows;
 }
 
-/** Returns the top blocker row (most urgent non-met row), or null if all met. */
+/** Returns the top blocker row (most urgent non-met row), or null if all met.
+ *  Uses severity priority as primary sort, original row order as tie-breaker. */
 export function getTopBlocker(rows: ChecklistRow[]): ChecklistRow | null {
-  const nonMet = rows.filter((r) => r.status !== 'met');
-  if (nonMet.length === 0) return null;
-  return nonMet.sort((a, b) => STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status])[0];
+  const indexed = rows
+    .map((r, idx) => ({ r, idx }))
+    .filter(({ r }) => r.status !== 'met');
+
+  if (indexed.length === 0) return null;
+
+  indexed.sort((a, b) => {
+    const p = STATUS_PRIORITY[a.r.status] - STATUS_PRIORITY[b.r.status];
+    return p !== 0 ? p : a.idx - b.idx;
+  });
+
+  return indexed[0].r;
 }
 
 export type ReadinessState = 'eligible' | 'in_progress' | 'blocked' | 'waiting';
 
-/** Derives an overall readiness state from checklist rows. */
+/** Derives an overall readiness state from checklist rows.
+ *  Active requirements (in_progress) take priority over passive waits (info). */
 export function getReadinessState(rows: ChecklistRow[]): ReadinessState {
   if (rows.length > 0 && rows.every((r) => r.status === 'met')) return 'eligible';
   if (rows.some((r) => r.status === 'blocked')) return 'blocked';
+  if (rows.some((r) => r.status === 'in_progress')) return 'in_progress';
   if (rows.some((r) => r.status === 'info')) return 'waiting';
   return 'in_progress';
 }
