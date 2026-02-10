@@ -141,6 +141,25 @@ export default function Rules() {
           </Card>
         </section>
 
+        {/* Refunds */}
+        <section id="refunds">
+          <h2 className="text-2xl font-bold mb-6">Refund Policy</h2>
+          <Card>
+            <CardContent className="py-6 space-y-3 text-sm text-muted-foreground">
+              <ul className="space-y-2 list-disc list-inside">
+                <li>Refund eligibility depends on account status and policy conditions at time of purchase.</li>
+                <li>If you believe you're eligible, contact support with your order email.</li>
+                <li>Refunds may be denied in cases of rule abuse, chargeback risk, or policy violations.</li>
+                <li>Processing times vary; approved refunds are typically returned to the original payment method.</li>
+              </ul>
+              <p className="pt-2 text-xs">
+                For full terms, see our{' '}
+                <Link to="/terms" className="underline hover:text-foreground">Terms of Service</Link>.
+              </p>
+            </CardContent>
+          </Card>
+        </section>
+
         {/* CTA */}
         <div className="text-center py-8">
           <Button asChild size="lg" className="gap-2">
