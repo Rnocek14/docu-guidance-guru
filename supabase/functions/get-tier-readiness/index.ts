@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import Stripe from 'https://esm.sh/stripe@18.5.0'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -69,6 +70,13 @@ interface TierReadiness {
   }
 }
 
+function json(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -78,10 +86,7 @@ Deno.serve(async (req) => {
     // ── Auth: require admin role ─────────────────────────────
     const authHeader = req.headers.get('Authorization')
     if (!authHeader?.startsWith('Bearer ')) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return json(401, { error: 'Unauthorized' })
     }
 
     const supabase = createClient(
@@ -90,49 +95,75 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     )
 
-    const token = authHeader.replace('Bearer ', '')
-    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token)
-    if (claimsError || !claimsData?.claims?.sub) {
-      return new Response(JSON.stringify({ error: 'Invalid token' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    // Use getUser() — canonical JWT verification
+    const { data: userData, error: userErr } = await supabase.auth.getUser()
+    if (userErr || !userData?.user?.id) {
+      return json(401, { error: 'Invalid token' })
     }
 
-    const userId = claimsData.claims.sub as string
+    const userId = userData.user.id
 
     // Check admin role
-    const { data: roleData } = await supabase
+    const { data: roleRow, error: roleErr } = await supabase
       .from('user_roles')
       .select('role')
       .eq('user_id', userId)
       .eq('role', 'admin')
       .maybeSingle()
 
-    if (!roleData) {
-      return new Response(JSON.stringify({ error: 'Admin access required' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    if (roleErr || !roleRow) {
+      return json(403, { error: 'Admin access required' })
     }
 
+    // ── Parse query params ──────────────────────────────────
+    const url = new URL(req.url)
+    const deep = url.searchParams.get('deep') === '1'
+
     // ── Gather data ─────────────────────────────────────────
-    // Use service role for cohort checks
     const serviceClient = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
     // Fetch all active cohorts
-    const { data: cohorts } = await serviceClient
+    const { data: cohorts, error: cohortQueryErr } = await serviceClient
       .from('cohorts')
-      .select('id, name, cohort_phase, is_active, entry_fee, profit_target_percent')
+      .select('id, name, cohort_phase, is_active, entry_fee, tier_id')
       .eq('is_active', true)
 
     const activeCohorts = cohorts || []
 
     // Check Stripe key presence
-    const stripeKeyPresent = !!Deno.env.get('STRIPE_SECRET_KEY')
+    const stripeKey = Deno.env.get('STRIPE_SECRET_KEY')
+    const stripeKeyPresent = !!stripeKey && stripeKey.length > 10
+
+    // Optional deep Stripe verification
+    let stripeDeepResults: Record<string, { priceValid: boolean; productValid: boolean; error?: string }> = {}
+    if (deep && stripeKeyPresent) {
+      try {
+        const stripe = new Stripe(stripeKey!, { apiVersion: '2025-08-27.basil' })
+        for (const [id, cfg] of Object.entries(TIER_CONFIG)) {
+          try {
+            const [price, product] = await Promise.all([
+              stripe.prices.retrieve(cfg.priceId).catch(() => null),
+              stripe.products.retrieve(cfg.productId).catch(() => null),
+            ])
+            stripeDeepResults[id] = {
+              priceValid: !!price && price.active === true,
+              productValid: !!product && product.active === true,
+            }
+          } catch (e) {
+            stripeDeepResults[id] = {
+              priceValid: false,
+              productValid: false,
+              error: (e as Error).message,
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Stripe deep check init failed:', e)
+      }
+    }
 
     // ── Build per-tier readiness ─────────────────────────────
     const tiers: TierReadiness[] = Object.entries(TIER_CONFIG).map(([id, cfg]) => {
@@ -145,34 +176,61 @@ Deno.serve(async (req) => {
       // Stripe wired check
       const hasPriceId = !!cfg.priceId && cfg.priceId.startsWith('price_')
       const hasProductId = !!cfg.productId && cfg.productId.startsWith('prod_')
-      const stripeWired = {
-        ok: hasPriceId && hasProductId && stripeKeyPresent,
-        detail: !stripeKeyPresent
+
+      let stripeDetail: string
+      let stripeOk: boolean
+
+      if (deep && stripeDeepResults[id]) {
+        const dr = stripeDeepResults[id]
+        stripeOk = dr.priceValid && dr.productValid && stripeKeyPresent
+        if (dr.error) {
+          stripeDetail = `Stripe API error: ${dr.error}`
+        } else if (!dr.priceValid && !dr.productValid) {
+          stripeDetail = 'Price and product not found or inactive in Stripe'
+        } else if (!dr.priceValid) {
+          stripeDetail = 'Price not found or inactive in Stripe'
+        } else if (!dr.productValid) {
+          stripeDetail = 'Product not found or inactive in Stripe'
+        } else {
+          stripeDetail = 'Price and product verified active in Stripe'
+        }
+      } else {
+        stripeOk = hasPriceId && hasProductId && stripeKeyPresent
+        stripeDetail = !stripeKeyPresent
           ? 'STRIPE_SECRET_KEY not configured'
           : !hasPriceId
             ? 'Missing or invalid priceId'
             : !hasProductId
               ? 'Missing or invalid productId'
-              : 'Price and product IDs configured',
+              : 'Price and product IDs configured (use deep verify to confirm in Stripe)'
       }
 
-      // Cohort ready check — look for a matching cohort by entry_fee
+      const stripeWired = { ok: stripeOk, detail: stripeDetail }
+
+      // Cohort ready check — prefer tier_id match, fallback to entry_fee
       const matchingCohort = activeCohorts.find(
-        (c) => c.entry_fee === cfg.entryFee && c.is_active
+        (c) => (c.tier_id === id) || (!c.tier_id && c.entry_fee === cfg.entryFee)
       )
       const cohortReady = {
         ok: !!matchingCohort,
         detail: matchingCohort
-          ? `Active cohort: ${matchingCohort.name} (${matchingCohort.cohort_phase})`
-          : `No active cohort found with entry_fee=${cfg.entryFee}`,
+          ? `Active cohort: ${matchingCohort.name} (${matchingCohort.cohort_phase})${!matchingCohort.tier_id ? ' — matched by entry_fee (add tier_id for safety)' : ''}`
+          : cohortQueryErr
+            ? `Cohort query failed: ${cohortQueryErr.message}`
+            : `No active cohort found for tier "${id}"`,
       }
 
-      // Server gate check — mirrors create-checkout-session logic
+      // Server gate check — simulates create-checkout-session validation
+      const gateInputsPresent = cfg.isLive && hasPriceId && hasProductId && stripeKeyPresent
       const serverGateOk = {
-        ok: cfg.isLive && hasPriceId && hasProductId && stripeKeyPresent,
-        detail: cfg.isLive
-          ? 'Server will accept checkout requests'
-          : 'Server returns 400: TIER_NOT_LIVE',
+        ok: gateInputsPresent,
+        detail: !cfg.isLive
+          ? 'Server returns 400: TIER_NOT_LIVE'
+          : !stripeKeyPresent
+            ? 'Server will fail: STRIPE_CONFIG_MISSING'
+            : !hasPriceId || !hasProductId
+              ? 'Server will fail: STRIPE_CONFIG_MISSING'
+              : 'All gate inputs present — server will accept checkout requests',
       }
 
       return {
@@ -188,16 +246,10 @@ Deno.serve(async (req) => {
       }
     })
 
-    return new Response(JSON.stringify({ tiers }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return json(200, { tiers, deep })
   } catch (err) {
     const error = err as Error
     console.error('get-tier-readiness error:', error)
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return json(500, { error: error.message })
   }
 })
