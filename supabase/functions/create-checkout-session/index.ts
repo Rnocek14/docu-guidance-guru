@@ -46,30 +46,25 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // ── 1. Auth ──────────────────────────────────────────────
+    // ── 1. Auth (optional — supports guest checkout) ───────
     const authHeader = req.headers.get('Authorization')
-    if (!authHeader?.startsWith('Bearer ')) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
+    let userId: string | null = null
+    let userEmail: string | null = null
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: authHeader } } }
-    )
+    if (authHeader?.startsWith('Bearer ')) {
+      const supabase = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_ANON_KEY')!,
+        { global: { headers: { Authorization: authHeader } } }
+      )
 
-    const token = authHeader.replace('Bearer ', '')
-    const { data: userData, error: userError } = await supabase.auth.getUser(token)
-    if (userError || !userData.user) {
-      return new Response(JSON.stringify({ error: 'Invalid token' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      const token = authHeader.replace('Bearer ', '')
+      const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token)
+      if (!claimsError && claimsData?.claims?.sub) {
+        userId = claimsData.claims.sub as string
+        userEmail = (claimsData.claims.email as string) || null
+      }
     }
-    const user = userData.user
 
     // ── 2. Parse & validate request ─────────────────────────
     const body = await req.json()
@@ -100,10 +95,9 @@ Deno.serve(async (req) => {
       apiVersion: '2025-08-27.basil',
     })
 
-    const customers = await stripe.customers.list({
-      email: user.email!,
-      limit: 1,
-    })
+    const customers = userEmail
+      ? await stripe.customers.list({ email: userEmail, limit: 1 })
+      : { data: [] }
 
     let customerId: string | undefined
     if (customers.data.length > 0) {
@@ -115,12 +109,11 @@ Deno.serve(async (req) => {
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
-      customer_email: customerId ? undefined : user.email!,
+      customer_email: customerId ? undefined : (userEmail || undefined),
       line_items: [{ price: tier.priceId, quantity: 1 }],
       mode: 'payment',
-      // Dispute-readiness: store what was presented at checkout
       metadata: {
-        user_id: user.id,
+        user_id: userId || 'guest',
         tier_id: tierId,
         account_size: String(tier.accountSize),
         entry_fee: String(tier.entryFee),
@@ -130,7 +123,7 @@ Deno.serve(async (req) => {
       },
       payment_intent_data: {
         metadata: {
-          user_id: user.id,
+          user_id: userId || 'guest',
           tier_id: tierId,
         },
       },
@@ -138,7 +131,7 @@ Deno.serve(async (req) => {
       cancel_url: `${origin}/checkout?payment=cancelled`,
     })
 
-    console.log(`Checkout session created: ${session.id} for user=${user.id} tier=${tierId}`)
+    console.log(`Checkout session created: ${session.id} for user=${userId || 'guest'} tier=${tierId}`)
 
     return new Response(JSON.stringify({ url: session.url }), {
       status: 200,
