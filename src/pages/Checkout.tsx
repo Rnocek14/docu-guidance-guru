@@ -10,9 +10,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { TIERS, getLiveTiers } from "@/lib/pricing-data";
 
-const LIVE_TIER_IDS = new Set(getLiveTiers().map((t) => t.id));
-const DEFAULT_TIER = getLiveTiers()[0]?.id ?? "starter";
-
 // Map shared pricing data to checkout TierCard format
 const CHECKOUT_TIERS = TIERS.map((t) => ({
   id: t.id,
@@ -33,12 +30,16 @@ const CHECKOUT_TIERS = TIERS.map((t) => ({
   ],
 }));
 
+const LIVE_CHECKOUT_TIERS = CHECKOUT_TIERS.filter((t) => t.isLive);
+const DEFAULT_TIER = LIVE_CHECKOUT_TIERS[0]?.id ?? "starter";
+
 export default function Checkout() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const urlTier = searchParams.get("tier");
   const initialTier =
-    searchParams.get("tier") && CHECKOUT_TIERS.some((t) => t.id === searchParams.get("tier"))
-      ? searchParams.get("tier")!
+    urlTier && LIVE_CHECKOUT_TIERS.some((t) => t.id === urlTier)
+      ? urlTier
       : DEFAULT_TIER;
   const [selectedTier, setSelectedTier] = useState<string>(initialTier);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
@@ -49,7 +50,7 @@ export default function Checkout() {
   // Sync state when URL changes (back/forward nav, manual edits)
   useEffect(() => {
     const t = searchParams.get("tier");
-    if (t && CHECKOUT_TIERS.some((x) => x.id === t) && t !== selectedTier) {
+    if (t && LIVE_CHECKOUT_TIERS.some((x) => x.id === t) && t !== selectedTier) {
       setSelectedTier(t);
     }
   }, [searchParams, selectedTier]);
