@@ -157,7 +157,7 @@ async function fetchTierReadiness(deep: boolean) {
     throw new Error(err.error || 'Failed to fetch tier readiness');
   }
 
-  return response.json() as Promise<{ tiers: TierData[]; deep: boolean }>;
+  return response.json() as Promise<{ tiers: TierData[]; deep: boolean; checkedAt: string }>;
 }
 
 export default function TierReadiness() {
@@ -171,6 +171,7 @@ export default function TierReadiness() {
 
   const tiers = data?.tiers ?? [];
   const isDeepResult = data?.deep ?? false;
+  const checkedAt = data?.checkedAt;
 
   return (
     <DashboardLayout title="Tier Readiness" navItems={adminNavItems}>
@@ -204,10 +205,20 @@ export default function TierReadiness() {
           </div>
         </div>
 
-        {isDeepResult && (
-          <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
-            <ShieldCheck className="h-3.5 w-3.5 inline mr-1" />
-            Deep verification active — Stripe price/product IDs checked against live API.
+        {!isLoading && !error && checkedAt && (
+          <div className="flex items-center gap-3 text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+            <Badge variant={isDeepResult ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0">
+              {isDeepResult ? 'Deep Stripe Verify (live API)' : 'Config Only'}
+            </Badge>
+            <span>
+              Checked at {new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+            {isDeepResult && (
+              <span className="flex items-center gap-1">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Price/product IDs verified against live Stripe
+              </span>
+            )}
           </div>
         )}
 

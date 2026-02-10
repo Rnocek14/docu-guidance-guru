@@ -262,7 +262,7 @@ Deno.serve(async (req) => {
       }
     })
 
-    return json(200, { tiers, deep })
+    return json(200, { tiers, deep, checkedAt: new Date().toISOString() })
   } catch (err) {
     const error = err as Error
     console.error('get-tier-readiness error:', error)
