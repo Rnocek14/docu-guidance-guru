@@ -1,5 +1,4 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { TrendingUp, CheckCircle2 } from 'lucide-react';
 
 interface PayoutProfitBufferCardProps {
@@ -8,6 +7,13 @@ interface PayoutProfitBufferCardProps {
   profitBufferRemaining: number;
   profitBufferMet: boolean;
   profitBufferProgressPct?: number;
+}
+
+function bandProgress(pct: number): string {
+  if (pct >= 100) return 'Complete';
+  if (pct >= 75) return 'Almost there';
+  if (pct >= 40) return 'On track';
+  return 'Getting started';
 }
 
 export function PayoutProfitBufferCard({
@@ -32,8 +38,7 @@ export function PayoutProfitBufferCard({
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            You've accumulated ${realizedProfit.toFixed(2)} in profit since your last payout,
-            exceeding the ${profitBufferRequired.toFixed(0)} requirement.
+            You've accumulated sufficient profit since your last payout to meet the buffer requirement.
           </p>
         </CardContent>
       </Card>
@@ -49,19 +54,11 @@ export function PayoutProfitBufferCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-3">
-          <Progress value={progress} className="h-2" />
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">
-              ${realizedProfit.toFixed(2)} / ${profitBufferRequired.toFixed(0)}
-            </span>
-            <span className="font-medium">
-              ${profitBufferRemaining.toFixed(2)} remaining
-            </span>
-          </div>
+        <div className="space-y-2">
+          <p className="text-sm font-medium">{bandProgress(progress)}</p>
           <p className="text-xs text-muted-foreground">
-            You need to accumulate at least ${profitBufferRequired.toFixed(0)} in profit
-            since your last payout before requesting another.
+            Additional profit is needed above the buffer threshold before requesting a payout.
+            Keep trading consistently to build your buffer.
           </p>
         </div>
       </CardContent>

@@ -64,41 +64,19 @@ export default function PayoutRequest() {
   // Submit payout request mutation
   const submitPayout = useMutation({
     mutationFn: async (amount: number) => {
-      // First validate
-      const { data: validation, error: validationError } = await supabase.rpc('validate_payout_request', {
+      const { data, error } = await supabase.rpc('submit_payout_request', {
         _account_id: id!,
         _requested_amount: amount,
       });
-      
-      if (validationError) throw validationError;
-      
-      const validationResult = validation as unknown as PayoutEligibility;
-      if (!validationResult.eligible) {
-        throw new Error(validationResult.reason || 'Payout request not eligible');
-      }
-
-      // Create payout request
-      const { data, error } = await supabase
-        .from('payouts')
-        .insert({
-          account_id: id!,
-          amount: amount,
-          status: 'pending',
-          submitted_amount: amount,
-          calculated_eligible_amount: eligibility?.max_eligible_amount,
-        })
-        .select()
-        .single();
 
       if (error) throw error;
 
-      // Update account status
-      await supabase
-        .from('accounts')
-        .update({ status: 'payout_requested' })
-        .eq('id', id!);
+      const result = data as unknown as { success: boolean; error?: string; payout_id?: string };
+      if (!result.success) {
+        throw new Error(result.error || 'Payout request not eligible');
+      }
 
-      return data;
+      return result;
     },
     onSuccess: () => {
       track('payout_request_submitted', { account_id: id ?? '' });

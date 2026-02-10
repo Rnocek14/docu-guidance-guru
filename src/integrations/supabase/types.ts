@@ -2840,6 +2840,10 @@ export type Database = {
         Args: { _from_account_id: string; _request_id?: string }
         Returns: Json
       }
+      submit_payout_request: {
+        Args: { _account_id: string; _requested_amount: number }
+        Returns: Json
+      }
       text_to_bytea: { Args: { data: string }; Returns: string }
       toggle_payment_system: {
         Args: {
