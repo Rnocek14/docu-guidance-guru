@@ -20,6 +20,7 @@ const CHECKOUT_TIERS = TIERS.map((t) => ({
   splitPercent: t.splitPercent,
   lifetimeCapMultiple: t.lifetimeCapMultiple,
   popular: t.popular,
+  isLive: t.isLive,
   features: [
     `Simulated ${t.accountSize} trading account`,
     `$${t.firstPayoutCap} first payout milestone`,
@@ -56,7 +57,7 @@ export default function Checkout() {
   };
 
   const handlePurchase = async () => {
-    if (!disclaimerAccepted) return;
+    if (!disclaimerAccepted || !tier.isLive) return;
     setIsProcessing(true);
     try {
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
@@ -138,10 +139,12 @@ export default function Checkout() {
           <Button
             className="w-full h-12 text-base font-semibold"
             size="lg"
-            disabled={!disclaimerAccepted || isProcessing}
+            disabled={!disclaimerAccepted || isProcessing || !tier.isLive}
             onClick={handlePurchase}
           >
-            {isProcessing ? (
+            {!tier.isLive ? (
+              "Coming Soon"
+            ) : isProcessing ? (
               "Processing…"
             ) : (
               <>
