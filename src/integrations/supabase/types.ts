@@ -323,6 +323,39 @@ export type Database = {
           },
         ]
       }
+      broker_payload_samples: {
+        Row: {
+          broker: string
+          created_at: string
+          headers_subset: Json
+          id: string
+          notes: string | null
+          raw_body: string
+          raw_hash: string
+          request_id: string
+        }
+        Insert: {
+          broker: string
+          created_at?: string
+          headers_subset?: Json
+          id?: string
+          notes?: string | null
+          raw_body: string
+          raw_hash: string
+          request_id: string
+        }
+        Update: {
+          broker?: string
+          created_at?: string
+          headers_subset?: Json
+          id?: string
+          notes?: string | null
+          raw_body?: string
+          raw_hash?: string
+          request_id?: string
+        }
+        Relationships: []
+      }
       chargeback_events: {
         Row: {
           amount: number
@@ -2314,6 +2347,7 @@ export type Database = {
           user_id: string
         }[]
       }
+      cleanup_old_payload_samples: { Args: never; Returns: undefined }
       confirm_payout_payment: {
         Args: {
           _confirmed_at?: string
