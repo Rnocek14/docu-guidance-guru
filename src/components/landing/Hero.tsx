@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Shield, Lock, Eye, Scale } from 'lucide-react';
 import { track } from '@/lib/track';
-import heroDashboard from '@/assets/hero-dashboard.jpg';
 
 const badges = [
   { icon: Lock, label: 'Frozen Rules' },
@@ -66,19 +65,6 @@ export function Hero() {
           </div>
         </div>
 
-        {/* Hero dashboard screenshot */}
-        <div className="max-w-5xl mx-auto mt-16 animate-in fade-in slide-in-from-bottom-6 duration-1000 [animation-delay:800ms]">
-          <div className="relative rounded-xl border border-border/50 bg-card/30 backdrop-blur p-2 shadow-2xl shadow-primary/5">
-            <img
-              src={heroDashboard}
-              alt="Trader dashboard showing account balance chart, payout readiness checklist, and performance gauges"
-              className="w-full rounded-lg"
-              loading="eager"
-            />
-            {/* Gradient fade at bottom */}
-            <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent rounded-b-xl" />
-          </div>
-        </div>
       </div>
     </section>
   );
