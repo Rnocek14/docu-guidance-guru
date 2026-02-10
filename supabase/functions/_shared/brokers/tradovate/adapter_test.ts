@@ -33,7 +33,6 @@ function makeRequest(rawBody: string, headers: Record<string, string> = {}): Req
 // ── Verify Tests ──
 
 Deno.test('verify — valid signature passes', async () => {
-  // Set env for test
   Deno.env.set('TRADOVATE_WEBHOOK_SECRET', TRADOVATE_TEST_SECRET);
 
   const rawBody = JSON.stringify(VALID_FILL_PAYLOAD);
@@ -55,7 +54,6 @@ Deno.test('verify — invalid signature rejected', async () => {
 
   const rawBody = JSON.stringify(VALID_FILL_PAYLOAD);
   const ts = String(Date.now());
-  // Corrupt signature by one char
   const sig = await generateTestSignature(TRADOVATE_TEST_SECRET, ts, rawBody);
   const badSig = sig.slice(0, -1) + (sig.slice(-1) === 'a' ? 'b' : 'a');
 
@@ -89,6 +87,23 @@ Deno.test('verify — stale timestamp rejected (time skew)', async () => {
 
   const req = makeRequest(rawBody, {
     'x-tv-timestamp': staleTs,
+    'x-tv-signature': sig,
+  });
+
+  const result = await TradovateAdapter.verify(req, rawBody, makeCtx());
+  assertEquals(result.ok, false);
+  assertEquals(result.decision, 'REJECTED_TIME_SKEW');
+});
+
+Deno.test('verify — future timestamp rejected (>30s ahead)', async () => {
+  Deno.env.set('TRADOVATE_WEBHOOK_SECRET', TRADOVATE_TEST_SECRET);
+
+  const rawBody = JSON.stringify(VALID_FILL_PAYLOAD);
+  const futureTs = String(Date.now() + 2 * 60 * 1000); // 2 min in future
+  const sig = await generateTestSignature(TRADOVATE_TEST_SECRET, futureTs, rawBody);
+
+  const req = makeRequest(rawBody, {
+    'x-tv-timestamp': futureTs,
     'x-tv-signature': sig,
   });
 
@@ -180,7 +195,7 @@ Deno.test('parse — invalid JSON rejected', async () => {
   assertEquals(result.decision, 'REJECTED_SCHEMA');
 });
 
-Deno.test('parse — hash is deterministic for same payload', async () => {
+Deno.test('parse — hash is deterministic for same rawBody', async () => {
   const rawBody = JSON.stringify(VALID_FILL_PAYLOAD);
   const req1 = makeRequest(rawBody);
   const req2 = makeRequest(rawBody);

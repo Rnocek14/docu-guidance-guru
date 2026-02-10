@@ -2,7 +2,7 @@
 
 import type { BrokerAdapter } from '../adapter.ts';
 import type { BrokerWebhookContext, AdapterVerifyResult, AdapterParseResult, CanonicalTrade } from '../types.ts';
-import { TradovoteFillPayload, normalizeSide, parseTimestamp } from './schema.ts';
+import { TradovateFillPayload, normalizeSide, parseTimestamp } from './schema.ts';
 import { normalizeSymbol } from '../normalize-symbol.ts';
 
 // ── Crypto helpers (Deno Web Crypto API) ──
@@ -30,17 +30,28 @@ async function sha256Hex(data: string): Promise<string> {
     .join('');
 }
 
+/**
+ * Constant-time comparison of two hex strings.
+ * Compares decoded bytes to avoid timing leaks from string operations.
+ */
 function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
+  const aLower = a.toLowerCase();
+  const bLower = b.toLowerCase();
+  if (aLower.length !== bLower.length || aLower.length % 2 !== 0) return false;
+
+  // Decode hex to bytes and compare
   let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  for (let i = 0; i < aLower.length; i += 2) {
+    const byteA = parseInt(aLower.substring(i, i + 2), 16);
+    const byteB = parseInt(bLower.substring(i, i + 2), 16);
+    result |= byteA ^ byteB;
   }
   return result === 0;
 }
 
 // ── Replay window ──
 const REPLAY_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_FUTURE_SKEW_MS = 30 * 1000;    // 30 seconds max future tolerance
 
 // ── Adapter ──
 
@@ -57,12 +68,12 @@ export const TradovateAdapter: BrokerAdapter = {
       return { ok: false, decision: 'ERROR', reason: 'TRADOVATE_WEBHOOK_SECRET not configured' };
     }
 
-    // Signature headers — configurable names for Tradovate's webhook setup
-    const ts = req.headers.get('x-tv-timestamp') ?? req.headers.get('x-webhook-timestamp') ?? '';
-    const sig = req.headers.get('x-tv-signature') ?? req.headers.get('x-webhook-signature') ?? '';
+    // Canonical header pair — single scheme only, no fallbacks
+    const ts = req.headers.get('x-tv-timestamp') ?? '';
+    const sig = req.headers.get('x-tv-signature') ?? '';
 
     if (!ts || !sig) {
-      return { ok: false, decision: 'REJECTED_SIGNATURE', reason: 'Missing signature or timestamp header' };
+      return { ok: false, decision: 'REJECTED_SIGNATURE', reason: 'Missing x-tv-timestamp or x-tv-signature header' };
     }
 
     // Parse timestamp (supports epoch seconds or milliseconds)
@@ -74,15 +85,18 @@ export const TradovateAdapter: BrokerAdapter = {
     // Heuristic: if < 1e12, treat as seconds; otherwise milliseconds
     tsMs = tsNum < 1e12 ? tsNum * 1000 : tsNum;
 
-    // Anti-replay: reject timestamps outside window
+    // Directional anti-replay: reject past timestamps beyond window AND future timestamps beyond small skew
     const now = Date.now();
-    if (Math.abs(now - tsMs) > REPLAY_WINDOW_MS) {
-      return { ok: false, decision: 'REJECTED_TIME_SKEW', reason: `Timestamp outside ${REPLAY_WINDOW_MS / 1000}s replay window` };
+    if (tsMs > now + MAX_FUTURE_SKEW_MS) {
+      return { ok: false, decision: 'REJECTED_TIME_SKEW', reason: `Timestamp is in the future (max ${MAX_FUTURE_SKEW_MS / 1000}s future skew allowed)` };
+    }
+    if (now - tsMs > REPLAY_WINDOW_MS) {
+      return { ok: false, decision: 'REJECTED_TIME_SKEW', reason: `Timestamp older than ${REPLAY_WINDOW_MS / 1000}s replay window` };
     }
 
     // HMAC verification: signature = hmac_sha256(secret, timestamp + "." + rawBody)
     const expected = await hmacSha256Hex(secret, `${ts}.${rawBody}`);
-    if (!constantTimeEqual(expected, sig.toLowerCase())) {
+    if (!constantTimeEqual(expected, sig)) {
       return { ok: false, decision: 'REJECTED_SIGNATURE', reason: 'HMAC signature mismatch' };
     }
 
@@ -103,7 +117,7 @@ export const TradovateAdapter: BrokerAdapter = {
     }
 
     // Schema validation
-    const parsed = TradovoteFillPayload.safeParse(payload);
+    const parsed = TradovateFillPayload.safeParse(payload);
     if (!parsed.success) {
       return {
         ok: false,
@@ -115,9 +129,19 @@ export const TradovateAdapter: BrokerAdapter = {
 
     const p = parsed.data;
 
-    // Normalize
+    // Normalize side (throws on unknown — caught below)
+    let side: 'buy' | 'sell';
+    try {
+      side = normalizeSide(p.side);
+    } catch (e) {
+      return { ok: false, decision: 'REJECTED_SCHEMA', reason: (e as Error).message, schemaOk: false };
+    }
+
+    // Normalize symbol
     const symbolRaw = p.symbol;
     const symbolNormalized = normalizeSymbol(symbolRaw);
+
+    // Parse timestamp
     let occurredAt: string;
     try {
       occurredAt = parseTimestamp(p.timestamp);
@@ -125,9 +149,8 @@ export const TradovateAdapter: BrokerAdapter = {
       return { ok: false, decision: 'REJECTED_SCHEMA', reason: (e as Error).message, schemaOk: false };
     }
 
-    // Stable hash of raw payload for dedup / audit
-    const stableRaw = JSON.stringify(payload, Object.keys(payload as Record<string, unknown>).sort());
-    const hash = await sha256Hex(stableRaw);
+    // Hash the raw body directly — stable by definition, no re-serialization drift
+    const hash = await sha256Hex(rawBody);
 
     const canonical: CanonicalTrade = {
       broker: 'tradovate',
@@ -138,7 +161,7 @@ export const TradovateAdapter: BrokerAdapter = {
       symbolRaw,
       symbolNormalized,
       assetClass: 'futures', // Tradovate is futures-only
-      side: normalizeSide(p.side),
+      side,
       qty: p.qty,
       price: p.price ?? null,
       commission: p.commission ?? null,

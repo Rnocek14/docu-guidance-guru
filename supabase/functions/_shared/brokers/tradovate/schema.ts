@@ -8,7 +8,7 @@ import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
  * Tradovate fill event payload.
  * Uses .passthrough() to preserve unknown fields in the raw trace.
  */
-export const TradovoteFillPayload = z.object({
+export const TradovateFillPayload = z.object({
   // Account identifier on Tradovate side
   accountId: z.union([z.string(), z.number()]).transform(String),
   // Unique trade/fill ID from Tradovate
@@ -17,7 +17,7 @@ export const TradovoteFillPayload = z.object({
   timestamp: z.union([z.string(), z.number()]),
   // Instrument
   symbol: z.string().min(1),
-  // Side
+  // Side — strictly buy or sell (case-insensitive)
   side: z.enum(['Buy', 'Sell', 'BUY', 'SELL', 'buy', 'sell']),
   // Quantity
   qty: z.number().positive(),
@@ -33,13 +33,17 @@ export const TradovoteFillPayload = z.object({
   eventType: z.string().optional(),
 }).passthrough();
 
-export type TradovoteFillPayloadType = z.infer<typeof TradovoteFillPayload>;
+export type TradovateFillPayloadType = z.infer<typeof TradovateFillPayload>;
 
 /**
  * Normalize side to lowercase canonical form.
+ * Throws on unknown values to prevent silent mis-mapping.
  */
 export function normalizeSide(side: string): 'buy' | 'sell' {
-  return side.toLowerCase() === 'buy' ? 'buy' : 'sell';
+  const lower = side.toLowerCase();
+  if (lower === 'buy') return 'buy';
+  if (lower === 'sell') return 'sell';
+  throw new Error(`Unknown side value: '${side}'. Expected 'buy' or 'sell'.`);
 }
 
 /**

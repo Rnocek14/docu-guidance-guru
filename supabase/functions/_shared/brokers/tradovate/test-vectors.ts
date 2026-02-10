@@ -35,7 +35,7 @@ export const INVALID_SIDE_PAYLOAD = {
   tradeId: 'fill-xyz-002',
   timestamp: Date.now(),
   symbol: 'CLZ5',
-  side: 'LONG', // invalid
+  side: 'LONG', // invalid — not buy or sell
   qty: 3,
 };
 
