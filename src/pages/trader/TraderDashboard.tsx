@@ -11,6 +11,7 @@ import { TrendingUp, TrendingDown, AlertTriangle, Target, Calendar, DollarSign, 
 import type { Account, Cohort, PayoutEligibility } from '@/lib/types';
 import { AccountPhaseIndicator } from '@/components/trader/AccountPhaseIndicator';
 import { PayoutReadinessCard } from '@/components/trader/PayoutReadinessCard';
+import { EquityCurveChart } from '@/components/trader/EquityCurveChart';
 
 export default function TraderDashboard() {
   const { user } = useAuth();
@@ -193,6 +194,12 @@ export default function TraderDashboard() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Equity Curve */}
+            <EquityCurveChart
+              accountId={activeAccount.id}
+              startingBalance={activeAccount.starting_balance}
+            />
 
             {/* Progress section */}
             <div className="grid gap-4 md:grid-cols-2">
