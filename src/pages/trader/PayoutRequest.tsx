@@ -4,8 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLayout';
 import { PayoutCoolingCard } from '@/components/trader/PayoutCoolingCard';
-import { PayoutProfitBufferCard } from '@/components/trader/PayoutProfitBufferCard';
-import { PayoutWinningDaysCard } from '@/components/trader/PayoutWinningDaysCard';
+import { EligibilityChecklist } from '@/components/trader/EligibilityChecklist';
 import { CapProgressCard } from '@/components/trader/CapProgressCard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,11 +12,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { ArrowLeft, DollarSign, AlertTriangle, CheckCircle2, Info, Clock } from 'lucide-react';
+import { ArrowLeft, DollarSign, AlertTriangle, Info, Clock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { getReasonCopy } from '@/lib/payout-copy';
-import { cn } from '@/lib/utils';
 import type { Account, PayoutEligibility } from '@/lib/types';
 
 export default function PayoutRequest() {
@@ -131,8 +129,6 @@ export default function PayoutRequest() {
   // FIX #4: Stricter check - only true if explicitly true (not undefined)
   const isWindowOpen = eligibility?.payout_window_opened === true;
   const canRequestPayout = eligibility?.eligible === true && isWindowOpen;
-  const reasonCode = eligibility?.reason_code ?? 'UNKNOWN';
-  const isDedicatedGate = reasonCode === 'PROFIT_BUFFER' || reasonCode === 'NO_PROFIT' || reasonCode === 'MIN_WINNING_DAYS';
 
   if (isLoading) {
     return (
@@ -191,57 +187,18 @@ export default function PayoutRequest() {
           />
         )}
 
-        {/* Eligibility Status (dedicated gates get their own card instead) */}
-        {eligibility && !eligibility.eligible && isWindowOpen && !isDedicatedGate && (() => {
-          const copy = getReasonCopy(reasonCode);
-          const isBlocking = copy.severity === 'blocking';
-          const isInfo = copy.severity === 'info';
-          return (
-            <Alert
-              variant={isBlocking ? "destructive" : "default"}
-              className={cn(
-                !isBlocking && !isInfo && "border-amber-500/40 bg-amber-500/5 [&>svg]:text-amber-600",
-              )}
-            >
-              {isBlocking ? <AlertTriangle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
-              <AlertTitle>{copy.headline}</AlertTitle>
-              <AlertDescription>
-                <p>{copy.explanation}</p>
-                <p className="mt-1.5 text-sm font-medium">{copy.nextAction}</p>
-              </AlertDescription>
-            </Alert>
-          );
-        })()}
-
-        {/* Winning Trading Days Card — show when has prior payout and required_winning_days > 0 */}
-        {eligibility && isWindowOpen && eligibility.has_prior_payout && (eligibility.required_winning_days ?? 0) > 0 && (
-          <PayoutWinningDaysCard
-            tradingDaysSincePayout={eligibility.winning_days_since_payout ?? 0}
-            requiredTradingDays={eligibility.required_winning_days!}
-            winningDaysRemaining={eligibility.winning_days_remaining ?? 0}
-            progressPct={eligibility.winning_days_progress_pct ?? 100}
-            isMet={reasonCode !== 'MIN_WINNING_DAYS'}
-          />
+        {/* Eligibility Checklist — replaces individual gate cards */}
+        {eligibility && isWindowOpen && (
+          <EligibilityChecklist eligibility={eligibility} />
         )}
 
-        {/* Profit Buffer Card — show on eligible + has_prior_payout OR on denial with PROFIT_BUFFER/NO_PROFIT */}
-        {eligibility && isWindowOpen && eligibility.profit_buffer_required != null && eligibility.has_prior_payout && (
-          <PayoutProfitBufferCard
-            profitBufferRequired={eligibility.profit_buffer_required}
-            realizedProfit={eligibility.realized_profit ?? 0}
-            profitBufferRemaining={eligibility.profit_buffer_remaining ?? 0}
-            profitBufferMet={eligibility.profit_buffer_met ?? true}
-            profitBufferProgressPct={eligibility.profit_buffer_progress_pct}
-          />
-        )}
-
-        {/* Cap Progress Card (D: brand-safe cap messaging) */}
+        {/* Cap Progress Card (brand-safe framing) */}
         {eligibility && isWindowOpen && (
           <CapProgressCard
             lifetimeCapAmount={eligibility.lifetime_cap_amount ?? null}
             lifetimePaidTotal={eligibility.lifetime_paid_total ?? 0}
             lifetimeHeadroom={eligibility.lifetime_headroom ?? null}
-            firstPayoutCapAmount={account.cohort?.first_payout_cap_amount ?? null}
+            firstPayoutCapAmount={eligibility.first_payout_cap_amount ?? null}
             isFirstPayoutInCycle={eligibility.is_first_payout_in_cycle ?? true}
             payoutSplitPercent={eligibility.payout_split_percent ?? 80}
           />
@@ -326,7 +283,7 @@ export default function PayoutRequest() {
                 </Button>
 
                 <p className="text-xs text-muted-foreground text-center">
-                  Your request will be reviewed by our team. Payouts are typically processed within 2-3 business days.
+                  Your request will be reviewed by our team. Requests are typically reviewed within 3–5 business days.
                 </p>
                 <p className="text-xs text-muted-foreground/70 text-center">
                   All trading activity is simulated. Payouts are performance-based rewards, not profit withdrawals or investment returns, and are subject to eligibility rules.
@@ -336,9 +293,9 @@ export default function PayoutRequest() {
           </Card>
         )}
 
-        {/* Window Open but not eligible for other reasons */}
+        {/* Window Open but not eligible — summary card with CTA context */}
         {isWindowOpen && !canRequestPayout && eligibility && (() => {
-          const copy = getReasonCopy(reasonCode);
+          const copy = getReasonCopy(eligibility.reason_code);
           return (
             <Card>
               <CardHeader>
