@@ -10,8 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, AlertTriangle, Target, Calendar, DollarSign, Eye } from 'lucide-react';
 import type { Account, Cohort, PayoutEligibility } from '@/lib/types';
 import { AccountPhaseIndicator } from '@/components/trader/AccountPhaseIndicator';
-import { PayoutMilestoneCard } from '@/components/trader/PayoutMilestoneCard';
-import { LifetimeHeadroomCard } from '@/components/trader/LifetimeHeadroomCard';
+import { PayoutReadinessCard } from '@/components/trader/PayoutReadinessCard';
 
 export default function TraderDashboard() {
   const { user } = useAuth();
@@ -117,19 +116,12 @@ export default function TraderDashboard() {
               windowOpensAt={eligibility?.payout_window_opens_at}
             />
 
-            {/* PA-only: Payout Info Cards */}
+            {/* PA-only: Payout Readiness */}
             {isPerformanceAccount && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <PayoutMilestoneCard
-                  firstPayoutCapAmount={activeAccount.cohort?.first_payout_cap_amount ?? null}
-                  isFirstPayoutInCycle={eligibility?.is_first_payout_in_cycle ?? true}
-                />
-                <LifetimeHeadroomCard
-                  lifetimeCapAmount={eligibility?.lifetime_cap_amount ?? null}
-                  lifetimePaidTotal={eligibility?.lifetime_paid_total ?? 0}
-                  lifetimeHeadroom={eligibility?.lifetime_headroom ?? null}
-                />
-              </div>
+              <PayoutReadinessCard
+                eligibility={eligibility}
+                accountId={activeAccount.id}
+              />
             )}
 
             {/* Stats grid */}
