@@ -13,10 +13,13 @@
 
 // ─── Eligibility reason codes ────────────────────────────────────────────
 
+export type ReasonSeverity = 'info' | 'warning' | 'blocking';
+
 export interface ReasonCopy {
   headline: string;
   explanation: string;
   nextAction: string;
+  severity: ReasonSeverity;
 }
 
 export const REASON_CODE_COPY: Record<string, ReasonCopy> = {
@@ -26,18 +29,21 @@ export const REASON_CODE_COPY: Record<string, ReasonCopy> = {
     explanation:
       "Your account hasn't generated eligible profit yet.",
     nextAction: "Continue trading within the rules to build profit.",
+    severity: 'warning',
   },
   PROFIT_BUFFER: {
     headline: "Maintain Profit Buffer",
     explanation:
       "You need to maintain a minimum profit buffer above your payout amount to remain eligible.",
     nextAction: "Continue trading while maintaining your buffer.",
+    severity: 'warning',
   },
   MIN_WINNING_DAYS: {
     headline: "Complete Required Winning Days",
     explanation:
       "A minimum number of profitable trading days is required before requesting a payout.",
     nextAction: "Trade additional days while staying within the rules.",
+    severity: 'warning',
   },
 
   // Timing / cooldown
@@ -46,12 +52,14 @@ export const REASON_CODE_COPY: Record<string, ReasonCopy> = {
     explanation:
       "A short waiting period applies before your first payout request can be submitted.",
     nextAction: "No action required — eligibility will update automatically.",
+    severity: 'info',
   },
   COOLDOWN: {
     headline: "Payout Cooldown Active",
     explanation:
       "A cooldown applies between payout requests to ensure account stability.",
     nextAction: "No action required — check back once the cooldown ends.",
+    severity: 'info',
   },
 
   // Account / phase status
@@ -60,18 +68,21 @@ export const REASON_CODE_COPY: Record<string, ReasonCopy> = {
     explanation:
       "Payouts are only available once your account reaches the Performance phase.",
     nextAction: "Complete the evaluation and verification phases.",
+    severity: 'blocking',
   },
   BAD_STATUS: {
     headline: "Account Not Eligible",
     explanation:
       "Your account status doesn't currently allow payout requests.",
     nextAction: "Review your account status for details.",
+    severity: 'blocking',
   },
   ACCOUNT_NOT_FOUND: {
     headline: "Account Not Found",
     explanation:
       "We couldn't locate an eligible account for this request.",
     nextAction: "Refresh the page or contact support if the issue persists.",
+    severity: 'blocking',
   },
 
   // Risk / review
@@ -80,6 +91,7 @@ export const REASON_CODE_COPY: Record<string, ReasonCopy> = {
     explanation:
       "Your account has pending reviews that must be resolved before payout eligibility can be confirmed.",
     nextAction: "No action required — you'll be notified once the review completes.",
+    severity: 'warning',
   },
 
   // Cap / structural
@@ -88,6 +100,7 @@ export const REASON_CODE_COPY: Record<string, ReasonCopy> = {
     explanation:
       "This account has reached its maximum lifetime payout limit.",
     nextAction: "Start a new evaluation to continue earning rewards.",
+    severity: 'blocking',
   },
 } as const;
 
@@ -97,6 +110,7 @@ export const UNKNOWN_REASON_COPY: ReasonCopy = {
   explanation:
     "Your account doesn't currently meet all payout requirements.",
   nextAction: "Review the eligibility details below.",
+  severity: 'blocking',
 };
 
 export function getReasonCopy(code: string | undefined): ReasonCopy {
