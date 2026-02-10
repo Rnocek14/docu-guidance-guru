@@ -146,7 +146,7 @@ export function PricingSection() {
         <div className="mt-12 max-w-3xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
         {[
             { label: 'Simulated Environment', emoji: '🎯' },
-            { label: 'Every Approved Payout Paid', emoji: '💰' },
+            { label: 'Approved Payouts Paid', emoji: '💰' },
             { label: 'Human Review for Flags', emoji: '👤' },
             { label: 'Rules Locked at Purchase', emoji: '🔒' },
           ].map(({ label, emoji }) => (
