@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { track } from '@/lib/track';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -112,7 +113,7 @@ export function PricingSection() {
           {/* Rule toggle */}
           <div className="inline-flex items-center rounded-lg border border-border bg-card p-1 gap-1">
             <button
-              onClick={() => setRuleView('evaluation')}
+              onClick={() => { setRuleView('evaluation'); track('pricing_toggle', { view: 'evaluation' }); }}
               className={cn(
                 'px-4 py-2 rounded-md text-sm font-medium transition-colors',
                 ruleView === 'evaluation'
@@ -123,7 +124,7 @@ export function PricingSection() {
               Evaluation Rules
             </button>
             <button
-              onClick={() => setRuleView('payout')}
+              onClick={() => { setRuleView('payout'); track('pricing_toggle', { view: 'payout' }); }}
               className={cn(
                 'px-4 py-2 rounded-md text-sm font-medium transition-colors',
                 ruleView === 'payout'

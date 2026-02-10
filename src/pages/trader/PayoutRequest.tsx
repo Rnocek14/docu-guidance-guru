@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { track } from '@/lib/track';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -24,6 +25,11 @@ export default function PayoutRequest() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [requestedAmount, setRequestedAmount] = useState<string>('');
+  const tracked = useRef(false);
+
+  useEffect(() => {
+    if (!tracked.current && id) { tracked.current = true; track('payout_request_view', { account_id: id }); }
+  }, [id]);
 
   // Fetch account details
   const { data: account, isLoading: accountLoading } = useQuery({
@@ -95,6 +101,7 @@ export default function PayoutRequest() {
       return data;
     },
     onSuccess: () => {
+      track('payout_request_submitted', { account_id: id ?? '' });
       toast.success('Payout request submitted successfully');
       queryClient.invalidateQueries({ queryKey: ['account-payout', id] });
       queryClient.invalidateQueries({ queryKey: ['payout-eligibility', id] });
@@ -129,6 +136,13 @@ export default function PayoutRequest() {
   // FIX #4: Stricter check - only true if explicitly true (not undefined)
   const isWindowOpen = eligibility?.payout_window_opened === true;
   const canRequestPayout = eligibility?.eligible === true && isWindowOpen;
+
+  // Track payout blocked with reason
+  useEffect(() => {
+    if (eligibility && !eligibility.eligible && eligibility.reason_code) {
+      track('payout_blocked', { reason_code: eligibility.reason_code, account_id: id ?? '' });
+    }
+  }, [eligibility, id]);
 
   if (isLoading) {
     return (

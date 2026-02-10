@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { track } from "@/lib/track";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -45,8 +46,17 @@ export default function Checkout() {
   const [selectedTier, setSelectedTier] = useState<string>(initialTier);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const tracked = useRef(false);
 
   const tier = CHECKOUT_TIERS.find((t) => t.id === selectedTier)!;
+
+  // Track checkout view once
+  useEffect(() => {
+    if (!tracked.current) {
+      tracked.current = true;
+      track('checkout_view', { tier: initialTier, is_live: LIVE_CHECKOUT_TIERS.some(t => t.id === initialTier) });
+    }
+  }, [initialTier]);
 
   // Normalize URL if tier param is non-live (stale bookmark/deep link)
   useEffect(() => {
@@ -66,12 +76,14 @@ export default function Checkout() {
   }, [searchParams, selectedTier]);
 
   const handleSelectTier = (id: string) => {
+    track('checkout_tier_select', { from: selectedTier, to: id });
     setSelectedTier(id);
     setSearchParams({ tier: id }, { replace: true });
   };
 
   const handlePurchase = async () => {
     if (!disclaimerAccepted || !tier.isLive) return;
+    track('checkout_click_pay', { tier: selectedTier });
     setIsProcessing(true);
     try {
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
@@ -79,11 +91,14 @@ export default function Checkout() {
       });
       if (error) throw error;
       if (data?.url) {
+        track('checkout_session_created', { tier: selectedTier });
         window.location.href = data.url;
       } else {
         throw new Error('No checkout URL returned');
       }
     } catch (err) {
+      const code = err instanceof Error ? err.message.slice(0, 80) : 'unknown';
+      track('checkout_session_failed', { tier: selectedTier, error_code: code });
       console.error('Checkout error:', err);
       toast.error('Failed to start checkout. Please try again.');
       setIsProcessing(false);
@@ -146,7 +161,7 @@ export default function Checkout() {
               ═══════════════════════════════════════════════════════ */}
           <CheckoutDisclaimer
             accepted={disclaimerAccepted}
-            onAcceptedChange={setDisclaimerAccepted}
+            onAcceptedChange={(v) => { setDisclaimerAccepted(v); track('checkout_disclaimer_toggle', { accepted: v }); }}
           />
 
           {/* Pay button */}
