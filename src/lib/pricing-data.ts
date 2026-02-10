@@ -75,3 +75,6 @@ export const TIERS: PricingTier[] = [
     isLive: false,
   },
 ];
+
+/** Returns only tiers that are currently purchasable. */
+export const getLiveTiers = () => TIERS.filter((t) => t.isLive);

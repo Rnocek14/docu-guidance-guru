@@ -4,13 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Check, ArrowRight } from 'lucide-react';
-import { TIERS, type PricingTier } from '@/lib/pricing-data';
+import { TIERS, getLiveTiers, type PricingTier } from '@/lib/pricing-data';
 import { cn } from '@/lib/utils';
 
 type RuleView = 'evaluation' | 'payout';
 
 function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView }) {
-  const isPopular = tier.popular;
+  const isPopular = tier.isLive && tier.popular;
+  const isUpcoming = !tier.isLive;
   return (
     <Card
       className={cn(
@@ -23,6 +24,11 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
       {isPopular && (
         <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-4">
           Most Popular
+        </Badge>
+      )}
+      {isUpcoming && (
+        <Badge variant="outline" className="absolute -top-3 left-1/2 -translate-x-1/2 text-muted-foreground px-4">
+          Upcoming
         </Badge>
       )}
       <CardHeader className="text-center pb-2 pt-8">
@@ -53,16 +59,27 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
             </>
           )}
         </div>
-        <Button
-          asChild
-          className={cn('w-full mt-6 gap-2')}
-          variant={isPopular ? 'default' : 'outline'}
-          size="lg"
-        >
-          <Link to={`/checkout?tier=${tier.id}`}>
-            Get Started <ArrowRight className="h-4 w-4" />
-          </Link>
-        </Button>
+        {isUpcoming ? (
+          <Button
+            className="w-full mt-6 gap-2"
+            variant="outline"
+            size="lg"
+            disabled
+          >
+            Coming Soon
+          </Button>
+        ) : (
+          <Button
+            asChild
+            className="w-full mt-6 gap-2"
+            variant={isPopular ? 'default' : 'outline'}
+            size="lg"
+          >
+            <Link to={`/checkout?tier=${tier.id}`}>
+              Get Started <ArrowRight className="h-4 w-4" />
+            </Link>
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

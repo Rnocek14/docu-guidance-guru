@@ -16,6 +16,7 @@ const TIER_CONFIG: Record<string, {
   name: string
   accountSize: number
   entryFee: number
+  isLive: boolean
 }> = {
   starter: {
     priceId: 'price_1SxvRoLH4HmFKO8KSW3FUPzA',
@@ -23,6 +24,7 @@ const TIER_CONFIG: Record<string, {
     name: 'Starter Evaluation',
     accountSize: 50_000,
     entryFee: 149,
+    isLive: true,
   },
   pro: {
     priceId: 'price_1SxvRpLH4HmFKO8KfvQtaGTV',
@@ -30,6 +32,7 @@ const TIER_CONFIG: Record<string, {
     name: 'Pro Evaluation',
     accountSize: 100_000,
     entryFee: 199,
+    isLive: false,
   },
   elite: {
     priceId: 'price_1SxvRqLH4HmFKO8KwCfeCx1C',
@@ -37,6 +40,7 @@ const TIER_CONFIG: Record<string, {
     name: 'Elite Evaluation',
     accountSize: 200_000,
     entryFee: 349,
+    isLive: false,
   },
 }
 
@@ -80,6 +84,16 @@ Deno.serve(async (req) => {
       })
     }
 
+    const tier = TIER_CONFIG[tierId]
+
+    // Server-side gate: reject non-live tiers
+    if (!tier.isLive) {
+      return new Response(
+        JSON.stringify({ error: 'This tier is not yet available for purchase' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // P0 RELEASE BLOCKER: disclaimer must be accepted
     if (!disclaimerAccepted) {
       return new Response(
@@ -87,8 +101,6 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
-
-    const tier = TIER_CONFIG[tierId]
 
     // ── 3. Stripe customer lookup / reuse ────────────────────
     const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
