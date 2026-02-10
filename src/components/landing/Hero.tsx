@@ -25,7 +25,7 @@ export function Hero() {
           {/* Tagline badge — prominent */}
           <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/5 backdrop-blur px-4 py-1.5 text-sm font-semibold text-primary mb-6 animate-in fade-in slide-in-from-bottom-2 duration-700">
             <Shield className="h-4 w-4" />
-            Detection, Not Domination.
+            Your Fixed Point in Trading.
           </div>
 
           {/* Badge row */}

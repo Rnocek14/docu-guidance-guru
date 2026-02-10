@@ -8,7 +8,7 @@ export function Footer() {
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2">
             <Shield className="h-6 w-6 text-primary" />
-            <span className="font-bold">RiskAnalytics</span>
+            <span className="font-bold">Meridian</span>
           </div>
           <nav className="flex flex-wrap items-center gap-6 text-sm text-muted-foreground">
             <Link to="/rules" className="hover:text-foreground transition-colors">
@@ -23,7 +23,7 @@ export function Footer() {
             <Link to="/login" className="hover:text-foreground transition-colors">
               Sign In
             </Link>
-            <a href="mailto:support@riskanalytics.com" className="hover:text-foreground transition-colors">
+            <a href="mailto:support@meridianfunded.com" className="hover:text-foreground transition-colors">
               Contact
             </a>
           </nav>
@@ -35,7 +35,7 @@ export function Footer() {
             financial advice.
           </p>
           <p className="text-sm text-muted-foreground">
-            © {new Date().getFullYear()} RiskAnalytics. Detection, Not Domination.
+            © {new Date().getFullYear()} Meridian. Your fixed point in trading.
           </p>
         </div>
       </div>
