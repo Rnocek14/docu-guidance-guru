@@ -243,12 +243,15 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground" title="What percentage of your total profit came from your single best day. High concentration suggests luck over consistency.">
-                  Spike Day Ratio
+                <span className="text-muted-foreground" title="How concentrated your profits are in a single day. High concentration suggests luck over consistency.">
+                  Profit Distribution
                 </span>
-                <span className="font-mono text-sm font-medium">
-                  {analysis.spikeDayRatio > 0 ? `${analysis.spikeDayRatio.toFixed(0)}%` : '—'}
-                </span>
+                <Badge
+                  variant={analysis.spikeDayRatio > 50 ? 'destructive' : analysis.spikeDayRatio > 30 ? 'outline' : 'default'}
+                  className="text-xs"
+                >
+                  {analysis.spikeDayRatio === 0 ? '—' : analysis.spikeDayRatio <= 30 ? 'Good' : analysis.spikeDayRatio <= 50 ? 'Watch' : 'Risky'}
+                </Badge>
               </div>
               {analysis.spikeDayRatio > 0 && (
                 <div className="text-[11px] text-muted-foreground">
