@@ -6,7 +6,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   ShieldCheck,
@@ -20,6 +19,7 @@ import {
   FileText,
   Loader2,
   ExternalLink,
+  Info,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -27,13 +27,14 @@ interface CheckResult { ok: boolean; detail: string; verifyUnavailable?: boolean
 
 interface TierReadiness {
   id: string; name: string; isLive: boolean; entryFee: number;
+  configLiveReady: boolean;
   checks: { purchasable: CheckResult; stripeWired: CheckResult; cohortReady: CheckResult; serverGateOk: CheckResult };
 }
 
-interface CohortHealth {
+interface CohortExposure {
   id: string; name: string; tier_id: string | null;
-  cash_reserve: number; pending_liability: number; opening_soon_liability: number;
-  net_buffer: number; ok: boolean; detail: string;
+  pending_amount: number; approved_unpaid: number; total_exposure: number;
+  pending_count: number; approved_count: number;
 }
 
 interface AuditHealth {
@@ -46,7 +47,7 @@ interface Blocker { key: string; severity: 'warning' | 'blocking'; detail: strin
 
 interface ReadinessResponse {
   checkedAt: string; deep: boolean; safeToSell: boolean;
-  blockers: Blocker[]; tiers: TierReadiness[]; cohorts: CohortHealth[];
+  blockers: Blocker[]; tiers: TierReadiness[]; cohorts: CohortExposure[];
   audits: AuditHealth;
   liability: {
     cashReserve: number; assumedAvgPayout: number; totalPending: number;
@@ -66,16 +67,41 @@ function CheckIcon({ ok, unavailable }: { ok: boolean; unavailable?: boolean }) 
     : <XCircle className="h-4 w-4 text-destructive shrink-0" />;
 }
 
+const CHECK_LABELS: Record<string, string> = {
+  purchasable: 'Purchasable',
+  stripeWired: 'Stripe Wired',
+  cohortReady: 'Cohort Ready',
+  serverGateOk: 'Server Gate',
+};
+
 export default function AdminReadiness() {
   const [deep, setDeep] = useState(false);
 
   const { data, isLoading, error, refetch, isRefetching } = useQuery({
     queryKey: ['admin-readiness', deep],
     queryFn: async () => {
+      // Fix #6: use supabase.functions.invoke (consistent with rest of codebase)
+      const { data, error } = await supabase.functions.invoke('get-admin-readiness', {
+        headers: { 'Content-Type': 'application/json' },
+        body: null,
+        method: 'GET',
+      });
+      if (error) throw error;
+      return data as ReadinessResponse;
+    },
+    refetchInterval: 30_000,
+  });
+
+  // Since supabase.functions.invoke doesn't support query params easily,
+  // we handle deep mode by invoking with the URL approach but through a consistent helper
+  const { data: deepData, isLoading: deepLoading, refetch: refetchDeep } = useQuery({
+    queryKey: ['admin-readiness-deep'],
+    queryFn: async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
+      const baseUrl = (supabase as any).supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
       const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-admin-readiness?deep=${deep ? '1' : '0'}`,
+        `${baseUrl}/functions/v1/get-admin-readiness?deep=1`,
         { headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' } }
       );
       if (!res.ok) {
@@ -84,8 +110,12 @@ export default function AdminReadiness() {
       }
       return res.json() as Promise<ReadinessResponse>;
     },
-    refetchInterval: 30_000,
+    enabled: deep,
+    refetchInterval: deep ? 30_000 : false,
   });
+
+  const activeData = deep ? deepData : data;
+  const activeLoading = deep ? deepLoading : isLoading;
 
   if (error) {
     return (
@@ -112,54 +142,57 @@ export default function AdminReadiness() {
           <div className="flex items-center gap-2">
             <Button
               variant={deep ? 'default' : 'outline'} size="sm"
-              onClick={() => setDeep(!deep)}
+              onClick={() => {
+                setDeep(!deep);
+                if (!deep) refetchDeep();
+              }}
             >
               {deep ? 'Deep Mode ON' : 'Deep Verify'}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isRefetching}>
+            <Button variant="outline" size="sm" onClick={() => deep ? refetchDeep() : refetch()} disabled={isRefetching}>
               <RefreshCw className={`h-4 w-4 mr-1.5 ${isRefetching ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
           </div>
         </div>
 
-        {isLoading ? (
+        {activeLoading ? (
           <div className="flex items-center justify-center h-64">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
-        ) : data ? (
+        ) : activeData ? (
           <>
             {/* ── Verdict Card ── */}
-            <Card className={`border-2 ${data.safeToSell ? 'border-success/50 bg-success/5' : 'border-destructive/50 bg-destructive/5'}`}>
+            <Card className={`border-2 ${activeData.safeToSell ? 'border-success/50 bg-success/5' : 'border-destructive/50 bg-destructive/5'}`}>
               <CardContent className="pt-6">
                 <div className="flex items-start gap-4">
-                  {data.safeToSell ? (
+                  {activeData.safeToSell ? (
                     <ShieldCheck className="h-10 w-10 text-success shrink-0" />
                   ) : (
                     <ShieldX className="h-10 w-10 text-destructive shrink-0" />
                   )}
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
-                      <h3 className={`text-xl font-bold ${data.safeToSell ? 'text-success' : 'text-destructive'}`}>
-                        {data.safeToSell ? 'SAFE TO SELL' : 'NOT SAFE TO SELL'}
+                      <h3 className={`text-xl font-bold ${activeData.safeToSell ? 'text-success' : 'text-destructive'}`}>
+                        {activeData.safeToSell ? 'SAFE TO SELL' : 'NOT SAFE TO SELL'}
                       </h3>
-                      <Badge variant={data.safeToSell ? 'secondary' : 'destructive'}>
-                        {data.deep ? 'Deep Verified' : 'Config Only'}
+                      <Badge variant={activeData.deep ? 'default' : 'secondary'}>
+                        {activeData.deep ? 'Deep Verified' : 'Config Only'}
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Checked {formatDistanceToNow(new Date(data.checkedAt), { addSuffix: true })}
+                      Checked {formatDistanceToNow(new Date(activeData.checkedAt), { addSuffix: true })}
                     </p>
 
-                    {/* Blockers */}
-                    {data.blockers.length > 0 && (
+                    {activeData.blockers.length > 0 && (
                       <div className="mt-4 space-y-2">
                         <p className="text-sm font-medium">
-                          {data.blockers.filter(b => b.severity === 'blocking').length} blocking issue{data.blockers.filter(b => b.severity === 'blocking').length !== 1 ? 's' : ''}
-                          {data.blockers.filter(b => b.severity === 'warning').length > 0 && `, ${data.blockers.filter(b => b.severity === 'warning').length} warning(s)`}
+                          {activeData.blockers.filter(b => b.severity === 'blocking').length} blocking
+                          {activeData.blockers.filter(b => b.severity === 'warning').length > 0 &&
+                            `, ${activeData.blockers.filter(b => b.severity === 'warning').length} warning(s)`}
                         </p>
                         <ul className="space-y-1.5">
-                          {data.blockers.map(b => (
+                          {activeData.blockers.map(b => (
                             <li key={b.key} className="flex items-start gap-2 text-sm">
                               {b.severity === 'blocking'
                                 ? <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
@@ -178,7 +211,7 @@ export default function AdminReadiness() {
               </CardContent>
             </Card>
 
-            {/* ── Liability Summary ── */}
+            {/* ── Liability Summary (global only — fix #2) ── */}
             <div className="grid gap-4 md:grid-cols-4">
               <Card>
                 <CardHeader className="pb-2">
@@ -187,16 +220,16 @@ export default function AdminReadiness() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold">{fmt(data.liability.cashReserve)}</p>
+                  <p className="text-2xl font-bold">{fmt(activeData.liability.cashReserve)}</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Pending Liability</CardTitle>
+                  <CardTitle className="text-sm font-medium">Total Pending</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold">{fmt(data.liability.totalPending)}</p>
-                  <p className="text-xs text-muted-foreground">{fmt(data.liability.approvedUnpaid)} approved unpaid</p>
+                  <p className="text-2xl font-bold">{fmt(activeData.liability.totalPending)}</p>
+                  <p className="text-xs text-muted-foreground">{fmt(activeData.liability.approvedUnpaid)} approved unpaid</p>
                 </CardContent>
               </Card>
               <Card>
@@ -204,17 +237,17 @@ export default function AdminReadiness() {
                   <CardTitle className="text-sm font-medium">Opening Soon (7d)</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold">{data.liability.openingSoonCount}</p>
-                  <p className="text-xs text-muted-foreground">{fmt(data.liability.openingSoonLiability)} est. liability</p>
+                  <p className="text-2xl font-bold">{activeData.liability.openingSoonCount}</p>
+                  <p className="text-xs text-muted-foreground">{fmt(activeData.liability.openingSoonLiability)} est.</p>
                 </CardContent>
               </Card>
-              <Card className={data.liability.netBuffer !== null && data.liability.netBuffer <= 0 ? 'border-destructive/50' : ''}>
+              <Card className={activeData.liability.netBuffer !== null && activeData.liability.netBuffer <= 0 ? 'border-destructive/50' : ''}>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Net Buffer</CardTitle>
+                  <CardTitle className="text-sm font-medium">Net Buffer (Global)</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className={`text-2xl font-bold ${data.liability.netBuffer !== null && data.liability.netBuffer <= 0 ? 'text-destructive' : ''}`}>
-                    {data.liability.netBuffer !== null ? fmt(data.liability.netBuffer) : '—'}
+                  <p className={`text-2xl font-bold ${activeData.liability.netBuffer !== null && activeData.liability.netBuffer <= 0 ? 'text-destructive' : ''}`}>
+                    {activeData.liability.netBuffer !== null ? fmt(activeData.liability.netBuffer) : '—'}
                   </p>
                 </CardContent>
               </Card>
@@ -224,13 +257,13 @@ export default function AdminReadiness() {
             <Tabs defaultValue="tiers">
               <TabsList>
                 <TabsTrigger value="tiers">Tier Flip Safety</TabsTrigger>
-                <TabsTrigger value="cohorts">Cohort Health</TabsTrigger>
+                <TabsTrigger value="cohorts">Cohort Exposure</TabsTrigger>
                 <TabsTrigger value="audit">Audit & Recon</TabsTrigger>
               </TabsList>
 
               {/* Tiers */}
               <TabsContent value="tiers" className="space-y-3 mt-4">
-                {data.tiers.map(t => (
+                {activeData.tiers.map(t => (
                   <Card key={t.id} className={!t.isLive ? 'opacity-60' : ''}>
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
@@ -239,6 +272,11 @@ export default function AdminReadiness() {
                           <Badge variant={t.isLive ? 'default' : 'secondary'}>
                             {t.isLive ? 'Live' : 'Upcoming'}
                           </Badge>
+                          {!t.isLive && t.configLiveReady && (
+                            <Badge variant="outline" className="text-warning border-warning/30 bg-warning/10">
+                              Config Ready
+                            </Badge>
+                          )}
                           <Badge variant="outline">${t.entryFee}</Badge>
                         </div>
                       </div>
@@ -249,49 +287,62 @@ export default function AdminReadiness() {
                           <div key={key} className="flex items-start gap-2 text-sm">
                             <CheckIcon ok={check.ok} unavailable={check.verifyUnavailable} />
                             <div>
-                              <span className="font-medium">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                              <span className="font-medium">{CHECK_LABELS[key] || key}</span>
                               <p className="text-xs text-muted-foreground">{check.detail}</p>
                             </div>
                           </div>
                         ))}
                       </div>
+                      {!t.isLive && t.configLiveReady && (
+                        <div className="flex items-center gap-2 mt-3 text-xs text-warning bg-warning/10 rounded px-2 py-1.5">
+                          <Info className="h-3.5 w-3.5 shrink-0" />
+                          Stripe config is valid — ensure create-checkout-session blocks with TIER_NOT_LIVE
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
               </TabsContent>
 
-              {/* Cohorts */}
+              {/* Cohorts — exposure breakdown only (fix #2/#3) */}
               <TabsContent value="cohorts" className="space-y-3 mt-4">
-                {data.cohorts.length === 0 ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-lg px-4 py-2.5">
+                  <Info className="h-4 w-4 shrink-0" />
+                  Per-cohort exposure breakdown. Net buffer is calculated globally (see summary above).
+                </div>
+                {activeData.cohorts.length === 0 ? (
                   <Alert>
                     <AlertTriangle className="h-4 w-4" />
                     <AlertTitle>No Active Cohorts</AlertTitle>
                     <AlertDescription>No active cohorts found. Create cohorts before selling.</AlertDescription>
                   </Alert>
-                ) : data.cohorts.map(c => (
-                  <Card key={c.id} className={!c.ok ? 'border-destructive/30' : ''}>
+                ) : activeData.cohorts.map(c => (
+                  <Card key={c.id}>
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-sm font-medium">{c.name}</CardTitle>
-                        <CheckIcon ok={c.ok} />
+                        <Badge variant="outline">{fmt(c.total_exposure)} exposure</Badge>
                       </div>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid gap-2 sm:grid-cols-3 text-sm">
+                      <div className="grid gap-3 sm:grid-cols-4 text-sm">
                         <div>
-                          <p className="text-xs text-muted-foreground">Reserve</p>
-                          <p className="font-medium">{fmt(c.cash_reserve)}</p>
+                          <p className="text-xs text-muted-foreground">Pending</p>
+                          <p className="font-medium">{c.pending_count} ({fmt(c.pending_amount)})</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Pending Liability</p>
-                          <p className="font-medium">{fmt(c.pending_liability)}</p>
+                          <p className="text-xs text-muted-foreground">Approved Unpaid</p>
+                          <p className="font-medium">{c.approved_count} ({fmt(c.approved_unpaid)})</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Net Buffer</p>
-                          <p className={`font-medium ${c.net_buffer < 0 ? 'text-destructive' : ''}`}>{fmt(c.net_buffer)}</p>
+                          <p className="text-xs text-muted-foreground">Total Exposure</p>
+                          <p className="font-medium">{fmt(c.total_exposure)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Tier</p>
+                          <p className="font-medium">{c.tier_id || 'unlinked'}</p>
                         </div>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-2">{c.detail}</p>
                     </CardContent>
                   </Card>
                 ))}
@@ -299,13 +350,13 @@ export default function AdminReadiness() {
 
               {/* Audit */}
               <TabsContent value="audit" className="space-y-3 mt-4">
-                <Card className={!data.audits.ok ? 'border-destructive/30' : ''}>
+                <Card className={!activeData.audits.ok ? 'border-destructive/30' : ''}>
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm font-medium flex items-center gap-2">
                         <FileText className="h-4 w-4" /> Audit Health
                       </CardTitle>
-                      <CheckIcon ok={data.audits.ok} />
+                      <CheckIcon ok={activeData.audits.ok} />
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -315,8 +366,8 @@ export default function AdminReadiness() {
                         <div>
                           <p className="text-xs text-muted-foreground">Last Risk Snapshot</p>
                           <p className="font-medium">
-                            {data.audits.lastSnapshotAt
-                              ? `${formatDistanceToNow(new Date(data.audits.lastSnapshotAt), { addSuffix: true })} (${data.audits.snapshotAgeHours}h)`
+                            {activeData.audits.lastSnapshotAt
+                              ? `${formatDistanceToNow(new Date(activeData.audits.lastSnapshotAt), { addSuffix: true })} (${activeData.audits.snapshotAgeHours}h)`
                               : 'Never'}
                           </p>
                         </div>
@@ -326,22 +377,22 @@ export default function AdminReadiness() {
                         <div>
                           <p className="text-xs text-muted-foreground">Last Reconciliation</p>
                           <p className="font-medium">
-                            {data.audits.lastReconAt
-                              ? `${formatDistanceToNow(new Date(data.audits.lastReconAt), { addSuffix: true })} (${data.audits.reconAgeHours}h)`
+                            {activeData.audits.lastReconAt
+                              ? `${formatDistanceToNow(new Date(activeData.audits.lastReconAt), { addSuffix: true })} (${activeData.audits.reconAgeHours}h)`
                               : 'Never'}
                           </p>
                         </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
-                      <CheckIcon ok={data.audits.failuresLast24h === 0} />
+                      <CheckIcon ok={activeData.audits.failuresLast24h === 0} />
                       <span>
-                        {data.audits.failuresLast24h === 0
+                        {activeData.audits.failuresLast24h === 0
                           ? 'No failed audits in 24h'
-                          : `${data.audits.failuresLast24h} failed audit(s) in 24h`}
+                          : `${activeData.audits.failuresLast24h} failed audit(s) in 24h`}
                       </span>
                     </div>
-                    <p className="text-xs text-muted-foreground">{data.audits.detail}</p>
+                    <p className="text-xs text-muted-foreground">{activeData.audits.detail}</p>
 
                     <div className="flex gap-2 pt-2 border-t">
                       <Button asChild variant="outline" size="sm">

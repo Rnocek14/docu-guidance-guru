@@ -38,11 +38,30 @@ const TIER_CONFIG: Record<string, {
 interface CheckResult { ok: boolean; detail: string; verifyUnavailable?: boolean }
 interface Blocker { key: string; severity: 'warning' | 'blocking'; detail: string }
 
+interface DeepResult {
+  verifyRan: boolean
+  verifyUnavailable: boolean
+  priceValid: boolean
+  productValid: boolean
+  priceMatchesProduct: boolean
+  verifyError?: string
+}
+
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
+}
+
+/** Safely parse system_settings.value which may be JSONB, string, or null */
+function parseSettingsValue(raw: unknown): Record<string, unknown> {
+  if (!raw) return {}
+  if (typeof raw === 'object') return raw as Record<string, unknown>
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) } catch { return {} }
+  }
+  return {}
 }
 
 Deno.serve(async (req) => {
@@ -78,8 +97,15 @@ Deno.serve(async (req) => {
 
     const url = new URL(req.url)
     const deep = url.searchParams.get('deep') === '1'
+    const hasAnyLiveTier = Object.values(TIER_CONFIG).some(t => t.isLive)
 
-    // ── Parallel data fetches ──
+    // ── Step 1: Fetch buffer settings FIRST (fix #7 — single RPC call) ──
+    const settingsRes = await svc.rpc('get_liability_buffer_settings')
+    const bufSettings = settingsRes.data as any
+    const cashReserve = bufSettings?.cash_reserve ?? 0
+    const assumedAvgPayout = bufSettings?.assumed_avg_first_payout ?? 300
+
+    // ── Step 2: Parallel data fetches (liability uses real settings) ──
     const [
       cohortsRes,
       breakerRes,
@@ -95,7 +121,12 @@ Deno.serve(async (req) => {
       svc.from('risk_snapshots').select('net_buffer, created_at').order('created_at', { ascending: false }).limit(1).maybeSingle(),
       svc.from('payment_system_state').select('is_paused_inbound, pause_reason').limit(1).maybeSingle(),
       svc.from('system_settings').select('value').eq('key', 'reserve_aware_approval').maybeSingle(),
-      svc.rpc('get_liability_snapshot', { _days_forward: 7, _cash_reserve: 0, _assumed_avg_first_payout: 300 }),
+      // Fix #7: single call with actual settings
+      svc.rpc('get_liability_snapshot', {
+        _days_forward: 7,
+        _cash_reserve: cashReserve,
+        _assumed_avg_first_payout: assumedAvgPayout,
+      }),
       svc.from('reconciliation_runs').select('id, created_at').order('created_at', { ascending: false }).limit(1).maybeSingle(),
       svc.from('audit_logs').select('id').eq('action', 'reconciliation_failed').gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()).limit(5),
     ])
@@ -103,29 +134,15 @@ Deno.serve(async (req) => {
     const activeCohorts = cohortsRes.data || []
     const breaker = breakerRes.data
     const snapshot = snapshotRes.data
-    const liability = liabilityRes.data as any
-
-    // ── Load persisted buffer settings ──
-    const settingsRes = await svc.rpc('get_liability_buffer_settings')
-    const bufSettings = settingsRes.data as any
-    const cashReserve = bufSettings?.cash_reserve ?? 0
-    const assumedAvgPayout = bufSettings?.assumed_avg_first_payout ?? 300
-
-    // Re-fetch liability with actual settings if they differ
-    let liabilityData = liability
-    if (cashReserve !== 0 || assumedAvgPayout !== 300) {
-      const reRes = await svc.rpc('get_liability_snapshot', {
-        _days_forward: 7,
-        _cash_reserve: cashReserve,
-        _assumed_avg_first_payout: assumedAvgPayout,
-      })
-      if (!reRes.error) liabilityData = reRes.data as any
-    }
+    const liabilityData = liabilityRes.data as any
 
     // ── Stripe deep verify (optional) ──
     const stripeKey = Deno.env.get('STRIPE_SECRET_KEY')
     const stripeKeyPresent = !!stripeKey && stripeKey.length > 10
-    let stripeDeep: Record<string, { priceValid: boolean; productValid: boolean; priceMatchesProduct: boolean; error?: string }> = {}
+
+    // Fix #4: rich per-tier deep status
+    const stripeDeep: Record<string, DeepResult> = {}
+    let stripeInitFailed = false
 
     if (deep && stripeKeyPresent) {
       try {
@@ -140,64 +157,121 @@ Deno.serve(async (req) => {
               ? (typeof price.product === 'string' ? price.product : (price.product as any)?.id)
               : null
             stripeDeep[id] = {
+              verifyRan: true,
+              verifyUnavailable: false,
               priceValid: !!price && (price as any).active === true,
               productValid: !!product,
               priceMatchesProduct: priceProductId === cfg.productId,
             }
           } catch (e) {
-            stripeDeep[id] = { priceValid: false, productValid: false, priceMatchesProduct: false, error: (e as Error).message }
+            stripeDeep[id] = {
+              verifyRan: true,
+              verifyUnavailable: true,
+              priceValid: false,
+              productValid: false,
+              priceMatchesProduct: false,
+              verifyError: (e as Error).message,
+            }
           }
         }
-      } catch { /* init failed */ }
+      } catch (e) {
+        console.error('Stripe init failed:', e)
+        stripeInitFailed = true
+        // Mark all tiers as verify-unavailable
+        for (const id of Object.keys(TIER_CONFIG)) {
+          stripeDeep[id] = {
+            verifyRan: false,
+            verifyUnavailable: true,
+            priceValid: false,
+            productValid: false,
+            priceMatchesProduct: false,
+            verifyError: 'Stripe client init failed',
+          }
+        }
+      }
+    } else if (deep && !stripeKeyPresent) {
+      // Fix #4: deep requested but key missing
+      for (const id of Object.keys(TIER_CONFIG)) {
+        stripeDeep[id] = {
+          verifyRan: false,
+          verifyUnavailable: true,
+          priceValid: false,
+          productValid: false,
+          priceMatchesProduct: false,
+          verifyError: 'STRIPE_SECRET_KEY not configured',
+        }
+      }
     }
 
-    // ── Build tier readiness ──
+    // ── Build per-tier readiness ──
     const tiers = Object.entries(TIER_CONFIG).map(([id, cfg]) => {
       const hasPriceId = cfg.priceId?.startsWith('price_')
       const hasProductId = cfg.productId?.startsWith('prod_')
-      const dr = deep ? stripeDeep[id] : null
-      const verifyUnavailable = !!dr?.error
+      const dr = stripeDeep[id] ?? null
 
       const purchasable: CheckResult = { ok: cfg.isLive, detail: cfg.isLive ? 'Live' : 'isLive=false' }
 
-      let stripeOk = hasPriceId && hasProductId && stripeKeyPresent
-      let stripeDetail = 'Config present'
-      if (dr) {
-        stripeOk = dr.priceValid && dr.productValid && dr.priceMatchesProduct && stripeKeyPresent
-        stripeDetail = dr.error ? `Verify failed: ${dr.error}` : stripeOk ? 'Verified active in Stripe' : 'Stripe mismatch'
+      // Stripe wired check
+      let stripeOk: boolean
+      let stripeDetail: string
+      let verifyUnavailable = false
+
+      if (dr?.verifyRan || dr?.verifyUnavailable) {
+        verifyUnavailable = dr.verifyUnavailable
+        if (dr.verifyUnavailable) {
+          stripeOk = false
+          stripeDetail = `Verify unavailable: ${dr.verifyError ?? 'unknown'}`
+        } else {
+          stripeOk = dr.priceValid && dr.productValid && dr.priceMatchesProduct && stripeKeyPresent
+          stripeDetail = stripeOk ? 'Verified active in Stripe' : 'Stripe mismatch — check price/product'
+        }
+      } else {
+        stripeOk = hasPriceId && hasProductId && stripeKeyPresent
+        stripeDetail = !stripeKeyPresent ? 'STRIPE_SECRET_KEY missing' : stripeOk ? 'Config present (run deep verify)' : 'Missing price/product IDs'
       }
       const stripeWired: CheckResult = { ok: stripeOk, detail: stripeDetail, verifyUnavailable }
 
+      // Cohort check
       const matchingCohort = activeCohorts.find(c => c.tier_id === id || (!c.tier_id && c.entry_fee === cfg.entryFee))
       const cohortReady: CheckResult = {
         ok: !!matchingCohort,
         detail: matchingCohort ? `${matchingCohort.name} (${matchingCohort.cohort_phase})` : 'No active cohort',
       }
 
+      // Server gate — for live tiers, all must pass; for upcoming, it must be blocked
       const gateOk = cfg.isLive && stripeOk && !verifyUnavailable
       const serverGateOk: CheckResult = {
-        ok: gateOk,
-        detail: !cfg.isLive ? 'TIER_NOT_LIVE' : verifyUnavailable ? 'Verify unavailable — locked' : gateOk ? 'Gate open' : 'Blocked',
-        verifyUnavailable,
+        ok: cfg.isLive ? gateOk : true, // Upcoming tiers: "ok" means "correctly blocked"
+        detail: !cfg.isLive
+          ? 'Server returns TIER_NOT_LIVE (correct)'
+          : verifyUnavailable ? 'Verify unavailable — gate locked'
+          : gateOk ? 'Gate open' : 'Blocked',
+        verifyUnavailable: cfg.isLive ? verifyUnavailable : false,
       }
 
-      return { id, name: cfg.name, isLive: cfg.isLive, entryFee: cfg.entryFee, checks: { purchasable, stripeWired, cohortReady, serverGateOk } }
+      // Fix #1: compute "wouldPassGateIfLive" for leak detection
+      const wouldPassIfLive = stripeOk && !verifyUnavailable
+      const configLiveReady = !cfg.isLive && wouldPassIfLive
+
+      return {
+        id, name: cfg.name, isLive: cfg.isLive, entryFee: cfg.entryFee,
+        configLiveReady, // UI can show "config ready, ensure server blocks"
+        checks: { purchasable, stripeWired, cohortReady, serverGateOk },
+      }
     })
 
-    // ── Build cohort profitability ──
-    const cohortHealth = activeCohorts.map(c => {
+    // ── Build cohort exposure (fix #2/#3: global buffer only, per-cohort is exposure breakdown) ──
+    const cohortExposure = activeCohorts.map(c => {
       const cohortLiability = (liabilityData?.by_cohort || []).find((lc: any) => lc.cohort_id === c.id)
       const pendingAmount = cohortLiability?.pending_amount ?? 0
       const approvedUnpaid = cohortLiability?.approved_unpaid ?? 0
-      const netBuffer = cashReserve - pendingAmount - approvedUnpaid
       return {
         id: c.id, name: c.name, tier_id: c.tier_id,
-        cash_reserve: cashReserve,
-        pending_liability: pendingAmount + approvedUnpaid,
-        opening_soon_liability: liabilityData?.expected_opening_soon_liability ?? 0,
-        net_buffer: netBuffer,
-        ok: netBuffer >= 0,
-        detail: netBuffer >= 0 ? 'Buffer positive' : `Shortfall: $${Math.abs(Math.round(netBuffer))}`,
+        pending_amount: pendingAmount,
+        approved_unpaid: approvedUnpaid,
+        total_exposure: pendingAmount + approvedUnpaid,
+        pending_count: cohortLiability?.pending_count ?? 0,
+        approved_count: cohortLiability?.approved_count ?? 0,
       }
     })
 
@@ -224,12 +298,37 @@ Deno.serve(async (req) => {
         : 'Healthy',
     }
 
+    // ── Fix #8: normalize reserve gate value ──
+    const rgRaw = reserveGateRes.data?.value
+    const rg = parseSettingsValue(rgRaw)
+    const reserveEnabled = rg?.enabled === true
+    const hasSimRun = !!rg?.last_simulation_run_id
+
     // ── Compute blockers (fail-closed) ──
     const blockers: Blocker[] = []
 
+    // Fix #5: enforce deep verification for live tiers
+    if (hasAnyLiveTier && !deep) {
+      blockers.push({
+        key: 'deep_required',
+        severity: 'blocking',
+        detail: 'Deep Stripe verification required for live tiers — enable Deep Verify',
+      })
+    }
+
     // Tier blockers (only for live tiers)
     for (const t of tiers) {
-      if (!t.isLive) continue
+      if (!t.isLive) {
+        // Fix #1: upgraded leak detection
+        if (t.configLiveReady) {
+          blockers.push({
+            key: `upcoming_ready_${t.id}`,
+            severity: 'warning',
+            detail: `${t.name}: Config is live-ready (Stripe valid) — ensure server blocks with TIER_NOT_LIVE`,
+          })
+        }
+        continue
+      }
       if (!t.checks.stripeWired.ok) {
         blockers.push({ key: `tier_stripe_${t.id}`, severity: 'blocking', detail: `${t.name}: Stripe not wired — ${t.checks.stripeWired.detail}` })
       }
@@ -244,13 +343,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Check upcoming tiers aren't accidentally purchasable
-    for (const t of tiers) {
-      if (!t.isLive && t.checks.serverGateOk.ok) {
-        blockers.push({ key: `upcoming_leak_${t.id}`, severity: 'blocking', detail: `${t.name}: isLive=false but server gate reports OK — potential leak` })
-      }
-    }
-
     // Breaker
     if (!breaker) {
       blockers.push({ key: 'breaker_missing', severity: 'blocking', detail: 'Breaker state not found' })
@@ -258,7 +350,7 @@ Deno.serve(async (req) => {
       blockers.push({ key: 'breaker_active', severity: 'blocking', detail: `Breaker: ${breaker.breaker_level}` })
     }
 
-    // Net buffer
+    // Net buffer (global only — fix #2)
     const globalNetBuffer = liabilityData?.net_buffer ?? null
     if (globalNetBuffer === null) {
       blockers.push({ key: 'buffer_missing', severity: 'blocking', detail: 'Liability snapshot unavailable' })
@@ -275,9 +367,6 @@ Deno.serve(async (req) => {
     }
 
     // Reserve gate
-    const rg = reserveGateRes.data?.value as any
-    const reserveEnabled = rg?.enabled === true
-    const hasSimRun = !!rg?.last_simulation_run_id
     if (!reserveEnabled || !hasSimRun) {
       blockers.push({ key: 'reserve_gate', severity: 'blocking', detail: 'Reserve gate not configured or missing simulation run' })
     }
@@ -299,7 +388,7 @@ Deno.serve(async (req) => {
       safeToSell,
       blockers,
       tiers,
-      cohorts: cohortHealth,
+      cohorts: cohortExposure,
       audits,
       liability: {
         cashReserve,
