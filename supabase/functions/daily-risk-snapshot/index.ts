@@ -356,7 +356,32 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 9. Write snapshot
+    // =========================================================================
+    // 9. PENDING-PASS VELOCITY (B3 hardening)
+    // =========================================================================
+    let pendingPassVelocity: { near_pass_count: number; total_active: number; near_pass_ratio: number } | null = null
+
+    const { data: velocityData, error: velocityError } = await db.rpc('get_pending_pass_velocity', { _window_hours: 48 })
+    if (velocityError) {
+      console.error('Pending pass velocity error:', velocityError.message)
+    } else {
+      pendingPassVelocity = velocityData as typeof pendingPassVelocity
+      const nearPassCount = pendingPassVelocity?.near_pass_count ?? 0
+      const nearPassRatio = pendingPassVelocity?.near_pass_ratio ?? 0
+
+      // Alert if >10 accounts are near-pass or >5% of active accounts
+      if (nearPassCount > 10 || nearPassRatio > 5) {
+        alarms.push({
+          code: 'PENDING_PASS_VELOCITY',
+          level: nearPassCount > 20 || nearPassRatio > 10 ? 'high' : 'warning',
+          message: `${nearPassCount} accounts near pass threshold (${nearPassRatio}% of active)`,
+          value: nearPassCount,
+          threshold: 10,
+        })
+      }
+    }
+
+    // 10. Write snapshot
     const { data: snapshotId, error: snapshotError } = await db.rpc('create_risk_snapshot', {
       _pass_rate: passRate,
       _pass_rate_alert_level: passRateAlertLevel,
@@ -380,6 +405,7 @@ Deno.serve(async (req) => {
         econ_gate_reasons_count: econVerdict?.reasons?.length ?? 0,
         auto_tightening_attempted: shouldAttemptAutoTighten,
         auto_tightening_proposals_pending: proposalResult?.proposals_pending ?? 0,
+        pending_pass_velocity: pendingPassVelocity ?? null,
       }),
     })
 

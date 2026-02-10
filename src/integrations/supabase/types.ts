@@ -2553,6 +2553,10 @@ export type Database = {
         }
         Returns: Json
       }
+      get_pending_pass_velocity: {
+        Args: { _window_hours?: number }
+        Returns: Json
+      }
       get_rolling_pass_rate: { Args: { _window_days?: number }; Returns: Json }
       get_user_roles: {
         Args: { _user_id: string }
@@ -2849,6 +2853,10 @@ export type Database = {
       trading_day_et: {
         Args: { reset_hour?: number; ts: string }
         Returns: string
+      }
+      try_auto_pass: {
+        Args: { _account_id: string; _request_id: string }
+        Returns: Json
       }
       upsert_daily_stat: {
         Args: {

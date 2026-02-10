@@ -1,11 +1,18 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 import { Wallet } from 'lucide-react';
 
 interface LifetimeHeadroomCardProps {
   lifetimeCapAmount: number | null;
   lifetimePaidTotal: number;
   lifetimeHeadroom: number | null;
+}
+
+/** Qualitative band for lifetime headroom — no exact dollars. */
+function getHeadroomBand(paidPct: number): { label: string; variant: 'default' | 'secondary' | 'destructive' } {
+  if (paidPct >= 90) return { label: 'Nearing Limit', variant: 'destructive' };
+  if (paidPct >= 60) return { label: 'Well Used', variant: 'secondary' };
+  return { label: 'Plenty Remaining', variant: 'default' };
 }
 
 export function LifetimeHeadroomCard({
@@ -19,6 +26,7 @@ export function LifetimeHeadroomCard({
   }
 
   const paidPercentage = (lifetimePaidTotal / lifetimeCapAmount) * 100;
+  const band = getHeadroomBand(paidPercentage);
 
   return (
     <Card>
@@ -29,17 +37,14 @@ export function LifetimeHeadroomCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Progress value={paidPercentage} className="h-2" />
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">
-            ${lifetimePaidTotal.toLocaleString()} paid
-          </span>
-          <span className="font-medium">
-            ${lifetimeHeadroom.toLocaleString()} remaining
-          </span>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">Capacity Status</span>
+          <Badge variant={band.variant} className="text-xs">
+            {band.label}
+          </Badge>
         </div>
         <p className="text-xs text-muted-foreground">
-          Total available: ${lifetimeCapAmount.toLocaleString()}
+          Your lifetime reward capacity determines how much you can earn on this account tier.
         </p>
       </CardContent>
     </Card>

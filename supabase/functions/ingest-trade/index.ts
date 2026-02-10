@@ -476,11 +476,13 @@ Deno.serve(async (req) => {
       }, Number(result.new_balance))
 
       if (passEligibility.eligible) {
-        const { error: passError } = await supabase.from('accounts')
-          .update({ status: 'passed', passed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-          .eq('id', accountId).eq('status', 'active')
+        // B1 FIX: Use atomic RPC with FOR UPDATE locking to prevent race conditions
+        const { data: passResult, error: passError } = await supabase.rpc('try_auto_pass', {
+          _account_id: accountId,
+          _request_id: requestId,
+        })
 
-        if (!passError) {
+        if (!passError && passResult?.success && passResult?.updated) {
           accountPassed = true
           const ruleSnapshot = result.rule_snapshot as RuleSnapshot & { cohort_phase?: string }
           const cohortPhase = ruleSnapshot?.cohort_phase || 'evaluation'
