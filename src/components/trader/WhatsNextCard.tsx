@@ -57,8 +57,8 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
       label: `Profit target (${analysis.profitTarget}%)`,
       done: analysis.targetMet,
       detail: analysis.targetMet
-        ? `Target reached at ${analysis.currentReturn.toFixed(2)}%`
-        : `${analysis.remainingPercent.toFixed(2)}% remaining ($${analysis.remainingDollars.toLocaleString(undefined, { maximumFractionDigits: 0 })})`,
+        ? 'Target reached'
+        : 'Still working toward the target — keep trading consistently',
     },
     {
       label: 'Staff review of results',
@@ -78,7 +78,7 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
     if (!analysis.targetMet) {
       return {
         icon: Target,
-        text: `You're ${analysis.remainingPercent.toFixed(1)}% away from the target — stay consistent`,
+        text: 'Keep trading consistently toward your profit target',
       };
     }
     return {
