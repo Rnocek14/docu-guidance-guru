@@ -5,12 +5,34 @@ import { supabase } from '@/integrations/supabase/client';
  *
  * - Generates a stable session_id in sessionStorage
  * - Captures UTM params once per session from the URL
+ * - Caches user_id from auth state (no per-event session fetch)
  * - Fire-and-forget: never throws, never blocks UI
  * - Never logs PII (no emails, no payment refs)
  */
 
 const SESSION_KEY = 'ra_sid';
 const UTM_KEY = 'ra_utm';
+const MAX_EVENT_LEN = 64;
+const MAX_PROPS_LEN = 2000;
+
+/** Cached auth user id — set once on first call + auth state changes. */
+let cachedUserId: string | null = null;
+let authInitialized = false;
+
+function initAuth(): void {
+  if (authInitialized) return;
+  authInitialized = true;
+
+  // Read current session once
+  supabase.auth.getSession().then(({ data }) => {
+    cachedUserId = data?.session?.user?.id ?? null;
+  }).catch(() => { /* ignore */ });
+
+  // Keep it fresh on login/logout
+  supabase.auth.onAuthStateChange((_event, session) => {
+    cachedUserId = session?.user?.id ?? null;
+  });
+}
 
 function getSessionId(): string {
   let sid = sessionStorage.getItem(SESSION_KEY);
@@ -48,32 +70,34 @@ function getUtm(): UtmParams {
 /**
  * Track a conversion event. Safe to call anywhere — never throws.
  *
- * @param event - Event name (e.g. 'checkout_view', 'lp_click_cta')
- * @param props - Arbitrary JSON-safe properties (no PII!)
+ * @param event - Event name (e.g. 'checkout_view', 'lp_click_cta'). Max 64 chars.
+ * @param props - Arbitrary JSON-safe properties (no PII!). Max ~2KB serialized.
  */
 export function track(event: string, props: Record<string, string | number | boolean | null> = {}): void {
   try {
+    // Guard: reject oversized or empty events
+    if (!event || event.length > MAX_EVENT_LEN) return;
+    const propsStr = JSON.stringify(props);
+    if (propsStr.length > MAX_PROPS_LEN) return;
+
+    initAuth();
+
     const sessionId = getSessionId();
     const utm = getUtm();
 
-    // Get user_id if logged in, but don't await session
-    const userId = supabase.auth.getSession().then(({ data }) => data?.session?.user?.id ?? null);
-
-    userId.then((uid) => {
-      supabase
-        .from('analytics_events')
-        .insert([{
-          session_id: sessionId,
-          event,
-          path: window.location.pathname,
-          props,
-          user_id: uid,
-          ...utm,
-        }])
-        .then(({ error }) => {
-          if (error) console.warn('[track] insert failed:', error.message);
-        });
-    });
+    supabase
+      .from('analytics_events')
+      .insert([{
+        session_id: sessionId,
+        event,
+        path: window.location.pathname,
+        props,
+        user_id: cachedUserId,
+        ...utm,
+      }])
+      .then(({ error }) => {
+        if (error) console.warn('[track] insert failed:', error.message);
+      });
   } catch {
     // Tracking must never break the app
   }

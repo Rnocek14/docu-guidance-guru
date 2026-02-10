@@ -75,6 +75,7 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
             className="w-full mt-6 gap-2"
             variant={isPopular ? 'default' : 'outline'}
             size="lg"
+            onClick={() => track('lp_click_cta', { cta: 'pricing_card', tier: tier.id })}
           >
             <Link to={`/checkout?tier=${tier.id}`}>
               Get Started <ArrowRight className="h-4 w-4" />
