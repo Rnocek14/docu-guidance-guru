@@ -2347,6 +2347,7 @@ export type Database = {
           user_id: string
         }[]
       }
+      cleanup_broker_payload_samples: { Args: never; Returns: undefined }
       cleanup_old_payload_samples: { Args: never; Returns: undefined }
       confirm_payout_payment: {
         Args: {
