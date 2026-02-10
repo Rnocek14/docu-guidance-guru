@@ -8,7 +8,10 @@ import { TierCard } from "@/components/checkout/TierCard";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { TIERS } from "@/lib/pricing-data";
+import { TIERS, getLiveTiers } from "@/lib/pricing-data";
+
+const LIVE_TIER_IDS = new Set(getLiveTiers().map((t) => t.id));
+const DEFAULT_TIER = getLiveTiers()[0]?.id ?? "starter";
 
 // Map shared pricing data to checkout TierCard format
 const CHECKOUT_TIERS = TIERS.map((t) => ({
@@ -36,7 +39,7 @@ export default function Checkout() {
   const initialTier =
     searchParams.get("tier") && CHECKOUT_TIERS.some((t) => t.id === searchParams.get("tier"))
       ? searchParams.get("tier")!
-      : "pro";
+      : DEFAULT_TIER;
   const [selectedTier, setSelectedTier] = useState<string>(initialTier);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
