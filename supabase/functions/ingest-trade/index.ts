@@ -271,18 +271,17 @@ Deno.serve(async (req) => {
     const trade = parseResult.canonical
 
     // ── 5b. VALIDATE ECONOMICS FOR FILLS ──
-    // For fill events, require either explicit pnl or price to prevent silent zero-PnL accounting
-    if (trade.eventType === 'fill') {
-      if (trade.pnl === null && trade.price === null) {
-        return new Response(
-          JSON.stringify({
-            error: 'Fill events require either pnl or price field for accounting integrity',
-            decision: 'REJECTED_SCHEMA',
-            request_id: requestId,
-          }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
+    // Fills MUST have explicit pnl — we don't have a position engine to compute it from price alone.
+    // Without pnl, breach/pass math would silently use 0, which is catastrophically wrong.
+    if (trade.eventType === 'fill' && trade.pnl === null) {
+      return new Response(
+        JSON.stringify({
+          error: 'Fill events require explicit pnl field. Price alone is insufficient without a position engine.',
+          decision: 'REJECTED_SCHEMA',
+          request_id: requestId,
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     // ── 6. PLATFORM ACCOUNT MAPPING ──
@@ -336,7 +335,7 @@ Deno.serve(async (req) => {
       p_symbol: trade.symbolNormalized,
       p_side: trade.side,
       p_quantity: trade.qty,
-      p_entry_price: trade.price ?? 0,
+      p_entry_price: trade.price,  // null-safe: RPC must handle nullable price
       p_net_pnl: netPnl,
       p_commission: trade.commission ?? 0,
       p_opened_at: trade.occurredAt,
