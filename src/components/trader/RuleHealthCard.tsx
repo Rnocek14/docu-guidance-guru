@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Shield, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
@@ -71,6 +72,19 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
       ? losingDays.reduce((s, d) => s + Number(d.net_pnl), 0) / losingDays.length
       : 0;
 
+    // Variance Score: CV of daily P&L (stdev / |mean|)
+    const dailyPnls = dailyStats?.map((d) => Number(d.net_pnl)) ?? [];
+    let varianceLevel: 'low' | 'moderate' | 'high' = 'low';
+    let coefficientOfVariation = 0;
+    if (dailyPnls.length >= 3) {
+      const mean = dailyPnls.reduce((s, v) => s + v, 0) / dailyPnls.length;
+      const variance = dailyPnls.reduce((s, v) => s + (v - mean) ** 2, 0) / dailyPnls.length;
+      const stdev = Math.sqrt(variance);
+      coefficientOfVariation = Math.abs(mean) > 0 ? stdev / Math.abs(mean) : stdev > 0 ? Infinity : 0;
+      if (coefficientOfVariation > 3) varianceLevel = 'high';
+      else if (coefficientOfVariation > 1.5) varianceLevel = 'moderate';
+    }
+
     // Overall health
     let health: HealthLevel = 'stable';
     if (drawdownUsagePct > 70 || worstDayUsagePct > 70) health = 'at_risk';
@@ -89,6 +103,8 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
       avgWinDay,
       avgLossDay,
       health,
+      varianceLevel,
+      coefficientOfVariation,
     };
   }, [account, dailyStats, maxDailyLossPct, maxDrawdownPct]);
 
@@ -193,6 +209,26 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
                 </div>
                 <div className="text-[11px] text-muted-foreground">Avg Loss Day</div>
               </div>
+            </div>
+          </div>
+
+          {/* Variance Score */}
+          <div className="border-t border-border pt-3 space-y-1.5">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground" title="Coefficient of variation of daily P&L. Lower is more consistent.">
+                Variance Score
+              </span>
+              <Badge
+                variant={analysis.varianceLevel === 'high' ? 'destructive' : analysis.varianceLevel === 'moderate' ? 'outline' : 'default'}
+                className="text-xs"
+              >
+                {analysis.varianceLevel === 'low' ? 'Low' : analysis.varianceLevel === 'moderate' ? 'Moderate' : 'High'}
+              </Badge>
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {analysis.varianceLevel === 'low' && 'Consistent daily results — this is what reviewers look for.'}
+              {analysis.varianceLevel === 'moderate' && 'Some daily swings — tighter risk per session can help.'}
+              {analysis.varianceLevel === 'high' && 'Highly variable results — consider smaller position sizes.'}
             </div>
           </div>
         </div>
