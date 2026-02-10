@@ -1,111 +1,79 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Shield, TrendingUp, Users, Eye, ArrowRight } from 'lucide-react';
+import { Shield, ArrowRight } from 'lucide-react';
+import { Hero } from '@/components/landing/Hero';
+import { SocialProofBar } from '@/components/landing/SocialProofBar';
+import { HowItWorks } from '@/components/landing/HowItWorks';
+import { PricingSection } from '@/components/landing/PricingSection';
+import { Differentiators } from '@/components/landing/Differentiators';
+import { FAQ } from '@/components/landing/FAQ';
+import { Footer } from '@/components/landing/Footer';
 
 export default function Index() {
+  // Force dark mode on the landing page
+  useEffect(() => {
+    const root = document.documentElement;
+    const hadDark = root.classList.contains('dark');
+    root.classList.add('dark');
+    return () => {
+      if (!hadDark) root.classList.remove('dark');
+    };
+  }, []);
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-background text-foreground">
+      {/* Navigation */}
+      <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-lg">
+        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Shield className="h-8 w-8 text-primary" />
-            <span className="text-xl font-bold">RiskAnalytics</span>
+            <Shield className="h-7 w-7 text-primary" />
+            <span className="text-lg font-bold">RiskAnalytics</span>
           </div>
-          <div className="flex items-center gap-4">
-            <Link to="/login">
-              <Button variant="ghost">Sign in</Button>
-            </Link>
-            <Link to="/signup">
-              <Button>Get Started</Button>
-            </Link>
+          <nav className="hidden md:flex items-center gap-6 text-sm text-muted-foreground">
+            <a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a>
+            <Link to="/rules" className="hover:text-foreground transition-colors">Rules</Link>
+            <a href="#faq" className="hover:text-foreground transition-colors">FAQ</a>
+          </nav>
+          <div className="flex items-center gap-3">
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/login">Sign In</Link>
+            </Button>
+            <Button asChild size="sm" className="gap-1.5">
+              <Link to="/checkout">
+                Get Started <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </Button>
           </div>
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="py-20 lg:py-32">
+      <Hero />
+      <SocialProofBar />
+      <HowItWorks />
+      <PricingSection />
+      <Differentiators />
+      <section id="faq">
+        <FAQ />
+      </section>
+
+      {/* Final CTA */}
+      <section className="py-20 lg:py-28 border-t border-border">
         <div className="container mx-auto px-4 text-center">
-          <h1 className="text-4xl lg:text-6xl font-bold tracking-tight mb-6">
-            Simulated Trading Evaluation
-            <br />
-            <span className="text-primary">Done Right</span>
-          </h1>
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto mb-8">
-            Real-time detection. Human-approved decisions. Complete transparency.
-            <br />
-            <strong>Detection, Not Domination.</strong>
+          <h2 className="text-3xl sm:text-4xl font-bold mb-4">Ready to Prove Your Skill?</h2>
+          <p className="text-muted-foreground text-lg mb-8 max-w-xl mx-auto">
+            Join traders on the fairest simulated trading evaluation platform.
+            Transparent rules. Human decisions. Clear caps.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link to="/signup">
-              <Button size="lg" className="gap-2">
-                Start Your Challenge <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Link to="/login">
-              <Button size="lg" variant="outline">
-                Sign In
-              </Button>
-            </Link>
-          </div>
+          <Button asChild size="lg" className="gap-2 h-12 px-8 text-base font-semibold">
+            <a href="#pricing">
+              View Plans <ArrowRight className="h-4 w-4" />
+            </a>
+          </Button>
         </div>
       </section>
 
-      {/* Features */}
-      <section className="py-20 bg-muted/50">
-        <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-center mb-12">
-            Built for Fair Evaluation
-          </h2>
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="bg-card p-6 rounded-lg border">
-              <TrendingUp className="h-10 w-10 text-primary mb-4" />
-              <h3 className="text-xl font-semibold mb-2">Real-Time Monitoring</h3>
-              <p className="text-muted-foreground">
-                Track your drawdown, P&L, and progress in real-time. Get proactive warnings
-                before you hit limits, not surprise failures.
-              </p>
-            </div>
-            <div className="bg-card p-6 rounded-lg border">
-              <Users className="h-10 w-10 text-primary mb-4" />
-              <h3 className="text-xl font-semibold mb-2">Human-in-the-Loop</h3>
-              <p className="text-muted-foreground">
-                AI never denies payouts or locks accounts automatically. Every terminal
-                decision requires human review and approval.
-              </p>
-            </div>
-            <div className="bg-card p-6 rounded-lg border">
-              <Eye className="h-10 w-10 text-primary mb-4" />
-              <h3 className="text-xl font-semibold mb-2">Full Transparency</h3>
-              <p className="text-muted-foreground">
-                Complete audit trail for every decision. Your rules are locked when you
-                start—no mid-challenge changes.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="py-20">
-        <div className="container mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold mb-4">Ready to Prove Your Skill?</h2>
-          <p className="text-muted-foreground mb-8">
-            Join thousands of traders on the fairest simulated trading evaluation platform.
-          </p>
-          <Link to="/signup">
-            <Button size="lg">Create Your Account</Button>
-          </Link>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t py-8">
-        <div className="container mx-auto px-4 text-center text-muted-foreground space-y-2">
-          <p className="text-xs">All trading activity is simulated. Payouts are performance-based rewards, not profit withdrawals or investment returns.</p>
-          <p>© 2026 RiskAnalytics. Detection, Not Domination.</p>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }

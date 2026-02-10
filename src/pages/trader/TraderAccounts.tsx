@@ -124,13 +124,22 @@ export default function TraderAccounts() {
             ))}
           </div>
         ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle>No Accounts Yet</CardTitle>
-              <CardDescription>
-                You don't have any trading accounts. Contact support to get started.
+          <Card className="border-dashed">
+            <CardHeader className="text-center pb-2">
+              <TrendingUp className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+              <CardTitle className="text-xl">No Accounts Yet</CardTitle>
+              <CardDescription className="max-w-md mx-auto">
+                Start a simulated trading evaluation. Choose your account size, trade within the rules,
+                and earn performance-based rewards.
               </CardDescription>
             </CardHeader>
+            <CardContent className="text-center pt-4">
+              <Button asChild size="lg" className="gap-2">
+                <Link to="/checkout">
+                  Start Your Evaluation <Eye className="h-4 w-4" />
+                </Link>
+              </Button>
+            </CardContent>
           </Card>
         )}
       </div>

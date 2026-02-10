@@ -290,17 +290,21 @@ export default function TraderDashboard() {
             </Card>
           </>
         ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle>No Active Account</CardTitle>
-              <CardDescription>
-                You don't have an active trading challenge. Start a new challenge to begin trading.
+          <Card className="border-dashed">
+            <CardHeader className="text-center pb-2">
+              <Target className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+              <CardTitle className="text-xl">Start Your First Evaluation</CardTitle>
+              <CardDescription className="max-w-md mx-auto">
+                Choose a simulated account size, pass the evaluation by trading within the rules, and
+                earn performance-based rewards.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">
-                Contact support to set up your trading account.
-              </p>
+            <CardContent className="text-center pt-4">
+              <Button asChild size="lg" className="gap-2">
+                <Link to="/checkout">
+                  Choose a Plan <TrendingUp className="h-4 w-4" />
+                </Link>
+              </Button>
             </CardContent>
           </Card>
         )}
