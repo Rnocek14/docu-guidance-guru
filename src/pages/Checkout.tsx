@@ -51,12 +51,13 @@ export default function Checkout() {
   const tier = CHECKOUT_TIERS.find((t) => t.id === selectedTier)!;
 
   // Track checkout view once — fires after URL normalization settles
+  const tierIsLive = tier?.isLive ?? false;
   useEffect(() => {
-    if (!tracked.current && selectedTier && tier) {
+    if (!tracked.current && selectedTier) {
       tracked.current = true;
-      track('checkout_view', { tier: selectedTier, is_live: tier.isLive });
+      track('checkout_view', { tier: selectedTier, is_live: tierIsLive });
     }
-  }, [selectedTier, tier]);
+  }, [selectedTier, tierIsLive]);
 
   // Normalize URL if tier param is non-live (stale bookmark/deep link)
   useEffect(() => {

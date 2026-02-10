@@ -29,7 +29,13 @@ export type AnalyticsEvent =
   | 'payouts_view'
   | 'payout_request_view'
   | 'payout_blocked'
-  | 'payout_request_submitted';
+  | 'payout_request_submitted'
+  // Launch prep: demand signal for upcoming tiers
+  | 'tier_upcoming_view'
+  | 'tier_upcoming_click'
+  | 'tier_live_flip'
+  // Escape hatch for ad-hoc dev debugging (never use in prod paths)
+  | `debug_${string}`;
 
 /** Cached auth user id — set once on first call + auth state changes. */
 let cachedUserId: string | null = null;

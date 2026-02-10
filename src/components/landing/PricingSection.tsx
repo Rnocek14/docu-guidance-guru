@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { track } from '@/lib/track';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,14 @@ type RuleView = 'evaluation' | 'payout';
 function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView }) {
   const isPopular = tier.isLive && tier.popular;
   const isUpcoming = !tier.isLive;
+  const trackedUpcoming = useRef(false);
+
+  useEffect(() => {
+    if (isUpcoming && !trackedUpcoming.current) {
+      trackedUpcoming.current = true;
+      track('tier_upcoming_view', { tier: tier.id });
+    }
+  }, [isUpcoming, tier.id]);
   return (
     <Card
       className={cn(
@@ -66,6 +74,7 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
             variant="outline"
             size="lg"
             disabled
+            onClick={() => track('tier_upcoming_click', { tier: tier.id })}
           >
             Coming Soon
           </Button>
