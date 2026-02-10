@@ -20,7 +20,7 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('account_daily_stats')
-        .select('net_pnl, trading_day, is_winning_day')
+        .select('net_pnl, trading_day, is_winning_day, winning_trades, losing_trades, gross_pnl, commissions')
         .eq('account_id', account.id)
         .order('trading_day', { ascending: true });
 
@@ -31,14 +31,13 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
   });
 
   const analysis = useMemo(() => {
-    // Actual drawdown in percent (e.g. 0.69%)
+    // Drawdown
     const drawdownPct = account.highest_balance > 0
       ? ((account.highest_balance - account.current_balance) / account.highest_balance) * 100
       : 0;
-    // How much of the allowed limit is used (0–100 scale)
     const drawdownUsagePct = Math.min(100, (drawdownPct / maxDrawdownPct) * 100);
 
-    // Worst day: most negative day only (ignore zero/positive days)
+    // Worst day (loss-only)
     const losingDays = dailyStats?.filter((d) => Number(d.net_pnl) < 0) ?? [];
     const worstDayPnl = losingDays.length > 0
       ? Math.min(...losingDays.map((d) => Number(d.net_pnl)))
@@ -49,16 +48,33 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
       ? Math.min(100, (Math.abs(worstDayPnl) / dailyLossLimit) * 100)
       : 0;
 
-    // Consistency
-    const winningDays = dailyStats?.filter((d) => d.is_winning_day).length ?? 0;
+    // Discipline metrics: profit factor + avg win/loss
+    const winningDays = dailyStats?.filter((d) => d.is_winning_day) ?? [];
     const totalDays = dailyStats?.length ?? account.trading_days_count;
-    const winRate = totalDays > 0 ? (winningDays / totalDays) * 100 : 0;
-    const consistencyLabel = winRate >= 60 ? 'Strong' : winRate >= 45 ? 'Mixed' : 'Volatile';
+
+    // Gross wins and gross losses from daily stats
+    const grossWins = dailyStats?.reduce((sum, d) => {
+      const pnl = Number(d.net_pnl);
+      return pnl > 0 ? sum + pnl : sum;
+    }, 0) ?? 0;
+    const grossLosses = dailyStats?.reduce((sum, d) => {
+      const pnl = Number(d.net_pnl);
+      return pnl < 0 ? sum + Math.abs(pnl) : sum;
+    }, 0) ?? 0;
+
+    const profitFactor = grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? Infinity : 0;
+
+    const avgWinDay = winningDays.length > 0
+      ? winningDays.reduce((s, d) => s + Number(d.net_pnl), 0) / winningDays.length
+      : 0;
+    const avgLossDay = losingDays.length > 0
+      ? losingDays.reduce((s, d) => s + Number(d.net_pnl), 0) / losingDays.length
+      : 0;
 
     // Overall health
     let health: HealthLevel = 'stable';
     if (drawdownUsagePct > 70 || worstDayUsagePct > 70) health = 'at_risk';
-    else if (drawdownUsagePct > 50 || worstDayUsagePct > 50 || consistencyLabel === 'Volatile') health = 'caution';
+    else if (drawdownUsagePct > 50 || worstDayUsagePct > 50 || profitFactor < 1) health = 'caution';
 
     return {
       drawdownPct,
@@ -67,10 +83,11 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
       dailyLossLimit,
       worstDayUsagePct,
       hasLosingDays: worstDayPnl !== null,
-      winningDays,
+      winningDayCount: winningDays.length,
       totalDays,
-      winRate,
-      consistencyLabel,
+      profitFactor,
+      avgWinDay,
+      avgLossDay,
       health,
     };
   }, [account, dailyStats, maxDailyLossPct, maxDrawdownPct]);
@@ -87,6 +104,12 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
   const barColor = (usagePct: number) =>
     usagePct > 70 ? 'bg-destructive' : usagePct > 50 ? 'bg-warning' : 'bg-success';
 
+  const formatPF = (pf: number) => {
+    if (pf === Infinity) return '∞';
+    if (pf === 0) return '—';
+    return pf.toFixed(2);
+  };
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -96,7 +119,7 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
               <Shield className="h-5 w-5 text-primary" />
               Rule Health
             </CardTitle>
-            <CardDescription>Your safety rails at a glance</CardDescription>
+            <CardDescription>Safety rails &amp; discipline metrics</CardDescription>
           </div>
           <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-semibold ${config.color} ${config.bg} ${config.border}`}>
             <HealthIcon className="h-3.5 w-3.5" />
@@ -133,7 +156,7 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
                 <span className="font-mono font-medium">
                   -${Math.abs(analysis.worstDayPnl!).toLocaleString()}
                   <span className="text-muted-foreground ml-1">
-                    ({analysis.worstDayUsagePct.toFixed(0)}% of -${analysis.dailyLossLimit.toLocaleString()} limit)
+                    ({analysis.worstDayUsagePct.toFixed(0)}% of limit)
                   </span>
                 </span>
               ) : (
@@ -150,19 +173,26 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
             )}
           </div>
 
-          {/* Consistency */}
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Consistency</span>
-            <div className="flex items-center gap-2">
-              <span className={`font-semibold ${
-                analysis.consistencyLabel === 'Strong' ? 'text-success' :
-                analysis.consistencyLabel === 'Mixed' ? 'text-warning' : 'text-destructive'
-              }`}>
-                {analysis.consistencyLabel}
-              </span>
-              <span className="text-muted-foreground font-mono text-xs">
-                {analysis.winningDays}/{analysis.totalDays} winning days
-              </span>
+          {/* Discipline metrics */}
+          <div className="border-t border-border pt-3 space-y-2">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Discipline</div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <div className="text-lg font-bold font-mono">{formatPF(analysis.profitFactor)}</div>
+                <div className="text-[11px] text-muted-foreground">Profit Factor</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold font-mono text-success">
+                  +${Math.round(analysis.avgWinDay).toLocaleString()}
+                </div>
+                <div className="text-[11px] text-muted-foreground">Avg Win Day</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold font-mono text-destructive">
+                  {analysis.hasLosingDays ? `-$${Math.abs(Math.round(analysis.avgLossDay)).toLocaleString()}` : '—'}
+                </div>
+                <div className="text-[11px] text-muted-foreground">Avg Loss Day</div>
+              </div>
             </div>
           </div>
         </div>

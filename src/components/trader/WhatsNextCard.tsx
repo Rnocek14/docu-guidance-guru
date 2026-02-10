@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Compass, CheckCircle2, Circle, ArrowRight, Calendar, Target, Send } from 'lucide-react';
+import { Compass, CheckCircle2, Circle, Calendar, Target, Send, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { Account, Cohort } from '@/lib/types';
 
@@ -41,6 +41,7 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
       daysMet,
       estimatedDaysToTarget,
       avgDailyPnl,
+      allMet: targetMet && daysMet,
     };
   }, [account]);
 
@@ -72,20 +73,17 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
       return {
         icon: Calendar,
         text: `Trade ${analysis.daysRemaining} more day${analysis.daysRemaining !== 1 ? 's' : ''} to meet the minimum`,
-        variant: 'info' as const,
       };
     }
     if (!analysis.targetMet) {
       return {
         icon: Target,
         text: `You're ${analysis.remainingPercent.toFixed(1)}% away from the target — stay consistent`,
-        variant: 'info' as const,
       };
     }
     return {
       icon: Send,
       text: 'All milestones met — your account will be reviewed by staff',
-      variant: 'success' as const,
     };
   }, [analysis]);
 
@@ -123,20 +121,20 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
 
         {/* Contextual next action */}
         <div className={`mt-4 rounded-lg border p-3 ${
-          nextAction.variant === 'success' 
+          analysis.allMet 
             ? 'border-success/30 bg-success/5' 
             : 'border-border bg-muted/30'
         }`}>
           <div className="flex items-center gap-2 text-sm">
             <NextIcon className={`h-4 w-4 shrink-0 ${
-              nextAction.variant === 'success' ? 'text-success' : 'text-primary'
+              analysis.allMet ? 'text-success' : 'text-primary'
             }`} />
-            <span className={nextAction.variant === 'success' ? 'font-medium text-foreground' : 'text-muted-foreground'}>
+            <span className={analysis.allMet ? 'font-medium text-foreground' : 'text-muted-foreground'}>
               {nextAction.text}
             </span>
           </div>
 
-          {/* Pace projection (only when not yet at target) */}
+          {/* Pace projection */}
           {analysis.estimatedDaysToTarget && !analysis.targetMet && (
             <p className="text-xs text-muted-foreground/70 mt-2 ml-6">
               At your current pace (~${Math.round(analysis.avgDailyPnl).toLocaleString()}/day), 
@@ -145,6 +143,25 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
                 Projection based on past performance — not a guarantee.
               </span>
             </p>
+          )}
+        </div>
+
+        {/* CTA button */}
+        <div className="mt-3">
+          {analysis.allMet ? (
+            <Button asChild size="sm" className="w-full gap-2">
+              <Link to={`/trader/accounts/${account.id}`}>
+                <Send className="h-3.5 w-3.5" />
+                View Account for Review
+              </Link>
+            </Button>
+          ) : (
+            <Button asChild size="sm" variant="outline" className="w-full gap-2">
+              <Link to={`/trader/accounts/${account.id}`}>
+                <ExternalLink className="h-3.5 w-3.5" />
+                View Full Account Details
+              </Link>
+            </Button>
           )}
         </div>
       </CardContent>
