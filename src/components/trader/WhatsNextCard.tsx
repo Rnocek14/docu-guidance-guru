@@ -134,14 +134,10 @@ export function WhatsNextCard({ account }: WhatsNextCardProps) {
             </span>
           </div>
 
-          {/* Pace projection */}
-          {analysis.estimatedDaysToTarget && !analysis.targetMet && (
+          {/* Pace indicator (qualitative, not quantitative) */}
+          {!analysis.targetMet && analysis.avgDailyPnl !== 0 && (
             <p className="text-xs text-muted-foreground/70 mt-2 ml-6">
-              At your current pace (~${Math.round(analysis.avgDailyPnl).toLocaleString()}/day), 
-              you may reach the target in ~{analysis.estimatedDaysToTarget} trading day{analysis.estimatedDaysToTarget !== 1 ? 's' : ''}.
-              <span className="block text-[10px] text-muted-foreground/50 mt-0.5">
-                Projection based on past performance — not a guarantee.
-              </span>
+              Your current pace is {analysis.avgDailyPnl > 0 ? 'positive — keep trading consistently' : 'negative — consider adjusting your approach'}.
             </p>
           )}
         </div>

@@ -81,28 +81,28 @@ export function ConsistencyPreviewCard({ account }: ConsistencyPreviewCardProps)
 
   const rules = [
     {
-      label: `Best Day Cap (${bestDayCap}%)`,
-      description: `No single day can exceed ${bestDayCap}% of positive net P\u0026L`,
-      current: `Your best day: ${bestDayPct.toFixed(0)}% (cap: ${bestDayCap}%)`,
+      label: 'Profit Distribution',
+      description: 'No single day should dominate your total gains',
+      current: null,
       status: getBestDayStatus(),
-      tooltip: 'Calculated from daily net P&L (not trade-level).',
+      tooltip: 'Reviewers look for consistent performance across multiple days.',
     },
     {
-      label: `Min Profitable Days (${minProfitableDays})`,
-      description: `At least ${minProfitableDays} winning days required`,
-      current: `You have: ${profitableDays} (need: ${minProfitableDays})`,
+      label: 'Minimum Profitable Days',
+      description: 'A minimum number of winning days is required',
+      current: null,
       status: getMinDaysStatus(),
       tooltip: null,
     },
     {
-      label: `Profit Target: ${nextCohort.profit_target_percent}%`,
+      label: 'Profit Target',
       description: 'Separate target for verification phase',
       current: null,
       status: null as RuleStatus | null,
       tooltip: null,
     },
     {
-      label: `Min Trading Days: ${nextCohort.min_trading_days}`,
+      label: 'Min Trading Days',
       description: 'More trading days required in verification',
       current: null,
       status: null as RuleStatus | null,

@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 import { Star, CheckCircle2 } from 'lucide-react';
 
 interface ConsistencyBestDayCardProps {
@@ -10,12 +10,13 @@ interface ConsistencyBestDayCardProps {
 }
 
 export function ConsistencyBestDayCard({
-  bestDayPnl,
   bestDayPctOfTarget,
   maxCapPercent,
   isMet,
 }: ConsistencyBestDayCardProps) {
-  const progress = Math.min(100, (bestDayPctOfTarget / maxCapPercent) * 100);
+  // Determine status band
+  const ratio = bestDayPctOfTarget / maxCapPercent;
+  const status: 'good' | 'watch' | 'risky' = ratio <= 0.8 ? 'good' : ratio <= 1.0 ? 'watch' : 'risky';
 
   if (isMet) {
     return (
@@ -28,7 +29,7 @@ export function ConsistencyBestDayCard({
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Your best day ({bestDayPctOfTarget.toFixed(1)}% of target) is within the {maxCapPercent}% cap.
+            Your profits are well-distributed across trading days.
             No single day dominates your performance.
           </p>
         </CardContent>
@@ -39,25 +40,28 @@ export function ConsistencyBestDayCard({
   return (
     <Card className="border-warning/30 bg-warning/5">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Star className="h-4 w-4 text-warning" />
-          Best Day Cap Exceeded
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <Star className="h-4 w-4 text-warning" />
+            Best Day Distribution
+          </CardTitle>
+          <Badge
+            variant={status === 'watch' ? 'outline' : 'destructive'}
+            className="text-xs"
+          >
+            {status === 'watch' ? 'Watch' : 'Risky'}
+          </Badge>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-3">
-          <Progress value={progress} className="h-2 [&>div]:bg-warning" />
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">
-              Best day: {bestDayPctOfTarget.toFixed(1)}% of target (${bestDayPnl.toLocaleString()})
-            </span>
-            <span className="font-medium">
-              Cap: {maxCapPercent}%
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            No single trading day can exceed {maxCapPercent}% of your profit target.
-            Continue trading to distribute your profits more evenly across days.
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Your profits are concentrated in too few days. Reviewers prefer
+            profits distributed across multiple trading days.
+          </p>
+          <p className="text-xs text-muted-foreground/70">
+            Continue trading to spread your gains more evenly. This rule ensures
+            consistency, not just a single lucky day.
           </p>
         </div>
       </CardContent>
