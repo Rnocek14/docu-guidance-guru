@@ -155,7 +155,7 @@ export default function Rules() {
             </CardContent>
           </Card>
           <p className="text-xs text-muted-foreground mt-3">
-            Pro and Elite tiers are planned for launch and will be available soon. Rules shown reflect intended evaluation criteria.
+            Pro and Elite are planned tiers and not yet available for purchase. Values shown reflect intended criteria and may be updated prior to launch.
           </p>
         </section>
 
