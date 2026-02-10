@@ -24,9 +24,11 @@ SCAN_DIRS=(
   "src/lib/claims.ts"
 )
 
-# Allowlisted patterns (grep -v). Add exact strings that are intentionally kept.
+# Allowlisted patterns (grep -v). Keep very specific — file:line or exact phrase.
+# To allowlist a line, add a comment "// lint-copy: allow" on that line in source,
+# or add the exact phrase here.
 ALLOWLIST=(
-  "# Allowlisted"  # placeholder so array is never empty
+  "lint-copy: allow"  # inline marker for intentional uses
 )
 
 # Build allowlist grep pattern
