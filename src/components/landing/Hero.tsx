@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Shield, Lock, Eye, Scale } from 'lucide-react';
 import { track } from '@/lib/track';
+import { HeroDashboardPreview } from './HeroDashboardPreview';
 
 const badges = [
   { icon: Lock, label: 'Frozen Rules' },
@@ -65,6 +66,8 @@ export function Hero() {
           </div>
         </div>
 
+        {/* Dashboard Preview */}
+        <HeroDashboardPreview />
       </div>
     </section>
   );
