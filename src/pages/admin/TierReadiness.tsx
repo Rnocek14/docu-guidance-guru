@@ -4,8 +4,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, ExternalLink, Loader2 } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useState } from 'react';
 
 interface CheckResult {
   ok: boolean;
@@ -29,7 +30,9 @@ interface TierData {
   };
 }
 
-const CHECK_LABELS: Record<string, { label: string; description: string }> = {
+type CheckKey = keyof TierData['checks'];
+
+const CHECK_LABELS: Record<CheckKey, { label: string; description: string }> = {
   purchasable: { label: 'Purchasable', description: 'isLive flag enables UI + server acceptance' },
   stripeWired: { label: 'Stripe Wired', description: 'Price ID, Product ID, and API key present' },
   cohortReady: { label: 'Cohort Present', description: 'Active cohort row matches this tier' },
@@ -43,7 +46,7 @@ function CheckIcon({ ok, isLive }: { ok: boolean; isLive: boolean }) {
 }
 
 function TierReadinessCard({ tier }: { tier: TierData }) {
-  const checkEntries = Object.entries(tier.checks) as [string, CheckResult][];
+  const checkEntries = Object.entries(tier.checks) as [CheckKey, CheckResult][];
   const allOk = checkEntries.every(([, c]) => c.ok);
   const failCount = checkEntries.filter(([, c]) => !c.ok).length;
 
@@ -54,7 +57,6 @@ function TierReadinessCard({ tier }: { tier: TierData }) {
       tier.isLive && !allOk && 'border-destructive/50',
       !tier.isLive && 'border-amber-500/30',
     )}>
-      {/* Status ribbon */}
       <div className={cn(
         'absolute top-0 left-0 right-0 h-1',
         allOk ? 'bg-emerald-500' : tier.isLive ? 'bg-destructive' : 'bg-amber-500',
@@ -77,7 +79,6 @@ function TierReadinessCard({ tier }: { tier: TierData }) {
       </CardHeader>
 
       <CardContent className="space-y-3">
-        {/* Summary line */}
         <div className="flex items-center gap-2 text-sm font-medium">
           {allOk ? (
             <>
@@ -98,7 +99,6 @@ function TierReadinessCard({ tier }: { tier: TierData }) {
           )}
         </div>
 
-        {/* Individual checks */}
         <div className="space-y-2">
           {checkEntries.map(([key, check]) => {
             const meta = CHECK_LABELS[key];
@@ -106,7 +106,7 @@ function TierReadinessCard({ tier }: { tier: TierData }) {
               <div key={key} className="flex items-start gap-3 p-2 rounded-md bg-muted/50">
                 <CheckIcon ok={check.ok} isLive={tier.isLive} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{meta?.label ?? key}</p>
+                  <p className="text-sm font-medium">{meta.label}</p>
                   <p className="text-xs text-muted-foreground">{check.detail}</p>
                 </div>
               </div>
@@ -114,7 +114,6 @@ function TierReadinessCard({ tier }: { tier: TierData }) {
           })}
         </div>
 
-        {/* Tier details */}
         <div className="pt-2 border-t border-border">
           <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
             <div>First payout cap: <span className="font-medium text-foreground">${tier.firstPayoutCap}</span></div>
@@ -122,7 +121,6 @@ function TierReadinessCard({ tier }: { tier: TierData }) {
           </div>
         </div>
 
-        {/* CTA */}
         <div className="pt-2">
           {tier.isLive ? (
             <Button variant="outline" size="sm" className="w-full" asChild>
@@ -142,31 +140,37 @@ function TierReadinessCard({ tier }: { tier: TierData }) {
   );
 }
 
-export default function TierReadiness() {
-  const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ['tier-readiness'],
-    queryFn: async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Not authenticated');
+async function fetchTierReadiness(deep: boolean) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not authenticated');
 
-      const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/get-tier-readiness`, {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Failed to fetch tier readiness');
-      }
-
-      return response.json() as Promise<{ tiers: TierData[] }>;
+  const url = `${SUPABASE_FUNCTIONS_URL}/get-tier-readiness${deep ? '?deep=1' : ''}`;
+  const response = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
     },
+  });
+
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(err.error || 'Failed to fetch tier readiness');
+  }
+
+  return response.json() as Promise<{ tiers: TierData[]; deep: boolean }>;
+}
+
+export default function TierReadiness() {
+  const [deepMode, setDeepMode] = useState(false);
+
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
+    queryKey: ['tier-readiness', deepMode],
+    queryFn: () => fetchTierReadiness(deepMode),
     staleTime: 30_000,
   });
 
   const tiers = data?.tiers ?? [];
+  const isDeepResult = data?.deep ?? false;
 
   return (
     <DashboardLayout title="Tier Readiness" navItems={adminNavItems}>
@@ -178,16 +182,34 @@ export default function TierReadiness() {
               Pre-flight checklist for each pricing tier. All checks must pass before flipping a tier live.
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching}
-          >
-            <RefreshCw className={cn('h-4 w-4 mr-1.5', isFetching && 'animate-spin')} />
-            Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setDeepMode(true); refetch(); }}
+              disabled={isFetching}
+            >
+              <ShieldCheck className="h-4 w-4 mr-1.5" />
+              Verify Stripe
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setDeepMode(false); refetch(); }}
+              disabled={isFetching}
+            >
+              <RefreshCw className={cn('h-4 w-4 mr-1.5', isFetching && 'animate-spin')} />
+              Refresh
+            </Button>
+          </div>
         </div>
+
+        {isDeepResult && (
+          <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+            <ShieldCheck className="h-3.5 w-3.5 inline mr-1" />
+            Deep verification active — Stripe price/product IDs checked against live API.
+          </div>
+        )}
 
         {isLoading && (
           <div className="flex items-center justify-center py-12">

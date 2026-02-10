@@ -563,6 +563,7 @@ export type Database = {
           payout_eligibility_delay_days: number
           payout_split_percent: number
           profit_target_percent: number
+          tier_id: string | null
           version: number
         }
         Insert: {
@@ -593,6 +594,7 @@ export type Database = {
           payout_eligibility_delay_days?: number
           payout_split_percent?: number
           profit_target_percent?: number
+          tier_id?: string | null
           version?: number
         }
         Update: {
@@ -623,6 +625,7 @@ export type Database = {
           payout_eligibility_delay_days?: number
           payout_split_percent?: number
           profit_target_percent?: number
+          tier_id?: string | null
           version?: number
         }
         Relationships: [
