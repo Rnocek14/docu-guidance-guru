@@ -4,7 +4,7 @@ import { track } from '@/lib/track';
 
 const stats = [
   { icon: Users, value: 'Early Access', label: 'Platform Status', highlight: true },
-  { icon: Shield, value: 'Human-Reviewed', label: 'Every Payout Decision' },
+  { icon: Shield, value: 'Human-Reviewed', label: 'Payout Decisions' },
   { icon: Clock, value: '3–5 Days', label: 'Typical Review Time' },
   { icon: Lock, value: 'Frozen', label: 'Rules at Purchase' },
 ];

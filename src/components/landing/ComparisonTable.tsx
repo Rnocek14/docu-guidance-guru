@@ -43,7 +43,7 @@ const rows: CompareRow[] = [
     feature: 'Decision Audit Trail',
     others: 'Rarely available to traders',
     othersOk: false,
-    us: 'Full trail for every key decision',
+    us: 'Full trail for key decisions',
     usOk: true,
   },
   {
@@ -84,7 +84,7 @@ export function ComparisonTable() {
         <div className="text-center mb-12">
           <h2 className="text-3xl sm:text-4xl font-bold mb-4">Us vs. The Industry</h2>
           <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-            We chose tighter rules and lower splits so we can reliably pay every approved request.
+            We chose tighter rules and lower splits so we can reliably pay approved requests.
           </p>
         </div>
 

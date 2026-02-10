@@ -119,7 +119,7 @@ export function PricingSection() {
         <div className="text-center mb-12">
           <h2 className="text-3xl sm:text-4xl font-bold mb-4">Choose Your Evaluation</h2>
           <p className="text-muted-foreground text-lg max-w-xl mx-auto mb-8">
-            Simple pricing. Transparent rules. Every tier uses the same evaluation criteria.
+            Simple pricing. Transparent rules. All tiers use the same evaluation criteria.
           </p>
 
           {/* Rule toggle */}
