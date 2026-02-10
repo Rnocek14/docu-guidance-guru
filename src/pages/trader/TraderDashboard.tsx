@@ -201,6 +201,9 @@ export default function TraderDashboard() {
             <EquityCurveChart
               accountId={activeAccount.id}
               startingBalance={activeAccount.starting_balance}
+              maxDrawdownPct={activeAccount.cohort?.max_total_drawdown_percent ?? 10}
+              profitTargetPct={activeAccount.cohort?.profit_target_percent ?? 10}
+              minTradingDays={activeAccount.cohort?.min_trading_days ?? 5}
             />
 
             {/* Rule Health + What's Next */}

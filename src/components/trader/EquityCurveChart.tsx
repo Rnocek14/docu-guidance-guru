@@ -17,16 +17,22 @@ const chartConfig = {
 interface TradePoint {
   date: string;
   fullDate: string;
+  iso: string;
   balance: number;
   symbol?: string;
   side?: string;
   pnl?: number;
   quantity?: number;
+  // Rule event markers
+  event?: string;
 }
 
 interface EquityCurveChartProps {
   accountId: string;
   startingBalance: number;
+  maxDrawdownPct?: number;
+  profitTargetPct?: number;
+  minTradingDays?: number;
 }
 
 function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: TradePoint }> }) {
@@ -46,14 +52,31 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
           {point.symbol} · {point.side} · {point.quantity} ct{Number(point.quantity) !== 1 ? 's' : ''}
         </div>
       )}
-      <div className="text-muted-foreground/60 mt-0.5" title={point.fullDate}>
+      {point.event && (
+        <div className="text-primary font-medium mt-1 border-t border-border/50 pt-1">
+          ⚡ {point.event}
+        </div>
+      )}
+      <div className="text-muted-foreground/60 mt-0.5" title={point.iso}>
         {point.fullDate || point.date}
       </div>
     </div>
   );
 }
 
-export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChartProps) {
+// Custom dot renderer for rule events
+function EventDot(props: Record<string, unknown>) {
+  const { cx, cy, payload } = props as { cx: number; cy: number; payload: TradePoint };
+  if (!payload?.event) return null;
+  return (
+    <g>
+      <circle cx={cx} cy={cy} r={6} fill="hsl(var(--primary))" fillOpacity={0.2} stroke="hsl(var(--primary))" strokeWidth={1.5} />
+      <circle cx={cx} cy={cy} r={2.5} fill="hsl(var(--primary))" />
+    </g>
+  );
+}
+
+export function EquityCurveChart({ accountId, startingBalance, maxDrawdownPct = 10, profitTargetPct = 10, minTradingDays = 5 }: EquityCurveChartProps) {
   const { data: trades, dataUpdatedAt } = useQuery({
     queryKey: ['equity-curve-trades', accountId],
     queryFn: async () => {
@@ -75,33 +98,74 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
   const chartData = useMemo(() => {
     if (!trades?.length) return [];
 
-    const points: TradePoint[] = [{ date: 'Start', fullDate: '', balance: startingBalance }];
+    const points: TradePoint[] = [{ date: 'Start', fullDate: '', iso: '', balance: startingBalance }];
     let cumulative = startingBalance;
+    let peakBalance = startingBalance;
+    let drawdown50Fired = false;
+    let drawdown70Fired = false;
+    let targetWithin1Fired = false;
+    let targetReachedFired = false;
+    let minDaysFired = false;
+
+    // Track unique trading days for min-days event
+    const tradingDays = new Set<string>();
 
     trades.forEach((trade) => {
       const pnl = Number(trade.pnl);
       cumulative += pnl;
+      peakBalance = Math.max(peakBalance, cumulative);
       const closedDate = new Date(trade.closed_at!);
+      const dayKey = format(closedDate, 'yyyy-MM-dd');
+      tradingDays.add(dayKey);
+
+      // Compute rule events
+      const events: string[] = [];
+      const drawdownPct = peakBalance > 0 ? ((peakBalance - cumulative) / peakBalance) * 100 : 0;
+      const drawdownUsage = (drawdownPct / maxDrawdownPct) * 100;
+      const returnPct = ((cumulative - startingBalance) / startingBalance) * 100;
+
+      if (!drawdown50Fired && drawdownUsage >= 50) {
+        events.push('Drawdown at 50% of limit');
+        drawdown50Fired = true;
+      }
+      if (!drawdown70Fired && drawdownUsage >= 70) {
+        events.push('Drawdown at 70% of limit');
+        drawdown70Fired = true;
+      }
+      if (!minDaysFired && tradingDays.size >= minTradingDays) {
+        events.push(`${minTradingDays} trading days reached`);
+        minDaysFired = true;
+      }
+      if (!targetWithin1Fired && returnPct >= profitTargetPct - 1 && returnPct < profitTargetPct) {
+        events.push('Within 1% of profit target');
+        targetWithin1Fired = true;
+      }
+      if (!targetReachedFired && returnPct >= profitTargetPct) {
+        events.push('Profit target reached');
+        targetReachedFired = true;
+      }
+
       points.push({
         date: format(closedDate, 'MMM d'),
         fullDate: format(closedDate, 'MMM d, h:mma'),
+        iso: trade.closed_at!,
         balance: Math.round(cumulative * 100) / 100,
         symbol: trade.symbol,
         side: trade.side === 'buy' ? 'Buy' : 'Sell',
         pnl,
         quantity: Number(trade.quantity),
+        event: events.length > 0 ? events.join(' · ') : undefined,
       });
     });
 
     return points;
-  }, [trades, startingBalance]);
+  }, [trades, startingBalance, maxDrawdownPct, profitTargetPct, minTradingDays]);
 
   if (!chartData.length) return null;
 
   const currentBalance = chartData[chartData.length - 1]?.balance ?? startingBalance;
   const totalReturn = ((currentBalance - startingBalance) / startingBalance) * 100;
 
-  // "Last updated" relative time
   const lastUpdatedLabel = dataUpdatedAt
     ? (() => {
         const diffMs = Date.now() - dataUpdatedAt;
@@ -155,9 +219,15 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
               axisLine={false}
               tick={{ fontSize: 12 }}
               tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-              domain={['dataMin - 500', 'dataMax + 500']}
+              domain={[
+                (min: number) => min - 500,
+                (max: number) => max + 500,
+              ]}
             />
-            <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }} />
+            <Tooltip
+              content={<CustomTooltip />}
+              cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
+            />
             <ReferenceLine
               y={startingBalance}
               stroke="hsl(var(--muted-foreground))"
@@ -171,7 +241,7 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
               stroke="hsl(var(--primary))"
               strokeWidth={2}
               fill="url(#equityGradient)"
-              dot={false}
+              dot={<EventDot />}
               activeDot={{ r: 4, strokeWidth: 2, stroke: 'hsl(var(--primary))', fill: 'hsl(var(--background))' }}
             />
           </AreaChart>
