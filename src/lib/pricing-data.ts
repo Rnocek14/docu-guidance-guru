@@ -15,6 +15,7 @@ export interface PricingTier {
   lifetimeCapAmount: number;
   resetFee: number;
   popular?: boolean;
+  isLive: boolean;
 }
 
 export const TIERS: PricingTier[] = [
@@ -34,6 +35,7 @@ export const TIERS: PricingTier[] = [
     lifetimeCapMultiple: 7,
     lifetimeCapAmount: 1_043,
     resetFee: 99,
+    isLive: true,
   },
   {
     id: "pro",
@@ -52,6 +54,7 @@ export const TIERS: PricingTier[] = [
     lifetimeCapAmount: 1_791,
     resetFee: 99,
     popular: true,
+    isLive: false,
   },
   {
     id: "elite",
@@ -69,5 +72,6 @@ export const TIERS: PricingTier[] = [
     lifetimeCapMultiple: 12,
     lifetimeCapAmount: 4_188,
     resetFee: 99,
+    isLive: false,
   },
 ];

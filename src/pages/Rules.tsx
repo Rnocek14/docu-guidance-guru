@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Shield, ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import { TIERS } from '@/lib/pricing-data';
@@ -14,13 +14,40 @@ const evaluationRules = [
   { label: 'Minimum Trading Days', description: 'You must trade on at least the minimum number of distinct trading days before you are eligible to pass.' },
 ];
 
+const verificationRules = [
+  { label: 'Verification Profit Target', description: 'A reduced profit target confirms consistent performance before advancing to the Performance phase.' },
+  { label: 'Minimum Trading Days', description: 'You must trade on at least the required number of distinct days during Verification.' },
+  { label: 'Minimum Profitable Days', description: 'A minimum number of your trading days must be profitable to demonstrate consistency.' },
+  { label: 'Best-Day Cap', description: "No single trading day's profit may exceed a set percentage of total profit, preventing reliance on one outsized win." },
+];
+
 const performanceRules = [
   { label: 'Payout Cooldown', description: 'After each payout, you must wait the cooldown period (30 days) before requesting another.' },
   { label: 'First Payout Cap', description: 'Your first payout request is capped at a fixed dollar amount, which varies by tier.' },
   { label: 'Payout Split', description: 'You receive a percentage of your eligible simulated profit as a performance-based reward.' },
   { label: 'Lifetime Cap', description: 'Each account has a maximum total payout amount (a multiple of your entry fee). Once reached, the account is closed.' },
-  { label: 'Human Review', description: 'Every payout request and account breach is reviewed by a human risk officer. AI never auto-denies.' },
+  { label: 'Winning Days Requirement', description: 'A minimum number of profitable trading days is required between payout requests.' },
+  { label: 'Profit Buffer', description: 'Accounts must maintain a minimum profit buffer above the payout amount to remain eligible.' },
+  { label: 'Human Review', description: 'Every payout request and account breach is reviewed by a human risk officer. AI does not auto-deny.' },
 ];
+
+function RuleList({ rules }: { rules: { label: string; description: string }[] }) {
+  return (
+    <div className="space-y-4">
+      {rules.map((rule) => (
+        <Card key={rule.label}>
+          <CardContent className="flex items-start gap-4 py-4">
+            <Check className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+            <div>
+              <p className="font-medium">{rule.label}</p>
+              <p className="text-sm text-muted-foreground">{rule.description}</p>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
 
 export default function Rules() {
   useEffect(() => {
@@ -59,40 +86,22 @@ export default function Rules() {
           </p>
         </div>
 
-        {/* Evaluation Phase */}
+        {/* Phase 1: Evaluation */}
         <section>
-          <h2 className="text-2xl font-bold mb-6">Evaluation Phase</h2>
-          <div className="space-y-4">
-            {evaluationRules.map((rule) => (
-              <Card key={rule.label}>
-                <CardContent className="flex items-start gap-4 py-4">
-                  <Check className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium">{rule.label}</p>
-                    <p className="text-sm text-muted-foreground">{rule.description}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <h2 className="text-2xl font-bold mb-6">Phase 1 — Evaluation</h2>
+          <RuleList rules={evaluationRules} />
         </section>
 
-        {/* Performance Phase */}
+        {/* Phase 2: Verification */}
         <section>
-          <h2 className="text-2xl font-bold mb-6">Performance Phase</h2>
-          <div className="space-y-4">
-            {performanceRules.map((rule) => (
-              <Card key={rule.label}>
-                <CardContent className="flex items-start gap-4 py-4">
-                  <Check className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium">{rule.label}</p>
-                    <p className="text-sm text-muted-foreground">{rule.description}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <h2 className="text-2xl font-bold mb-6">Phase 2 — Verification</h2>
+          <RuleList rules={verificationRules} />
+        </section>
+
+        {/* Phase 3: Performance */}
+        <section>
+          <h2 className="text-2xl font-bold mb-6">Phase 3 — Performance</h2>
+          <RuleList rules={performanceRules} />
         </section>
 
         {/* Tier Comparison Table */}
@@ -106,10 +115,15 @@ export default function Rules() {
                     <th className="text-left p-4 text-muted-foreground font-medium">Rule</th>
                     {TIERS.map((t) => (
                       <th key={t.id} className="text-center p-4 font-medium">
-                        {t.name}
-                        {t.popular && (
-                          <Badge variant="secondary" className="ml-2 text-xs">Popular</Badge>
-                        )}
+                        <div className="flex items-center justify-center gap-2 flex-wrap">
+                          {t.name}
+                          {t.popular && (
+                            <Badge variant="secondary" className="text-xs">Popular</Badge>
+                          )}
+                          {!t.isLive && (
+                            <Badge variant="outline" className="text-xs text-muted-foreground">Upcoming</Badge>
+                          )}
+                        </div>
                       </th>
                     ))}
                   </tr>
@@ -139,6 +153,9 @@ export default function Rules() {
               </table>
             </CardContent>
           </Card>
+          <p className="text-xs text-muted-foreground mt-3">
+            Pro and Elite tiers are planned for launch and will be available soon. Rules shown reflect intended evaluation criteria.
+          </p>
         </section>
 
         {/* Refunds */}
