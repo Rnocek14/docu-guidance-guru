@@ -29,12 +29,9 @@ export function OrderSummary({ tier }: OrderSummaryProps) {
           </span>
         </div>
         <div className="text-xs text-muted-foreground space-y-1 pt-1">
-          <p>• First payout milestone: ${tier.firstPayoutCap}</p>
           <p>• Payout rate: {tier.splitPercent}% of eligible rewards</p>
-          <p>
-            • Lifetime cap: {tier.lifetimeCapMultiple}× entry fee ($
-            {(tier.price * tier.lifetimeCapMultiple).toLocaleString()})
-          </p>
+          <p>• First payout: up to ${tier.firstPayoutCap}</p>
+          <p>• Lifetime earnings: up to {tier.lifetimeCapMultiple}× your entry fee (${tier.lifetimeCapAmount.toLocaleString()})</p>
           <p>• Reset fee: $99 (optional, if evaluation is failed)</p>
         </div>
       </CardContent>

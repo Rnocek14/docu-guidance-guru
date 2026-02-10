@@ -19,13 +19,14 @@ const CHECKOUT_TIERS = TIERS.map((t) => ({
   firstPayoutCap: t.firstPayoutCap,
   splitPercent: t.splitPercent,
   lifetimeCapMultiple: t.lifetimeCapMultiple,
+  lifetimeCapAmount: t.lifetimeCapAmount,
   popular: t.popular,
   isLive: t.isLive,
   features: [
     `Simulated ${t.accountSize} trading account`,
-    `$${t.firstPayoutCap} first payout milestone`,
+    `Up to $${t.firstPayoutCap} first payout`,
     `${t.splitPercent}% payout rate on eligible rewards`,
-    `${t.lifetimeCapMultiple}× lifetime cap ($${t.lifetimeCapAmount.toLocaleString()} max)`,
+    `Up to ${t.lifetimeCapMultiple}× your entry in lifetime earnings`,
     `$${t.resetFee} reset fee if needed`,
   ],
 }));
