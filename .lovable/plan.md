@@ -1,126 +1,179 @@
 
 
-# Show Customer Volume and Growth in Simulation Results
+# Customer-Facing Overhaul: Competitive Parity Plan
 
-## Problem
-The simulation runs on `accountsPerMonth` from the slider but never shows:
-- How many total customers are being simulated
-- Monthly cumulative customer growth (new signups, eligible, capped out, churned)
-- The funnel breakdown that drives the financial results
+## The Problem
 
-This makes the financial numbers feel disconnected from the actual customer base.
+Your current site looks like an internal admin tool, not a product people buy. Comparing to Tradeify, Alpha Futures, and Funded Futures Family, you're missing every element that converts a visitor into a paying customer.
 
-## Solution
+### Gap Analysis: What Competitors Have That You Don't
 
-### 1. Edge Function: Return monthly cohort counters
+| Feature | Tradeify | Alpha Futures | FFF | You |
+|---------|----------|--------------|-----|-----|
+| High-impact landing page with hero imagery | Yes | Yes | Yes | Bare minimum |
+| Pricing table with rules comparison | Yes (interactive) | Yes (tabbed) | Yes (multi-plan tabs) | Hidden in checkout only |
+| "How it Works" 3-step flow | Yes | Yes | Yes | No |
+| Social proof (Trustpilot, payout totals) | Yes ($110M+) | Yes ($25M+) | Yes ($14M+) | No |
+| FAQ / Rules page | Yes | Yes | Yes | No |
+| Promo/discount banner | Yes | Yes | Yes | No |
+| Payout proof / certificates | Yes (carousel) | Yes (testimonials) | Yes (photos) | No |
+| Trader dashboard with clear account status | Basic | Yes | Yes | Functional but plain |
+| "Start Evaluation" purchase flow from landing page | Seamless | Seamless | Seamless | Exists but disconnected |
+| Dark theme (trading terminal feel) | Yes | Yes | Yes | Supported but landing is light |
 
-Modify `simulateMonthAggregate()` to also return pool sizes, and collect them as monthly bands (P50) across iterations.
+## Implementation Plan
 
-New fields added to the return object:
+This is broken into 4 workstreams, ordered by impact. Each can be done incrementally.
 
-```text
-cohortBands: [
-  { month: 1, totalAccounts: 150, eligible: 18, firstPayout: 18, capHits: 0, churned: 12 },
-  { month: 2, totalAccounts: 300, eligible: 36, firstPayout: 15, capHits: 0, churned: 25 },
-  ...
-]
-```
+---
 
-**Changes to `supabase/functions/run-simulation/index.ts`:**
-- Have `simulateMonthAggregate()` return additional fields: `totalAccounts`, `eligiblePool`, `firstPayoutPool`, `capHits`
-- In `runSimulation()`, collect these per-month per-iteration into columns (like `monthColumns` for profit)
-- Compute P50 (median) of each counter per month
-- Add `cohortBands` array to the results object alongside `monthlyBands`
+### Workstream 1: Landing Page Rebuild (Highest Impact)
 
-### 2. UI: Add "Customer Growth" tab and summary cards
+**Goal:** A landing page that looks like a real product, not a placeholder.
 
-**Changes to `src/pages/admin/MonteCarloAnalytics.tsx`:**
+#### 1a. New Hero Section
+- Dark gradient background (use your existing dark mode palette)
+- Bold headline: your existing "Simulated Trading Evaluation" messaging
+- Key differentiators as bullet badges (like Tradeify's "Daily Payouts / No Consistency / EOD Drawdown")
+- Primary CTA: "Start Your Evaluation" linking to the pricing section
+- Secondary CTA: "Sign In" for returning users
+- Social proof placeholder row (Trustpilot widget slot, payout counter slot)
 
-Add two new elements:
+#### 1b. "How It Works" Section
+A 3-step visual flow (matches every competitor):
+1. **Choose Your Plan** -- Pick your simulated account size
+2. **Pass the Evaluation** -- Meet the profit target within the rules
+3. **Get Paid** -- Request your performance-based reward
 
-**a) Summary banner** — Show total customers simulated prominently in the verdict section:
-- "Simulating **1,800 total customers** over 12 months (150/mo)"
-- "Peak eligible pool: **216 funded accounts**"
+Each step gets an icon, short description, and a connecting visual line/arrow.
 
-**b) New "Customers" tab** alongside Bands / Distribution / Risk / Diagnostics:
-- Stacked area chart showing monthly cumulative counts:
-  - Total signups (cumulative)
-  - Eligible (funded, active)
-  - First-payout pending
-  - Cap-hit / churned
-- This directly answers "how many customers is this modeling?"
+#### 1c. Pricing Section (on the landing page, not just checkout)
+- Interactive tier selector (Starter / Pro / Elite) showing your existing 3 tiers
+- Each tier shows: price, account size, profit target, max drawdown, payout split, lifetime cap, reset fee
+- Rules comparison table below the cards
+- "Most Popular" badge on Pro
+- CTA button on each card goes directly to checkout with that tier pre-selected
+- Regulatory disclaimer text at the bottom of the section
 
-### 3. Diagnostics enhancement
+#### 1d. "Why Choose Us" / Differentiators Section
+- Frozen rules (no mid-challenge changes)
+- Human-in-the-loop (AI never auto-denies)
+- Full audit trail / transparency
+- Performance-based rewards with clear caps
 
-Add to the existing diagnostics panel:
-- Total accounts simulated: `accountsPerMonth x horizon`
-- Peak eligible pool (median)
-- Churn rate (cap-hit + reset-out as % of total)
-- Customer lifetime (avg months before cap or churn)
+#### 1e. FAQ Section
+Collapsible accordion with the top 8-10 questions:
+- "Is this real trading?" (No -- simulated environment)
+- "How do payouts work?" (Performance-based rewards, not withdrawals)
+- "What happens if I breach a rule?" (Human review, not auto-fail)
+- "Can rules change during my challenge?" (No -- frozen at start)
+- "What platforms can I use?" (Currently manual entry, broker integration coming)
+- "What's the reset fee?" ($99)
+- "What's the lifetime cap?" (Explain multiplier)
+- "How fast are payouts?" (TBD -- placeholder)
+
+#### 1f. Footer
+- Mandatory sim-trading disclaimer (you already have this)
+- Links: Terms, Privacy, FAQ, Contact
+- Copyright
+
+---
+
+### Workstream 2: Dedicated Pages
+
+#### 2a. Rules Page (`/rules`)
+A standalone page explaining all evaluation rules clearly:
+- Evaluation phase rules (profit target, drawdown, min days, position sizing)
+- Performance phase rules (payout eligibility, cooling period, caps)
+- Table comparing rules across the 3 tiers
+- Links back to pricing/checkout
+
+#### 2b. Enhanced Checkout Flow
+The existing checkout page is solid but needs:
+- URL support for pre-selected tier (`/checkout?tier=pro`)
+- Tier cards should show rule details inline (not just features list)
+- Add a "Back to Plans" link that goes to the landing page pricing section
+
+---
+
+### Workstream 3: Trader Dashboard Polish
+
+#### 3a. Empty State Improvement
+When a trader has no accounts, instead of "Contact support," show:
+- "Start Your First Evaluation" card with a CTA to `/checkout`
+- Brief explanation of what happens after purchase
+
+#### 3b. Account Card Enhancements
+- Add a visual progress ring or bar for profit target completion
+- Show days remaining more prominently
+- Color-code drawdown proximity to limit (green/yellow/red)
+
+#### 3c. Navigation Polish
+- Add a "Buy New Account" link in the trader sidebar
+- Link back to the landing page from the dashboard logo
+
+---
+
+### Workstream 4: Design System & Polish
+
+#### 4a. Dark-First Landing Page
+- The landing page should default to dark mode (trading terminal aesthetic) regardless of system preference
+- Use the existing dark mode CSS variables
+- Add subtle gradient backgrounds and glow effects for visual polish
+
+#### 4b. Component Additions
+New reusable components needed:
+- `StepCard` -- for the "How it Works" section
+- `PricingTable` -- interactive tier comparison with rules
+- `FAQAccordion` -- collapsible Q&A using the existing Accordion primitive
+- `SocialProofBar` -- placeholder for Trustpilot + payout counter
+- `PromoBar` -- dismissible top banner for discounts (future use)
+
+---
 
 ## Technical Details
 
-### Edge function changes (`supabase/functions/run-simulation/index.ts`)
-
-The `simulateMonthAggregate` function (line 160) already computes `totalEligible` on line 279. We need to:
-
-1. Return it from the function along with other pool counters
-2. Collect per-month arrays similar to `monthColumns` for profit
-3. Compute medians and add to results
-
-New return type from `simulateMonthAggregate`:
+### New Files to Create
 ```text
-{
-  netProfit, totalPayouts, payoutRequests, capHits,
-  totalAccounts,     // sum of all cohort.totalAccounts
-  eligiblePool,      // sum of all cohort.eligiblePool
-  firstPayoutPool,   // sum of all cohort.firstPayoutPool
-}
+src/pages/Index.tsx              -- Complete rewrite (landing page)
+src/pages/Rules.tsx              -- New rules page
+src/components/landing/Hero.tsx
+src/components/landing/HowItWorks.tsx
+src/components/landing/PricingSection.tsx
+src/components/landing/Differentiators.tsx
+src/components/landing/FAQ.tsx
+src/components/landing/Footer.tsx
+src/components/landing/SocialProofBar.tsx
 ```
 
-New field in simulation results:
+### Files to Modify
 ```text
-cohortBands: Array<{
-  totalAccounts: number   // cumulative signups
-  eligible: number        // funded & active (median across iterations)
-  firstPayout: number     // awaiting first payout
-  capHits: number         // cumulative cap-hit accounts
-}>
+src/App.tsx                      -- Add /rules route
+src/pages/Checkout.tsx           -- Support ?tier= query param
+src/pages/trader/TraderDashboard.tsx  -- Improve empty state
+src/pages/trader/TraderAccounts.tsx   -- Improve empty state + CTA
+src/components/layout/DashboardLayout.tsx -- Add "Buy Account" nav item
 ```
 
-### Frontend changes
+### No Backend Changes Required
+All changes are frontend-only. Pricing data is already hardcoded in the checkout page and will be shared via a constants file.
 
-| File | Change |
-|------|--------|
-| `supabase/functions/run-simulation/index.ts` | Return cohort pool counters per month |
-| `src/pages/admin/MonteCarloAnalytics.tsx` | Add customer summary to verdict, new "Customers" tab with stacked area chart, enhance diagnostics |
+### Routing Updates
+| Route | Page |
+|-------|------|
+| `/` | Rebuilt landing page |
+| `/rules` | New rules page |
+| `/checkout?tier=pro` | Existing checkout with pre-selection |
 
-### UI Layout for Customers tab
+---
 
-```text
-+--------------------------------------------------+
-| Customer Growth (Median Across Iterations)        |
-|                                                   |
-|  [Stacked Area Chart]                             |
-|  - Blue area: Cumulative signups                  |
-|  - Green area: Eligible (funded)                  |
-|  - Orange area: First-payout pending              |
-|  - Red line: Cumulative cap-hits                  |
-|                                                   |
-|  M1    M3    M6    M9    M12                      |
-+--------------------------------------------------+
-| Key Stats:                                        |
-| Total Customers: 1,800 | Peak Eligible: 216       |
-| Avg Lifetime: 4.2 mo   | Cap-Hit Rate: 8.3%       |
-+--------------------------------------------------+
-```
+## Execution Order
 
-### Verdict banner addition
+1. **Landing page rebuild** (Hero + Pricing + How It Works + FAQ + Footer) -- this is the "money page"
+2. **Checkout pre-selection** support
+3. **Trader dashboard empty states** with purchase CTA
+4. **Rules page**
+5. **Design polish** (dark theme, gradients, animations)
 
-The existing verdict banner (line 236) will be enhanced to show:
-```text
-"2,000 iterations x 12 months using live cohort rules"
-→
-"2,000 iterations x 12 months | 1,800 customers (150/mo) | live cohort rules"
-```
+This gets you from "internal tool" to "product someone would buy" in one focused sprint. No backend changes, no new dependencies, just making the existing product sellable.
 
