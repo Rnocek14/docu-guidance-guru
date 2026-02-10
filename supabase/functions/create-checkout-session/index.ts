@@ -123,46 +123,35 @@ Deno.serve(async (req) => {
     }
 
     // ── 4. Resolve redirect origin (fail-closed) ──────────
-    // Priority: APP_ORIGIN env > Origin header (validated against allowlist)
+    // APP_ORIGIN is REQUIRED. All Stripe redirect URLs point here.
+    // Never trust browser Origin header for money-touching flows.
     const APP_ORIGIN = Deno.env.get('APP_ORIGIN')
-    
-    // Build allowlist from APP_ORIGIN (always) + known domains
-    const ALLOWED_ORIGINS: string[] = []
-    if (APP_ORIGIN) ALLOWED_ORIGINS.push(APP_ORIGIN)
-    // Add any additional known production domains here
-    
-    const requestOrigin = req.headers.get('origin')
-    
-    let resolvedOrigin: string | null = null
-    
-    if (APP_ORIGIN) {
-      // Production mode: always use APP_ORIGIN regardless of request origin
-      resolvedOrigin = APP_ORIGIN
-    } else if (requestOrigin && ALLOWED_ORIGINS.length > 0 && ALLOWED_ORIGINS.includes(requestOrigin)) {
-      // Allowlisted origin
-      resolvedOrigin = requestOrigin
-    } else if (requestOrigin && ALLOWED_ORIGINS.length === 0) {
-      // No allowlist configured and no APP_ORIGIN — development fallback
-      // Still reject preview domains
-      if (requestOrigin.includes('id-preview--') || requestOrigin.includes('localhost')) {
-        console.warn(`Checkout origin rejected (preview/localhost): ${requestOrigin}`)
-        resolvedOrigin = null
-      } else {
-        resolvedOrigin = requestOrigin
-      }
-    }
-    
-    if (!resolvedOrigin) {
-      console.error(`Checkout origin resolution failed. APP_ORIGIN=${APP_ORIGIN || 'unset'}, request_origin=${requestOrigin || 'absent'}`)
+
+    if (!APP_ORIGIN) {
+      console.error('FATAL: APP_ORIGIN not configured. Cannot create checkout session.')
       return new Response(
-        JSON.stringify({ 
-          error: 'Unable to determine redirect origin',
-          hint: APP_ORIGIN ? undefined : 'Set APP_ORIGIN env var for production deployments'
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Server misconfiguration' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
+    // Log & warn if request origin doesn't match (informational only)
+    const originHeader = req.headers.get('origin')
+    const forwardedHost = req.headers.get('x-forwarded-host')
+    const forwardedProto = req.headers.get('x-forwarded-proto')
+
+    let requestOrigin: string | null = null
+    if (originHeader) {
+      requestOrigin = originHeader
+    } else if (forwardedHost && forwardedProto) {
+      requestOrigin = `${forwardedProto}://${forwardedHost}`
+    }
+
+    if (requestOrigin && requestOrigin !== APP_ORIGIN) {
+      console.warn(`Origin mismatch: request=${requestOrigin}, APP_ORIGIN=${APP_ORIGIN}. Using APP_ORIGIN for redirects.`)
+    }
+
+    // Stripe redirect URLs ALWAYS use APP_ORIGIN — never request origin
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       customer_email: customerId ? undefined : (userEmail || undefined),
@@ -183,8 +172,8 @@ Deno.serve(async (req) => {
           tier_id: tierId,
         },
       },
-      success_url: `${resolvedOrigin}/trader?session_id={CHECKOUT_SESSION_ID}&payment=success`,
-      cancel_url: `${resolvedOrigin}/checkout?payment=cancelled`,
+      success_url: `${APP_ORIGIN}/trader?session_id={CHECKOUT_SESSION_ID}&payment=success`,
+      cancel_url: `${APP_ORIGIN}/checkout?payment=cancelled`,
     })
 
     console.log(`Checkout session created: ${session.id} for user=${userId} tier=${tierId} origin=${resolvedOrigin}`)
