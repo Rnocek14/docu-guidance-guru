@@ -12,6 +12,8 @@ import type { Account, Cohort, PayoutEligibility } from '@/lib/types';
 import { AccountPhaseIndicator } from '@/components/trader/AccountPhaseIndicator';
 import { PayoutReadinessCard } from '@/components/trader/PayoutReadinessCard';
 import { EquityCurveChart } from '@/components/trader/EquityCurveChart';
+import { RuleHealthCard } from '@/components/trader/RuleHealthCard';
+import { WhatsNextCard } from '@/components/trader/WhatsNextCard';
 
 export default function TraderDashboard() {
   const { user } = useAuth();
@@ -200,6 +202,12 @@ export default function TraderDashboard() {
               accountId={activeAccount.id}
               startingBalance={activeAccount.starting_balance}
             />
+
+            {/* Rule Health + What's Next */}
+            <div className="grid gap-4 md:grid-cols-2">
+              <RuleHealthCard account={activeAccount} />
+              <WhatsNextCard account={activeAccount} />
+            </div>
 
             {/* Progress section */}
             <div className="grid gap-4 md:grid-cols-2">
