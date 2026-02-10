@@ -34,6 +34,7 @@ import LiabilityDashboard from "./pages/admin/LiabilityDashboard";
 import OpsPlaybook from "./pages/admin/OpsPlaybook";
 import OpsMetrics from "./pages/admin/OpsMetrics";
 import TierReadiness from "./pages/admin/TierReadiness";
+import AdminReadiness from "./pages/admin/AdminReadiness";
 import SupportDashboard from "./pages/support/SupportDashboard";
 import AccountDetails from "./pages/trader/AccountDetails";
 
@@ -219,6 +220,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <TierReadiness />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/readiness"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminReadiness />
                 </ProtectedRoute>
               }
             />
