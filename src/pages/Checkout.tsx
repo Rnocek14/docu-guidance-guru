@@ -4,75 +4,48 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ArrowLeft } from "lucide-react";
 import { CheckoutDisclaimer } from "@/components/checkout/CheckoutDisclaimer";
-import { TierCard, type PricingTier } from "@/components/checkout/TierCard";
+import { TierCard } from "@/components/checkout/TierCard";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { TIERS } from "@/lib/pricing-data";
 
-const TIERS: PricingTier[] = [
-  {
-    id: "starter",
-    name: "Starter",
-    price: 149,
-    accountSize: "$50,000",
-    firstPayoutCap: 300,
-    splitPercent: 80,
-    lifetimeCapMultiple: 7,
-    features: [
-      "Simulated $50k trading account",
-      "$300 first payout milestone",
-      "80% payout rate on eligible rewards",
-      "7× lifetime cap ($1,043 max)",
-      "$99 reset fee if needed",
-    ],
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    price: 199,
-    accountSize: "$100,000",
-    firstPayoutCap: 500,
-    splitPercent: 82,
-    lifetimeCapMultiple: 9,
-    popular: true,
-    features: [
-      "Simulated $100k trading account",
-      "$500 first payout milestone",
-      "82% payout rate on eligible rewards",
-      "9× lifetime cap ($1,791 max)",
-      "$99 reset fee if needed",
-    ],
-  },
-  {
-    id: "elite",
-    name: "Elite",
-    price: 349,
-    accountSize: "$200,000",
-    firstPayoutCap: 750,
-    splitPercent: 85,
-    lifetimeCapMultiple: 12,
-    features: [
-      "Simulated $200k trading account",
-      "$750 first payout milestone",
-      "85% payout rate on eligible rewards",
-      "12× lifetime cap ($4,188 max)",
-      "$99 reset fee if needed",
-    ],
-  },
-];
+// Map shared pricing data to checkout TierCard format
+const CHECKOUT_TIERS = TIERS.map((t) => ({
+  id: t.id,
+  name: t.name,
+  price: t.price,
+  accountSize: t.accountSize,
+  firstPayoutCap: t.firstPayoutCap,
+  splitPercent: t.splitPercent,
+  lifetimeCapMultiple: t.lifetimeCapMultiple,
+  popular: t.popular,
+  features: [
+    `Simulated ${t.accountSize} trading account`,
+    `$${t.firstPayoutCap} first payout milestone`,
+    `${t.splitPercent}% payout rate on eligible rewards`,
+    `${t.lifetimeCapMultiple}× lifetime cap ($${t.lifetimeCapAmount.toLocaleString()} max)`,
+    `$${t.resetFee} reset fee if needed`,
+  ],
+}));
 
 export default function Checkout() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const [selectedTier, setSelectedTier] = useState<string>(
-    searchParams.get("tier") && TIERS.some((t) => t.id === searchParams.get("tier"))
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTier =
+    searchParams.get("tier") && CHECKOUT_TIERS.some((t) => t.id === searchParams.get("tier"))
       ? searchParams.get("tier")!
-      : "pro"
-  );
+      : "pro";
+  const [selectedTier, setSelectedTier] = useState<string>(initialTier);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const tier = TIERS.find((t) => t.id === selectedTier)!;
+  const tier = CHECKOUT_TIERS.find((t) => t.id === selectedTier)!;
+
+  const handleSelectTier = (id: string) => {
+    setSelectedTier(id);
+    setSearchParams({ tier: id }, { replace: true });
+  };
 
   const handlePurchase = async () => {
     if (!disclaimerAccepted) return;
@@ -102,11 +75,11 @@ export default function Checkout() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/#pricing")}
             className="gap-1.5"
           >
             <ArrowLeft className="h-4 w-4" />
-            Back
+            Back to Plans
           </Button>
           <Separator orientation="vertical" className="h-6" />
           <h1 className="text-lg font-semibold text-foreground">
@@ -128,12 +101,12 @@ export default function Checkout() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {TIERS.map((t) => (
+            {CHECKOUT_TIERS.map((t) => (
               <TierCard
                 key={t.id}
                 tier={t}
                 isSelected={selectedTier === t.id}
-                onSelect={() => setSelectedTier(t.id)}
+                onSelect={() => handleSelectTier(t.id)}
               />
             ))}
           </div>

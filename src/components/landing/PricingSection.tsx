@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,7 +7,9 @@ import { Check, ArrowRight } from 'lucide-react';
 import { TIERS, type PricingTier } from '@/lib/pricing-data';
 import { cn } from '@/lib/utils';
 
-function TierCard({ tier }: { tier: PricingTier }) {
+type RuleView = 'evaluation' | 'payout';
+
+function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView }) {
   const isPopular = tier.popular;
   return (
     <Card
@@ -32,18 +35,27 @@ function TierCard({ tier }: { tier: PricingTier }) {
       </CardHeader>
       <CardContent className="flex-1 flex flex-col pt-4">
         <div className="space-y-3 flex-1">
-          <RuleRow label="Profit Target" value={`${tier.profitTarget}%`} />
-          <RuleRow label="Max Daily Loss" value={`${tier.maxDailyLoss}%`} />
-          <RuleRow label="Max Drawdown" value={`${tier.maxTotalDrawdown}%`} />
-          <RuleRow label="Min Trading Days" value={`${tier.minTradingDays}`} />
-          <RuleRow label="Payout Split" value={`${tier.splitPercent}%`} highlight />
-          <RuleRow label="First Payout Cap" value={`$${tier.firstPayoutCap}`} />
-          <RuleRow label="Lifetime Cap" value={`$${tier.lifetimeCapAmount.toLocaleString()}`} />
-          <RuleRow label="Reset Fee" value={`$${tier.resetFee}`} />
+          {ruleView === 'evaluation' ? (
+            <>
+              <RuleRow label="Profit Target" value={`${tier.profitTarget}%`} />
+              <RuleRow label="Max Daily Loss" value={`${tier.maxDailyLoss}%`} />
+              <RuleRow label="Max Drawdown" value={`${tier.maxTotalDrawdown}%`} />
+              <RuleRow label="Min Trading Days" value={`${tier.minTradingDays}`} />
+              <RuleRow label="Reset Fee" value={`$${tier.resetFee}`} />
+            </>
+          ) : (
+            <>
+              <RuleRow label="Payout Split" value={`${tier.splitPercent}%`} highlight />
+              <RuleRow label="First Payout Cap" value={`$${tier.firstPayoutCap}`} />
+              <RuleRow label="Lifetime Cap" value={`$${tier.lifetimeCapAmount.toLocaleString()}`} />
+              <RuleRow label="Cooldown Period" value={`${tier.payoutCooldown} days`} />
+              <RuleRow label="Human Review" value="Always" highlight />
+            </>
+          )}
         </div>
         <Button
           asChild
-          className={cn('w-full mt-6 gap-2', isPopular ? '' : 'variant-outline')}
+          className={cn('w-full mt-6 gap-2')}
           variant={isPopular ? 'default' : 'outline'}
           size="lg"
         >
@@ -69,19 +81,62 @@ function RuleRow({ label, value, highlight }: { label: string; value: string; hi
 }
 
 export function PricingSection() {
+  const [ruleView, setRuleView] = useState<RuleView>('evaluation');
+
   return (
     <section id="pricing" className="py-20 lg:py-28 border-t border-border">
       <div className="container mx-auto px-4">
-        <div className="text-center mb-16">
+        <div className="text-center mb-12">
           <h2 className="text-3xl sm:text-4xl font-bold mb-4">Choose Your Evaluation</h2>
-          <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+          <p className="text-muted-foreground text-lg max-w-xl mx-auto mb-8">
             Simple pricing. Transparent rules. Every tier uses the same evaluation criteria.
           </p>
+
+          {/* Rule toggle */}
+          <div className="inline-flex items-center rounded-lg border border-border bg-card p-1 gap-1">
+            <button
+              onClick={() => setRuleView('evaluation')}
+              className={cn(
+                'px-4 py-2 rounded-md text-sm font-medium transition-colors',
+                ruleView === 'evaluation'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Evaluation Rules
+            </button>
+            <button
+              onClick={() => setRuleView('payout')}
+              className={cn(
+                'px-4 py-2 rounded-md text-sm font-medium transition-colors',
+                ruleView === 'payout'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Payout Rules
+            </button>
+          </div>
         </div>
 
         <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
           {TIERS.map((tier) => (
-            <TierCard key={tier.id} tier={tier} />
+            <TierCard key={tier.id} tier={tier} ruleView={ruleView} />
+          ))}
+        </div>
+
+        {/* Compliance micro-section */}
+        <div className="mt-12 max-w-3xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+          {[
+            { label: 'Simulated Environment', emoji: '🎯' },
+            { label: 'Performance-Based Rewards', emoji: '💰' },
+            { label: 'Human Review for Flags', emoji: '👤' },
+            { label: 'Rules Locked at Purchase', emoji: '🔒' },
+          ].map(({ label, emoji }) => (
+            <div key={label} className="rounded-lg border border-border bg-card/50 py-3 px-2">
+              <span className="text-lg">{emoji}</span>
+              <p className="text-xs text-muted-foreground mt-1 font-medium">{label}</p>
+            </div>
           ))}
         </div>
 
