@@ -138,7 +138,7 @@ Deno.serve(async (req) => {
     const stripeKeyPresent = !!stripeKey && stripeKey.length > 10
 
     // Optional deep Stripe verification
-    let stripeDeepResults: Record<string, { priceValid: boolean; productValid: boolean; priceMatchesProduct: boolean; error?: string }> = {}
+    let stripeDeepResults: Record<string, { priceValid: boolean; productValid: boolean; priceMatchesProduct: boolean; observedPriceProductId?: string | null; error?: string }> = {}
     if (deep && stripeKeyPresent) {
       try {
         const stripe = new Stripe(stripeKey!)
@@ -155,6 +155,7 @@ Deno.serve(async (req) => {
               priceValid: !!price && price.active === true,
               productValid: !!product,
               priceMatchesProduct: priceProductId === cfg.productId,
+              observedPriceProductId: priceProductId,
             }
           } catch (e) {
             stripeDeepResults[id] = {
@@ -197,7 +198,7 @@ Deno.serve(async (req) => {
         } else if (!dr.productValid) {
           stripeDetail = 'Product not found or inactive in Stripe'
         } else if (!dr.priceMatchesProduct) {
-          stripeDetail = 'Price exists but belongs to a different product — check for copy/paste error'
+          stripeDetail = `Mismatch: price.product=${dr.observedPriceProductId} but expected ${cfg.productId}`
         } else {
           stripeDetail = 'Price and product verified active in Stripe'
         }
@@ -227,17 +228,25 @@ Deno.serve(async (req) => {
             : `No active cohort found for tier "${id}"`,
       }
 
-      // Server gate check — simulates create-checkout-session validation
-      const gateInputsPresent = cfg.isLive && hasPriceId && hasProductId && stripeKeyPresent
+      // Server gate check — uses deep Stripe results when available
+      const deepStripeOk = deep && stripeDeepResults[id]
+        ? stripeDeepResults[id].priceValid && stripeDeepResults[id].productValid && stripeDeepResults[id].priceMatchesProduct
+        : null
+      const gateStripeOk = deepStripeOk !== null ? deepStripeOk : (hasPriceId && hasProductId && stripeKeyPresent)
+      const gateInputsPresent = cfg.isLive && gateStripeOk
       const serverGateOk = {
         ok: gateInputsPresent,
         detail: !cfg.isLive
           ? 'Server returns 400: TIER_NOT_LIVE'
           : !stripeKeyPresent
             ? 'Server will fail: STRIPE_CONFIG_MISSING'
-            : !hasPriceId || !hasProductId
-              ? 'Server will fail: STRIPE_CONFIG_MISSING'
-              : 'All gate inputs present — server will accept checkout requests',
+            : deep && deepStripeOk === false
+              ? 'Server will fail: Stripe verification failed (see Stripe Wired check)'
+              : !hasPriceId || !hasProductId
+                ? 'Server will fail: STRIPE_CONFIG_MISSING'
+                : deep
+                  ? 'Stripe Gate (verified) — all inputs validated against live Stripe'
+                  : 'All gate inputs present — server will accept checkout requests',
       }
 
       return {
