@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis, Tooltip } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { ChartContainer } from '@/components/ui/chart';
 import { TrendingUp } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
@@ -14,9 +14,40 @@ const chartConfig = {
   },
 };
 
+interface TradePoint {
+  date: string;
+  balance: number;
+  symbol?: string;
+  side?: string;
+  pnl?: number;
+  quantity?: number;
+}
+
 interface EquityCurveChartProps {
   accountId: string;
   startingBalance: number;
+}
+
+function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: TradePoint }> }) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0].payload;
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-background px-3 py-2 text-xs shadow-xl">
+      <div className="font-medium text-foreground">${point.balance.toLocaleString()}</div>
+      {point.pnl !== undefined && (
+        <div className={`font-mono ${point.pnl >= 0 ? 'text-success' : 'text-destructive'}`}>
+          {point.pnl >= 0 ? '+' : ''}{point.pnl.toLocaleString()} P&L
+        </div>
+      )}
+      {point.symbol && (
+        <div className="text-muted-foreground mt-0.5">
+          {point.symbol} {point.side} × {point.quantity}
+        </div>
+      )}
+      <div className="text-muted-foreground/60">{point.date}</div>
+    </div>
+  );
 }
 
 export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChartProps) {
@@ -25,7 +56,7 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
     queryFn: async () => {
       const { data, error } = await supabase
         .from('trades')
-        .select('pnl, closed_at')
+        .select('pnl, closed_at, symbol, side, quantity')
         .eq('account_id', accountId)
         .eq('status', 'closed')
         .not('closed_at', 'is', null)
@@ -41,15 +72,19 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
   const chartData = useMemo(() => {
     if (!trades?.length) return [];
 
-    // Start with starting balance point
-    const points = [{ date: 'Start', balance: startingBalance }];
+    const points: TradePoint[] = [{ date: 'Start', balance: startingBalance }];
     let cumulative = startingBalance;
 
     trades.forEach((trade) => {
-      cumulative += Number(trade.pnl);
+      const pnl = Number(trade.pnl);
+      cumulative += pnl;
       points.push({
         date: format(new Date(trade.closed_at!), 'MMM d'),
         balance: Math.round(cumulative * 100) / 100,
+        symbol: trade.symbol,
+        side: trade.side === 'buy' ? 'Long' : 'Short',
+        pnl,
+        quantity: Number(trade.quantity),
       });
     });
 
@@ -70,7 +105,7 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
               <TrendingUp className="h-5 w-5 text-primary" />
               Equity Curve
             </CardTitle>
-            <CardDescription>Cumulative balance over time</CardDescription>
+            <CardDescription>Cumulative balance — hover for trade details</CardDescription>
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold">${currentBalance.toLocaleString()}</div>
@@ -104,18 +139,13 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
               tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
               domain={['dataMin - 500', 'dataMax + 500']}
             />
-            <ChartTooltip
-              content={
-                <ChartTooltipContent
-                  formatter={(value) => [`$${Number(value).toLocaleString()}`, 'Balance']}
-                />
-              }
-            />
+            <Tooltip content={<CustomTooltip />} />
             <ReferenceLine
               y={startingBalance}
               stroke="hsl(var(--muted-foreground))"
               strokeDasharray="4 4"
               strokeOpacity={0.5}
+              label={{ value: 'Start', position: 'left', fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
             />
             <Area
               type="monotone"
@@ -123,6 +153,8 @@ export function EquityCurveChart({ accountId, startingBalance }: EquityCurveChar
               stroke="hsl(var(--primary))"
               strokeWidth={2}
               fill="url(#equityGradient)"
+              dot={false}
+              activeDot={{ r: 4, strokeWidth: 2, stroke: 'hsl(var(--primary))', fill: 'hsl(var(--background))' }}
             />
           </AreaChart>
         </ChartContainer>
