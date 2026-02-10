@@ -142,7 +142,7 @@ export default function Rules() {
         </section>
 
         {/* Refunds */}
-        <section id="refunds">
+        <section id="refunds" className="scroll-mt-24">
           <h2 className="text-2xl font-bold mb-6">Refund Policy</h2>
           <Card>
             <CardContent className="py-6 space-y-3 text-sm text-muted-foreground">
@@ -150,7 +150,8 @@ export default function Rules() {
                 <li>Refund eligibility depends on account status and policy conditions at time of purchase.</li>
                 <li>If you believe you're eligible, contact support with your order email.</li>
                 <li>Refunds may be denied in cases of rule abuse, chargeback risk, or policy violations.</li>
-                <li>Processing times vary; approved refunds are typically returned to the original payment method.</li>
+                <li>Approved refunds are returned to the original payment method when possible.</li>
+                <li>We do not provide cash refunds outside of the payment processor's supported methods.</li>
               </ul>
               <p className="pt-2 text-xs">
                 For full terms, see our{' '}
