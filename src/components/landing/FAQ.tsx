@@ -12,15 +12,15 @@ const faqs = [
   },
   {
     q: 'How do payouts work?',
-    a: 'Once you pass the evaluation and meet the payout eligibility requirements (minimum trading days, profit buffer, cooling period), you can request a payout. Every payout request is reviewed by a human — never auto-denied.',
+    a: 'Once you pass the evaluation and meet the payout eligibility requirements (minimum trading days, profit buffer, cooling period), you can request a payout. Payout requests are reviewed by a human — not auto-denied.',
   },
   {
     q: 'What happens if I breach a rule?',
-    a: 'The system detects the breach and flags it for human review. AI never auto-fails your account. A risk officer reviews the situation and makes the final call.',
+    a: 'The system detects the breach and flags it for human review. Accounts are not auto-failed. A risk officer reviews the situation and makes the final call.',
   },
   {
     q: 'Can rules change during my challenge?',
-    a: 'No. Your rules are frozen at the moment you purchase your evaluation. They cannot be changed mid-challenge. This is a core guarantee.',
+    a: 'No. Your rules are frozen at the moment you purchase your evaluation. They cannot be changed mid-challenge. This is a core commitment.',
   },
   {
     q: 'What trading platforms can I use?',
@@ -32,7 +32,7 @@ const faqs = [
   },
   {
     q: 'What is the lifetime payout limit?',
-    a: 'Each tier has a maximum lifetime earnings amount, expressed as a multiple of your entry fee (e.g., up to 7× on the Starter tier). This is disclosed upfront before purchase and ensures the platform can reliably pay every approved request.',
+    a: 'Each tier has a maximum lifetime earnings amount, expressed as a multiple of your entry fee (e.g., up to 7× on the Starter tier). This is disclosed upfront before purchase and ensures the platform can reliably pay approved requests.',
   },
   {
     q: 'How fast are payouts processed?',

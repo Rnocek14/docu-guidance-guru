@@ -14,7 +14,7 @@ const steps = [
   {
     icon: DollarSign,
     title: 'Earn Rewards',
-    description: 'Request your performance-based payout. Every decision is human-reviewed — never auto-denied.',
+    description: 'Request your performance-based payout. Decisions are human-reviewed — not auto-denied.',
   },
 ];
 
