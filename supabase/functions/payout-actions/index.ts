@@ -969,28 +969,65 @@ Deno.serve(async (req) => {
       effectiveAmount = result.amount || submittedAmount
       wasIdempotentRpc = false
       
+    } else if (body.action === 'approve') {
+      // C5 FIX: Use atomic RPC for approval (payout + account in one tx)
+      const { data: approveResult, error: approveError } = await supabaseAdmin.rpc('approve_payout_atomic', {
+        _payout_id: body.payout_id,
+        _approved_by: userId,
+        _review_notes: body.reason || null,
+        _calculated_eligible_amount: calculatedEligibleAmount,
+        _submitted_amount: submittedAmount,
+        _fraud_review_id: fraudReviewId || null,
+      })
+
+      if (approveError) {
+        throw new Error(`Failed to approve payout: ${approveError.message}`)
+      }
+
+      // deno-lint-ignore no-explicit-any
+      const approveData = approveResult as any
+      if (!approveData?.success) {
+        return new Response(
+          JSON.stringify({ error: approveData?.error || 'Failed to approve payout', details: approveData }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      effectiveNewStatus = 'approved'
+
+    } else if (body.action === 'reject') {
+      // Use atomic RPC for rejection
+      const { data: rejectResult, error: rejectError } = await supabaseAdmin.rpc('reject_payout_atomic', {
+        _payout_id: body.payout_id,
+        _rejected_by: userId,
+        _reason: body.reason || 'Rejected',
+      })
+
+      if (rejectError) {
+        throw new Error(`Failed to reject payout: ${rejectError.message}`)
+      }
+
+      // deno-lint-ignore no-explicit-any
+      const rejectData = rejectResult as any
+      if (!rejectData?.success) {
+        return new Response(
+          JSON.stringify({ error: rejectData?.error || 'Failed to reject payout', details: rejectData }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      effectiveNewStatus = 'rejected'
+
     } else {
-      // For non-mark_paid actions, use regular update flow
+      // For request_more_info: simple update (no account status change needed)
       const updateData: Record<string, unknown> = {
         status: newStatus,
         reviewed_by: userId,
         reviewed_at: new Date().toISOString(),
-        // Set approved_by for separation-of-duties enforcement in mark_payout_paid
-        ...(body.action === 'approve' ? { approved_by: userId } : {}),
       }
 
       if (body.reason) {
         updateData.review_notes = body.reason
-      }
-
-      // Store server-calculated amount for audit trail
-      if (calculatedEligibleAmount !== null) {
-        updateData.calculated_eligible_amount = calculatedEligibleAmount
-        updateData.submitted_amount = submittedAmount
-      }
-
-      if (fraudReviewId) {
-        updateData.fraud_review_id = fraudReviewId
       }
 
       const { error: updateError } = await supabaseAdmin
@@ -1002,18 +1039,11 @@ Deno.serve(async (req) => {
         throw new Error(`Failed to update payout: ${updateError.message}`)
       }
 
-      // Update account status based on payout action
-      let accountNewStatus: string | null = null
-      if (body.action === 'approve') {
-        accountNewStatus = 'payout_approved'
-      } else if (body.action === 'request_more_info') {
-        accountNewStatus = 'payout_under_review'
-      }
-
-      if (accountNewStatus) {
+      // request_more_info updates account to payout_under_review
+      if (body.action === 'request_more_info') {
         await supabaseAdmin
           .from('accounts')
-          .update({ status: accountNewStatus })
+          .update({ status: 'payout_under_review' })
           .eq('id', payout.account_id)
       }
     }

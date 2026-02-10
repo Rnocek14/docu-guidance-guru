@@ -50,25 +50,31 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // ── 1. Auth (optional — supports guest checkout) ───────
+    // ── 1. Auth (REQUIRED — no guest checkout) ────────────
     const authHeader = req.headers.get('Authorization')
-    let userId: string | null = null
-    let userEmail: string | null = null
-
-    if (authHeader?.startsWith('Bearer ')) {
-      const supabase = createClient(
-        Deno.env.get('SUPABASE_URL')!,
-        Deno.env.get('SUPABASE_ANON_KEY')!,
-        { global: { headers: { Authorization: authHeader } } }
-      )
-
-      const token = authHeader.replace('Bearer ', '')
-      const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token)
-      if (!claimsError && claimsData?.claims?.sub) {
-        userId = claimsData.claims.sub as string
-        userEmail = (claimsData.claims.email as string) || null
-      }
+    if (!authHeader?.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Authentication required' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    )
+
+    const { data: userData, error: userError } = await supabase.auth.getUser()
+    if (userError || !userData?.user) {
+      return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const userId = userData.user.id
+    const userEmail = userData.user.email || null
 
     // ── 2. Parse & validate request ─────────────────────────
     const body = await req.json()
@@ -117,7 +123,13 @@ Deno.serve(async (req) => {
     }
 
     // ── 4. Create checkout session ──────────────────────────
-    const origin = req.headers.get('origin') || 'https://id-preview--670d7a23-850f-41f2-bb87-32a472cdcbc3.lovable.app'
+    const origin = req.headers.get('origin')
+    if (!origin) {
+      return new Response(JSON.stringify({ error: 'Missing Origin header' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
@@ -125,7 +137,7 @@ Deno.serve(async (req) => {
       line_items: [{ price: tier.priceId, quantity: 1 }],
       mode: 'payment',
       metadata: {
-        user_id: userId || 'guest',
+        user_id: userId,
         tier_id: tierId,
         account_size: String(tier.accountSize),
         entry_fee: String(tier.entryFee),
@@ -135,7 +147,7 @@ Deno.serve(async (req) => {
       },
       payment_intent_data: {
         metadata: {
-          user_id: userId || 'guest',
+          user_id: userId,
           tier_id: tierId,
         },
       },
