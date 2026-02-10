@@ -54,10 +54,22 @@ export function HeroDashboardPreview() {
             <div className="text-[10px] text-muted-foreground">Here's an overview of your trading challenge progress.</div>
           </div>
 
-          {/* Phase indicator pill */}
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/5 px-2.5 py-1 text-[10px] font-medium text-primary">
-            <Target className="h-3 w-3" />
-            Evaluation Phase · $100K Account
+          {/* Phase indicator — matches real AccountPhaseIndicator */}
+          <div className="rounded-lg border border-primary/30 bg-primary/10 p-2.5">
+            <div className="flex items-start gap-2">
+              <div className="rounded-full bg-primary/20 p-1.5">
+                <Target className="h-3.5 w-3.5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-semibold text-primary">Challenge Phase</span>
+                  <span className="text-[8px] px-1.5 py-0.5 rounded bg-primary/20 text-primary border border-primary/30 font-medium">Evaluation</span>
+                </div>
+                <div className="text-[9px] text-muted-foreground mt-0.5">
+                  Hit your 10% performance target to advance.
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* 4 stat cards — matches real layout */}
@@ -141,15 +153,15 @@ export function HeroDashboardPreview() {
                   <div className="grid grid-cols-3 gap-1 text-center">
                     <div>
                       <div className="text-xs font-bold font-mono">2.41</div>
-                      <div className="text-[8px] text-muted-foreground">Profit Factor</div>
+                      <div className="text-[8px] text-muted-foreground">Daily Profit Factor</div>
                     </div>
                     <div>
                       <div className="text-xs font-bold font-mono text-success">+$625</div>
-                      <div className="text-[8px] text-muted-foreground">Avg Win</div>
+                      <div className="text-[8px] text-muted-foreground">Avg Win Day</div>
                     </div>
                     <div>
                       <div className="text-xs font-bold font-mono text-destructive">-$340</div>
-                      <div className="text-[8px] text-muted-foreground">Avg Loss</div>
+                      <div className="text-[8px] text-muted-foreground">Avg Loss Day</div>
                     </div>
                   </div>
                 </div>
