@@ -1,179 +1,79 @@
 
+# Trader Dashboard: Mock Data + Enhanced UI
 
-# Customer-Facing Overhaul: Competitive Parity Plan
+## Overview
+Seed realistic mock data for rnocek14@gmail.com and enhance the trader dashboard to be genuinely impressive — equity curve chart, better stats, and a polished experience that doubles as a real product screenshot for the hero image.
 
-## The Problem
+## What the user currently sees
+- Empty dashboard with a "Start Your Evaluation" card (no accounts, trades, or payouts exist)
+- User exists with `trader` + `admin` roles, profile name "Riley Nocek"
 
-Your current site looks like an internal admin tool, not a product people buy. Comparing to Tradeify, Alpha Futures, and Funded Futures Family, you're missing every element that converts a visitor into a paying customer.
+## Step 1: Seed Mock Data via SQL Migration
 
-### Gap Analysis: What Competitors Have That You Don't
+Insert realistic trading data for user `65c43a0a-7182-448f-9753-ed9818030602`:
 
-| Feature | Tradeify | Alpha Futures | FFF | You |
-|---------|----------|--------------|-----|-----|
-| High-impact landing page with hero imagery | Yes | Yes | Yes | Bare minimum |
-| Pricing table with rules comparison | Yes (interactive) | Yes (tabbed) | Yes (multi-plan tabs) | Hidden in checkout only |
-| "How it Works" 3-step flow | Yes | Yes | Yes | No |
-| Social proof (Trustpilot, payout totals) | Yes ($110M+) | Yes ($25M+) | Yes ($14M+) | No |
-| FAQ / Rules page | Yes | Yes | Yes | No |
-| Promo/discount banner | Yes | Yes | Yes | No |
-| Payout proof / certificates | Yes (carousel) | Yes (testimonials) | Yes (photos) | No |
-| Trader dashboard with clear account status | Basic | Yes | Yes | Functional but plain |
-| "Start Evaluation" purchase flow from landing page | Seamless | Seamless | Seamless | Exists but disconnected |
-| Dark theme (trading terminal feel) | Yes | Yes | Yes | Supported but landing is light |
+**Account** (evaluation phase, actively trading, doing well):
+- Cohort: "Standard Challenge" (`30c85b00-c613-4d33-83e5-c5af8a8ea6d5`)
+- Starting balance: $100,000
+- Current balance: $107,450
+- Highest balance: $108,200
+- Total P&L: +$7,450 (7.45% — close to the 10% target)
+- 12 trading days (past the 5-day minimum)
+- Daily P&L: +$320
+- Status: `active`
+- Rule snapshot frozen from cohort
 
-## Implementation Plan
+**Trades** (~25 realistic closed trades over 12 days):
+- Mix of ES, NQ, CL futures
+- Varied position sizes (1-4 contracts)
+- ~65% win rate, realistic P&L distribution
+- Spread across the last 3 weeks
+- 1 open position (ES, entered today)
 
-This is broken into 4 workstreams, ordered by impact. Each can be done incrementally.
+This gives the dashboard rich data to display without needing to touch any edge functions or RPCs.
 
----
+## Step 2: Add Equity Curve Chart to Trader Dashboard
 
-### Workstream 1: Landing Page Rebuild (Highest Impact)
+Create a new `EquityCurveChart` component using Recharts (already installed). It will:
+- Query closed trades for the active account, sorted by `closed_at`
+- Compute a running cumulative P&L series (starting from `starting_balance`)
+- Render an `AreaChart` with gradient fill (green when above start, following existing chart patterns from admin pages)
+- Show the starting balance as a reference line
+- Display in the main dashboard between the stats grid and the progress section
 
-**Goal:** A landing page that looks like a real product, not a placeholder.
+## Step 3: Enhance the Dashboard Layout
 
-#### 1a. New Hero Section
-- Dark gradient background (use your existing dark mode palette)
-- Bold headline: your existing "Simulated Trading Evaluation" messaging
-- Key differentiators as bullet badges (like Tradeify's "Daily Payouts / No Consistency / EOD Drawdown")
-- Primary CTA: "Start Your Evaluation" linking to the pricing section
-- Secondary CTA: "Sign In" for returning users
-- Social proof placeholder row (Trustpilot widget slot, payout counter slot)
+Current layout: phase indicator, payout readiness (PA only), 4 stat cards, 2 progress cards, account status card.
 
-#### 1b. "How It Works" Section
-A 3-step visual flow (matches every competitor):
-1. **Choose Your Plan** -- Pick your simulated account size
-2. **Pass the Evaluation** -- Meet the profit target within the rules
-3. **Get Paid** -- Request your performance-based reward
+Enhanced layout:
+1. Welcome + phase indicator (unchanged)
+2. **4 stat cards** (unchanged — balance, P&L, drawdown, trading days)
+3. **NEW: Equity curve chart** (full-width, prominent)
+4. **2 progress cards** (profit target + drawdown monitor — unchanged)
+5. Account status card (unchanged)
 
-Each step gets an icon, short description, and a connecting visual line/arrow.
+## Step 4: Replace Fake Hero Image
 
-#### 1c. Pricing Section (on the landing page, not just checkout)
-- Interactive tier selector (Starter / Pro / Elite) showing your existing 3 tiers
-- Each tier shows: price, account size, profit target, max drawdown, payout split, lifetime cap, reset fee
-- Rules comparison table below the cards
-- "Most Popular" badge on Pro
-- CTA button on each card goes directly to checkout with that tier pre-selected
-- Regulatory disclaimer text at the bottom of the section
+Remove the AI-generated `hero-dashboard.jpg` and instead:
+- Remove the `<img>` from Hero.tsx
+- Remove the import and the image file itself
+- The landing page returns to the clean text-only hero (which looked great before)
 
-#### 1d. "Why Choose Us" / Differentiators Section
-- Frozen rules (no mid-challenge changes)
-- Human-in-the-loop (AI never auto-denies)
-- Full audit trail / transparency
-- Performance-based rewards with clear caps
+Alternatively: once the dashboard is live with real data, take an actual screenshot and use that. For now, remove the fake.
 
-#### 1e. FAQ Section
-Collapsible accordion with the top 8-10 questions:
-- "Is this real trading?" (No -- simulated environment)
-- "How do payouts work?" (Performance-based rewards, not withdrawals)
-- "What happens if I breach a rule?" (Human review, not auto-fail)
-- "Can rules change during my challenge?" (No -- frozen at start)
-- "What platforms can I use?" (Currently manual entry, broker integration coming)
-- "What's the reset fee?" ($99)
-- "What's the lifetime cap?" (Explain multiplier)
-- "How fast are payouts?" (TBD -- placeholder)
+## Files Changed
 
-#### 1f. Footer
-- Mandatory sim-trading disclaimer (you already have this)
-- Links: Terms, Privacy, FAQ, Contact
-- Copyright
+| File | Change |
+|------|--------|
+| SQL migration | Seed account + 25 trades for rnocek14 |
+| `src/components/trader/EquityCurveChart.tsx` | **New** — Recharts area chart component |
+| `src/pages/trader/TraderDashboard.tsx` | Add equity curve below stat cards |
+| `src/components/landing/Hero.tsx` | Remove fake hero image |
+| `src/assets/hero-dashboard.jpg` | **Delete** |
 
----
+## Technical Notes
 
-### Workstream 2: Dedicated Pages
-
-#### 2a. Rules Page (`/rules`)
-A standalone page explaining all evaluation rules clearly:
-- Evaluation phase rules (profit target, drawdown, min days, position sizing)
-- Performance phase rules (payout eligibility, cooling period, caps)
-- Table comparing rules across the 3 tiers
-- Links back to pricing/checkout
-
-#### 2b. Enhanced Checkout Flow
-The existing checkout page is solid but needs:
-- URL support for pre-selected tier (`/checkout?tier=pro`)
-- Tier cards should show rule details inline (not just features list)
-- Add a "Back to Plans" link that goes to the landing page pricing section
-
----
-
-### Workstream 3: Trader Dashboard Polish
-
-#### 3a. Empty State Improvement
-When a trader has no accounts, instead of "Contact support," show:
-- "Start Your First Evaluation" card with a CTA to `/checkout`
-- Brief explanation of what happens after purchase
-
-#### 3b. Account Card Enhancements
-- Add a visual progress ring or bar for profit target completion
-- Show days remaining more prominently
-- Color-code drawdown proximity to limit (green/yellow/red)
-
-#### 3c. Navigation Polish
-- Add a "Buy New Account" link in the trader sidebar
-- Link back to the landing page from the dashboard logo
-
----
-
-### Workstream 4: Design System & Polish
-
-#### 4a. Dark-First Landing Page
-- The landing page should default to dark mode (trading terminal aesthetic) regardless of system preference
-- Use the existing dark mode CSS variables
-- Add subtle gradient backgrounds and glow effects for visual polish
-
-#### 4b. Component Additions
-New reusable components needed:
-- `StepCard` -- for the "How it Works" section
-- `PricingTable` -- interactive tier comparison with rules
-- `FAQAccordion` -- collapsible Q&A using the existing Accordion primitive
-- `SocialProofBar` -- placeholder for Trustpilot + payout counter
-- `PromoBar` -- dismissible top banner for discounts (future use)
-
----
-
-## Technical Details
-
-### New Files to Create
-```text
-src/pages/Index.tsx              -- Complete rewrite (landing page)
-src/pages/Rules.tsx              -- New rules page
-src/components/landing/Hero.tsx
-src/components/landing/HowItWorks.tsx
-src/components/landing/PricingSection.tsx
-src/components/landing/Differentiators.tsx
-src/components/landing/FAQ.tsx
-src/components/landing/Footer.tsx
-src/components/landing/SocialProofBar.tsx
-```
-
-### Files to Modify
-```text
-src/App.tsx                      -- Add /rules route
-src/pages/Checkout.tsx           -- Support ?tier= query param
-src/pages/trader/TraderDashboard.tsx  -- Improve empty state
-src/pages/trader/TraderAccounts.tsx   -- Improve empty state + CTA
-src/components/layout/DashboardLayout.tsx -- Add "Buy Account" nav item
-```
-
-### No Backend Changes Required
-All changes are frontend-only. Pricing data is already hardcoded in the checkout page and will be shared via a constants file.
-
-### Routing Updates
-| Route | Page |
-|-------|------|
-| `/` | Rebuilt landing page |
-| `/rules` | New rules page |
-| `/checkout?tier=pro` | Existing checkout with pre-selection |
-
----
-
-## Execution Order
-
-1. **Landing page rebuild** (Hero + Pricing + How It Works + FAQ + Footer) -- this is the "money page"
-2. **Checkout pre-selection** support
-3. **Trader dashboard empty states** with purchase CTA
-4. **Rules page**
-5. **Design polish** (dark theme, gradients, animations)
-
-This gets you from "internal tool" to "product someone would buy" in one focused sprint. No backend changes, no new dependencies, just making the existing product sellable.
-
+- The equity curve uses the same `ChartContainer` / `ChartConfig` pattern already established in admin charts
+- Trade data is computed client-side from the existing `trades` table query (no new RPC needed)
+- The cumulative P&L is calculated by sorting trades by `closed_at` and running a prefix sum
+- No schema changes required — only INSERT statements for mock data
