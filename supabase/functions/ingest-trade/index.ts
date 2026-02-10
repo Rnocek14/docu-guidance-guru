@@ -269,7 +269,7 @@ Deno.serve(async (req) => {
         const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(rawBody))
         const rawHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('')
 
-        await supabase.from('broker_payload_samples').insert({
+        await supabase.from('broker_payload_samples').upsert({
           broker: brokerId,
           request_id: requestId,
           raw_body: rawBody,
@@ -280,7 +280,7 @@ Deno.serve(async (req) => {
             user_agent: req.headers.get('user-agent'),
           },
           notes: 'auto-captured for schema discovery',
-        }).catch(e => console.error('Payload capture insert error:', e))
+        }, { onConflict: 'raw_hash', ignoreDuplicates: true }).catch(() => {})
       }
     } catch { /* capture is best-effort, never block ingestion */ }
 
