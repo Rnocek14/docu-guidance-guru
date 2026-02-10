@@ -9,13 +9,16 @@ import { BreachExplainer } from '@/components/trader/BreachExplainer';
 import { ConsistencyBestDayCard } from '@/components/trader/ConsistencyBestDayCard';
 import { ConsistencyProfitableDaysCard } from '@/components/trader/ConsistencyProfitableDaysCard';
 import { ReconciliationHistory } from '@/components/risk/ReconciliationHistory';
+import { EquityCurveChart } from '@/components/trader/EquityCurveChart';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ArrowLeft, DollarSign } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ArrowLeft, DollarSign, CheckCircle2, XCircle, Download } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Account, Violation } from '@/lib/types';
+import { format } from 'date-fns';
 
 interface RuleSnapshot {
   cohort_id: string;
@@ -81,6 +84,22 @@ export default function AccountDetails() {
 
       if (error) throw error;
       return data as Violation[];
+    },
+    enabled: !!id,
+  });
+
+  // Fetch daily stats for day-by-day breakdown
+  const { data: dailyStats } = useQuery({
+    queryKey: ['account-daily-stats', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('account_daily_stats')
+        .select('*')
+        .eq('account_id', id)
+        .order('trading_day', { ascending: false });
+
+      if (error) throw error;
+      return data;
     },
     enabled: !!id,
   });
@@ -205,8 +224,62 @@ export default function AccountDetails() {
           <BreachExplainer violations={violations} accountStatus={account.status} />
         )}
 
+        {/* Equity Curve */}
+        {ruleSnapshot && (
+          <EquityCurveChart
+            accountId={account.id}
+            startingBalance={account.starting_balance}
+            maxDrawdownPct={ruleSnapshot.max_total_drawdown_percent}
+            profitTargetPct={ruleSnapshot.profit_target_percent}
+            minTradingDays={ruleSnapshot.min_trading_days}
+          />
+        )}
+
         {/* Rule Snapshot */}
         <RuleSnapshotCard ruleSnapshot={ruleSnapshot} />
+
+        {/* Compliance Snapshot */}
+        {ruleSnapshot && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Compliance Snapshot</CardTitle>
+              <CardDescription>Pass/fail status for each rule — as of now</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  {
+                    label: `Profit Target (${ruleSnapshot.profit_target_percent}%)`,
+                    met: ((account.total_pnl / account.starting_balance) * 100) >= ruleSnapshot.profit_target_percent,
+                  },
+                  {
+                    label: `Min Trading Days (${ruleSnapshot.min_trading_days})`,
+                    met: account.trading_days_count >= ruleSnapshot.min_trading_days,
+                  },
+                  {
+                    label: `Max Drawdown (${ruleSnapshot.max_total_drawdown_percent}%)`,
+                    met: account.highest_balance > 0
+                      ? ((account.highest_balance - account.current_balance) / account.highest_balance * 100) <= ruleSnapshot.max_total_drawdown_percent
+                      : true,
+                  },
+                  {
+                    label: `Daily Loss Limit (${ruleSnapshot.max_daily_loss_percent}%)`,
+                    met: !(violations?.some(v => v.rule_type === 'max_daily_loss')),
+                  },
+                ].map((rule) => (
+                  <div key={rule.label} className="flex items-center gap-2 text-sm rounded-lg border border-border p-3">
+                    {rule.met ? (
+                      <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-destructive shrink-0" />
+                    )}
+                    <span className={rule.met ? 'text-foreground' : 'text-destructive font-medium'}>{rule.label}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Progress Gauges */}
         {ruleSnapshot && (
@@ -240,6 +313,81 @@ export default function AccountDetails() {
               />
             )}
           </div>
+        )}
+
+        {/* Day-by-Day Summary */}
+        {dailyStats && dailyStats.length > 0 && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg">Day-by-Day Summary</CardTitle>
+                  <CardDescription>Daily P&L breakdown from account_daily_stats</CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => {
+                    const csv = [
+                      'Date,Net P&L,Gross P&L,Commissions,Trades,Won,Lost,Winning Day',
+                      ...dailyStats.map(d =>
+                        `${d.trading_day},${d.net_pnl},${d.gross_pnl},${d.commissions},${d.trade_count},${d.winning_trades},${d.losing_trades},${d.is_winning_day}`
+                      ),
+                    ].join('\n');
+                    const blob = new Blob([csv], { type: 'text/csv' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `account-${account.account_number}-daily-stats.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export CSV
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="max-h-[400px] overflow-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead className="text-right">Net P&L</TableHead>
+                      <TableHead className="text-right">Trades</TableHead>
+                      <TableHead className="text-right">Won</TableHead>
+                      <TableHead className="text-right">Lost</TableHead>
+                      <TableHead className="text-center">Result</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dailyStats.map((day) => (
+                      <TableRow key={day.id}>
+                        <TableCell className="font-mono text-sm">
+                          {format(new Date(day.trading_day + 'T00:00:00'), 'MMM d, yyyy')}
+                        </TableCell>
+                        <TableCell className={`text-right font-mono ${Number(day.net_pnl) >= 0 ? 'text-success' : 'text-destructive'}`}>
+                          {Number(day.net_pnl) >= 0 ? '+' : ''}${Number(day.net_pnl).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">{day.trade_count}</TableCell>
+                        <TableCell className="text-right text-success">{day.winning_trades}</TableCell>
+                        <TableCell className="text-right text-destructive">{day.losing_trades}</TableCell>
+                        <TableCell className="text-center">
+                          {day.is_winning_day ? (
+                            <Badge variant="secondary" className="text-success">Win</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-destructive">Loss</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* Account Timeline */}

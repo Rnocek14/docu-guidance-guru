@@ -14,6 +14,7 @@ import { PayoutReadinessCard } from '@/components/trader/PayoutReadinessCard';
 import { EquityCurveChart } from '@/components/trader/EquityCurveChart';
 import { RuleHealthCard } from '@/components/trader/RuleHealthCard';
 import { WhatsNextCard } from '@/components/trader/WhatsNextCard';
+import { SafeDayPanel } from '@/components/trader/SafeDayPanel';
 
 export default function TraderDashboard() {
   const { user } = useAuth();
@@ -206,10 +207,11 @@ export default function TraderDashboard() {
               minTradingDays={activeAccount.cohort?.min_trading_days ?? 5}
             />
 
-            {/* Rule Health + What's Next */}
-            <div className="grid gap-4 md:grid-cols-2">
+            {/* Rule Health + What's Next + Safe Day */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <RuleHealthCard account={activeAccount} />
               <WhatsNextCard account={activeAccount} />
+              <SafeDayPanel account={activeAccount} />
             </div>
 
             {/* Progress section */}

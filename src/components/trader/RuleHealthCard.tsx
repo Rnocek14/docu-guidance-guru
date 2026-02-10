@@ -48,11 +48,11 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
       ? Math.min(100, (Math.abs(worstDayPnl) / dailyLossLimit) * 100)
       : 0;
 
-    // Discipline metrics: profit factor + avg win/loss
+    // Discipline metrics: profit factor + avg win/loss (daily-based)
     const winningDays = dailyStats?.filter((d) => d.is_winning_day) ?? [];
     const totalDays = dailyStats?.length ?? account.trading_days_count;
 
-    // Gross wins and gross losses from daily stats
+    // Daily Profit Factor (labeled honestly — trade-level PF needs per-trade data)
     const grossWins = dailyStats?.reduce((sum, d) => {
       const pnl = Number(d.net_pnl);
       return pnl > 0 ? sum + pnl : sum;
@@ -179,7 +179,7 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <div className="text-lg font-bold font-mono">{formatPF(analysis.profitFactor)}</div>
-                <div className="text-[11px] text-muted-foreground">Profit Factor</div>
+                <div className="text-[11px] text-muted-foreground" title="Computed from daily net P&L, not per-trade">Daily Profit Factor</div>
               </div>
               <div>
                 <div className="text-lg font-bold font-mono text-success">

@@ -57,7 +57,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
           ⚡ {point.event}
         </div>
       )}
-      <div className="text-muted-foreground/60 mt-0.5" title={point.iso}>
+      <div className="text-muted-foreground/60 mt-0.5" title={point.iso || undefined}>
         {point.fullDate || point.date}
       </div>
     </div>
@@ -184,7 +184,12 @@ export function EquityCurveChart({ accountId, startingBalance, maxDrawdownPct = 
               <TrendingUp className="h-5 w-5 text-primary" />
               Equity Curve
             </CardTitle>
-            <CardDescription>Cumulative balance — each point is a closed trade</CardDescription>
+            <CardDescription>
+              Cumulative balance — each point is a closed trade.{' '}
+              <span className="text-muted-foreground/50" title="Drawdown is measured from peak equity, not starting balance">
+                Drawdown computed from peak equity.
+              </span>
+            </CardDescription>
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold">${currentBalance.toLocaleString()}</div>
