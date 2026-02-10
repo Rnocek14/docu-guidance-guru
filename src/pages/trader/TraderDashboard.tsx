@@ -15,6 +15,7 @@ import { EquityCurveChart } from '@/components/trader/EquityCurveChart';
 import { RuleHealthCard } from '@/components/trader/RuleHealthCard';
 import { WhatsNextCard } from '@/components/trader/WhatsNextCard';
 import { SafeDayPanel } from '@/components/trader/SafeDayPanel';
+import { ConsistencyPreviewCard } from '@/components/trader/ConsistencyPreviewCard';
 
 export default function TraderDashboard() {
   const { user } = useAuth();
@@ -213,6 +214,9 @@ export default function TraderDashboard() {
               <WhatsNextCard account={activeAccount} />
               <SafeDayPanel account={activeAccount} />
             </div>
+
+            {/* Consistency Preview (Challenge phase only) */}
+            <ConsistencyPreviewCard account={activeAccount} />
 
             {/* Progress section */}
             <div className="grid gap-4 md:grid-cols-2">

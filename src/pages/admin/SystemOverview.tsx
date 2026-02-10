@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { BreakerStatusPanel } from '@/components/admin/BreakerStatusPanel';
 import { CompoundImpactPanel } from '@/components/admin/CompoundImpactPanel';
+import { PassRateBreakEvenCard } from '@/components/admin/PassRateBreakEvenCard';
 import {
   Shield,
   AlertTriangle,
@@ -433,11 +434,12 @@ export default function SystemOverview() {
           </div>
         )}
 
-        {/* Circuit Breaker + Compound Impact */}
+        {/* Circuit Breaker + Compound Impact + Pass Rate */}
         <div className="grid gap-6 md:grid-cols-2">
           <BreakerStatusPanel />
           <CompoundImpactPanel />
         </div>
+        <PassRateBreakEvenCard />
 
         {/* Account State Distribution */}
         <Card>
