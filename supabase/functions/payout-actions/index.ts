@@ -471,13 +471,14 @@ Deno.serve(async (req) => {
           const daysRemaining = Math.ceil(throttle.eligibility_delay_bonus_days - daysSinceRequest)
           return new Response(
             JSON.stringify({
+              code: 'RISK_THROTTLE_DELAY_ACTIVE',
               error: 'Payout approval delayed by risk throttle',
               throttle_state: throttle.state,
               bonus_delay_days: throttle.eligibility_delay_bonus_days,
               days_remaining: daysRemaining,
               hint: `Extended verification period active (${throttle.state}). Approval available in ~${daysRemaining} day(s).`,
             }),
-            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
       }
