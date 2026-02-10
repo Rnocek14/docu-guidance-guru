@@ -462,7 +462,13 @@ Deno.serve(async (req) => {
         .single()
 
       if (throttle && throttle.eligibility_delay_bonus_days > 0) {
-        // Check if the payout request is old enough to satisfy the bonus delay
+        // Guard: requested_at must exist for date math
+        if (!payout.requested_at) {
+          return new Response(
+            JSON.stringify({ code: 'MISSING_REQUESTED_AT', error: 'Payout has no requested_at timestamp' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
         const requestedAt = new Date(payout.requested_at)
         const now = new Date()
         const daysSinceRequest = (now.getTime() - requestedAt.getTime()) / (1000 * 60 * 60 * 24)
