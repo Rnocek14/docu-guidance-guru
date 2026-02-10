@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -77,45 +77,26 @@ const CHECK_LABELS: Record<string, string> = {
 export default function AdminReadiness() {
   const [deep, setDeep] = useState(false);
 
-  const { data, isLoading, error, refetch, isRefetching } = useQuery({
+  const fetchReadiness = async (deepMode: boolean): Promise<ReadinessResponse> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    const res = await fetch(
+      `${SUPABASE_FUNCTIONS_URL}/get-admin-readiness?deep=${deepMode ? '1' : '0'}`,
+      { headers: { Authorization: `Bearer ${session.access_token}` } }
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<ReadinessResponse>;
+  };
+
+  const { data: activeData, isLoading: activeLoading, error, refetch, isRefetching } = useQuery({
     queryKey: ['admin-readiness', deep],
-    queryFn: async () => {
-      // Fix #6: use supabase.functions.invoke (consistent with rest of codebase)
-      const { data, error } = await supabase.functions.invoke('get-admin-readiness', {
-        headers: { 'Content-Type': 'application/json' },
-        body: null,
-        method: 'GET',
-      });
-      if (error) throw error;
-      return data as ReadinessResponse;
-    },
+    queryFn: () => fetchReadiness(deep),
     refetchInterval: 30_000,
   });
-
-  // Since supabase.functions.invoke doesn't support query params easily,
-  // we handle deep mode by invoking with the URL approach but through a consistent helper
-  const { data: deepData, isLoading: deepLoading, refetch: refetchDeep } = useQuery({
-    queryKey: ['admin-readiness-deep'],
-    queryFn: async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Not authenticated');
-      const baseUrl = (supabase as any).supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
-      const res = await fetch(
-        `${baseUrl}/functions/v1/get-admin-readiness?deep=1`,
-        { headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' } }
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${res.status}`);
-      }
-      return res.json() as Promise<ReadinessResponse>;
-    },
-    enabled: deep,
-    refetchInterval: deep ? 30_000 : false,
-  });
-
-  const activeData = deep ? deepData : data;
-  const activeLoading = deep ? deepLoading : isLoading;
 
   if (error) {
     return (
@@ -142,14 +123,11 @@ export default function AdminReadiness() {
           <div className="flex items-center gap-2">
             <Button
               variant={deep ? 'default' : 'outline'} size="sm"
-              onClick={() => {
-                setDeep(!deep);
-                if (!deep) refetchDeep();
-              }}
+              onClick={() => setDeep(!deep)}
             >
               {deep ? 'Deep Mode ON' : 'Deep Verify'}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => deep ? refetchDeep() : refetch()} disabled={isRefetching}>
+            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isRefetching}>
               <RefreshCw className={`h-4 w-4 mr-1.5 ${isRefetching ? 'animate-spin' : ''}`} />
               Refresh
             </Button>

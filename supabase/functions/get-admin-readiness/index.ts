@@ -238,12 +238,12 @@ Deno.serve(async (req) => {
         detail: matchingCohort ? `${matchingCohort.name} (${matchingCohort.cohort_phase})` : 'No active cohort',
       }
 
-      // Server gate — for live tiers, all must pass; for upcoming, it must be blocked
+      // Server gate — for live tiers, all must pass; for upcoming, label as expected (not verified)
       const gateOk = cfg.isLive && stripeOk && !verifyUnavailable
       const serverGateOk: CheckResult = {
-        ok: cfg.isLive ? gateOk : true, // Upcoming tiers: "ok" means "correctly blocked"
+        ok: cfg.isLive ? gateOk : true,
         detail: !cfg.isLive
-          ? 'Server returns TIER_NOT_LIVE (correct)'
+          ? 'Expected: TIER_NOT_LIVE (not probed)'
           : verifyUnavailable ? 'Verify unavailable — gate locked'
           : gateOk ? 'Gate open' : 'Blocked',
         verifyUnavailable: cfg.isLive ? verifyUnavailable : false,
