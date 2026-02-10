@@ -1,10 +1,10 @@
-import { Shield, FileText, Eye, Lock, Check } from 'lucide-react';
+import { Shield, FileText, Eye, Lock } from 'lucide-react';
 
 const stats = [
-  { icon: Shield, label: 'Simulated Environment', value: '100%' },
-  { icon: FileText, label: 'Audit Trail Coverage', value: 'Every Trade' },
-  { icon: Eye, label: 'Human-Reviewed Decisions', value: '100%' },
-  { icon: Lock, label: 'Rules Changed Mid-Eval', value: 'Never' },
+  { icon: Shield, label: 'Simulated Environment', value: 'Fully Sim' },
+  { icon: FileText, label: 'Key Decisions', value: 'Audit Logged' },
+  { icon: Eye, label: 'Flagged Accounts', value: 'Human Reviewed' },
+  { icon: Lock, label: 'Rules at Purchase', value: 'Locked' },
 ];
 
 export function SocialProofBar() {

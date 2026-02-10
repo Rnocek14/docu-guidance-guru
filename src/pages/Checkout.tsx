@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ArrowLeft } from "lucide-react";
@@ -41,6 +41,14 @@ export default function Checkout() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const tier = CHECKOUT_TIERS.find((t) => t.id === selectedTier)!;
+
+  // Sync state when URL changes (back/forward nav, manual edits)
+  useEffect(() => {
+    const t = searchParams.get("tier");
+    if (t && CHECKOUT_TIERS.some((x) => x.id === t) && t !== selectedTier) {
+      setSelectedTier(t);
+    }
+  }, [searchParams]);
 
   const handleSelectTier = (id: string) => {
     setSelectedTier(id);
@@ -143,8 +151,8 @@ export default function Checkout() {
           </Button>
 
           <p className="text-xs text-muted-foreground text-center">
-            Secure payment processed by Stripe. You can request a refund within
-            48 hours if you haven't placed any trades.
+            Secure payment processed by Stripe. Refund eligibility is subject to
+            our <Link to="/rules" className="underline hover:text-foreground">refund policy</Link>.
           </p>
         </section>
       </main>

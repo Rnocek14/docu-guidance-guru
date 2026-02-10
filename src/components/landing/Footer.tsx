@@ -23,6 +23,9 @@ export function Footer() {
             <Link to="/login" className="hover:text-foreground transition-colors">
               Sign In
             </Link>
+            <a href="mailto:support@riskanalytics.com" className="hover:text-foreground transition-colors">
+              Contact
+            </a>
           </nav>
         </div>
         <div className="mt-8 pt-6 border-t border-border text-center space-y-2">
