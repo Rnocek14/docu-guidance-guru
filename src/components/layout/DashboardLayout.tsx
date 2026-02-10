@@ -90,7 +90,7 @@ export function DashboardLayout({ children, title, navItems }: DashboardLayoutPr
           <div className="flex items-center justify-between h-16 px-4 border-b border-sidebar-border">
             <Link to="/dashboard" className="flex items-center gap-2">
               <Shield className="h-8 w-8 text-sidebar-primary" />
-              <span className="font-bold text-sidebar-foreground">RiskAnalytics</span>
+              <span className="font-bold text-sidebar-foreground">Meridian</span>
             </Link>
             <Button
               variant="ghost"

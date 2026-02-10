@@ -86,7 +86,7 @@ export default function Signup() {
         <div>
           <div className="flex items-center gap-3 text-primary-foreground">
             <Shield className="h-10 w-10" />
-            <span className="text-2xl font-bold">RiskAnalytics</span>
+            <span className="text-2xl font-bold">Meridian</span>
           </div>
         </div>
         
@@ -119,7 +119,7 @@ export default function Signup() {
         </div>
 
         <p className="text-sm text-primary-foreground/60">
-          © 2024 RiskAnalytics. Detection, Not Domination.
+          © 2024 Meridian. Your fixed point in trading.
         </p>
       </div>
 
@@ -129,7 +129,7 @@ export default function Signup() {
           <CardHeader className="space-y-1">
             <div className="flex items-center gap-2 lg:hidden mb-4">
               <Shield className="h-8 w-8 text-primary" />
-              <span className="text-xl font-bold">RiskAnalytics</span>
+              <span className="text-xl font-bold">Meridian</span>
             </div>
             <CardTitle className="text-2xl">Create an account</CardTitle>
             <CardDescription>

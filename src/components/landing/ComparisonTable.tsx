@@ -94,7 +94,7 @@ export function ComparisonTable() {
               <tr className="border-b border-border">
                 <th className="text-left py-3 px-4 font-semibold text-foreground">Feature</th>
                 <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Typical Prop Firms</th>
-                <th className="text-left py-3 px-4 font-semibold text-primary">RiskAnalytics</th>
+                <th className="text-left py-3 px-4 font-semibold text-primary">Meridian</th>
               </tr>
             </thead>
             <tbody>

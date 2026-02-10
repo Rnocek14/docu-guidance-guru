@@ -39,7 +39,7 @@ export default function Index() {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Shield className="h-7 w-7 text-primary" />
-            <span className="text-lg font-bold">RiskAnalytics</span>
+            <span className="text-lg font-bold">Meridian</span>
           </div>
           <nav className="hidden md:flex items-center gap-6 text-sm text-muted-foreground">
             <a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a>

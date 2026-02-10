@@ -37,7 +37,7 @@ export const COMPARISON_HEADER = {
 
 // ── Hero section ────────────────────────────────────────────────────────
 
-export const HERO_TAGLINE = 'Detection, Not Domination.';
+export const HERO_TAGLINE = 'Your Fixed Point in Trading.';
 
 export const HERO_BADGES = [
   'Frozen Rules',

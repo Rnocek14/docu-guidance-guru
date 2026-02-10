@@ -65,7 +65,7 @@ export default function Rules() {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
             <Shield className="h-7 w-7 text-primary" />
-            <span className="text-lg font-bold">RiskAnalytics</span>
+            <span className="text-lg font-bold">Meridian</span>
           </Link>
           <Button asChild size="sm" className="gap-1.5">
             <Link to="/checkout">
