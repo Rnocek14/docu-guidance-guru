@@ -15,6 +15,22 @@ const UTM_KEY = 'ra_utm';
 const MAX_EVENT_LEN = 64;
 const MAX_PROPS_LEN = 2000;
 
+/** Exhaustive list of tracked events — prevents silent typo fragmentation. */
+export type AnalyticsEvent =
+  | 'lp_view'
+  | 'lp_click_cta'
+  | 'pricing_toggle'
+  | 'checkout_view'
+  | 'checkout_tier_select'
+  | 'checkout_disclaimer_toggle'
+  | 'checkout_click_pay'
+  | 'checkout_session_created'
+  | 'checkout_session_failed'
+  | 'payouts_view'
+  | 'payout_request_view'
+  | 'payout_blocked'
+  | 'payout_request_submitted';
+
 /** Cached auth user id — set once on first call + auth state changes. */
 let cachedUserId: string | null = null;
 let authInitialized = false;
@@ -73,7 +89,7 @@ function getUtm(): UtmParams {
  * @param event - Event name (e.g. 'checkout_view', 'lp_click_cta'). Max 64 chars.
  * @param props - Arbitrary JSON-safe properties (no PII!). Max ~2KB serialized.
  */
-export function track(event: string, props: Record<string, string | number | boolean | null> = {}): void {
+export function track(event: AnalyticsEvent, props: Record<string, string | number | boolean | null> = {}): void {
   try {
     // Guard: reject oversized or empty events
     if (!event || event.length > MAX_EVENT_LEN) return;
