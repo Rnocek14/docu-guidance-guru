@@ -11,6 +11,7 @@ export interface PricingTier {
   firstPayoutCap: number;
   splitPercent: number;
   lifetimeCapMultiple: number;
+  lifetimeCapAmount: number;
   popular?: boolean;
   features: string[];
 }

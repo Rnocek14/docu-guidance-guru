@@ -52,8 +52,8 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
           ) : (
             <>
               <RuleRow label="Payout Split" value={`${tier.splitPercent}%`} highlight />
-              <RuleRow label="First Payout Cap" value={`$${tier.firstPayoutCap}`} />
-              <RuleRow label="Lifetime Cap" value={`$${tier.lifetimeCapAmount.toLocaleString()}`} />
+              <RuleRow label="First Payout" value={`Up to $${tier.firstPayoutCap}`} />
+              <RuleRow label="Lifetime Earnings" value={`Up to ${tier.lifetimeCapMultiple}× entry`} highlight />
               <RuleRow label="Cooldown Period" value={`${tier.payoutCooldown} days`} />
               <RuleRow label="Human Review" value="For Flags" highlight />
             </>
@@ -144,9 +144,9 @@ export function PricingSection() {
 
         {/* Compliance micro-section */}
         <div className="mt-12 max-w-3xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-          {[
+        {[
             { label: 'Simulated Environment', emoji: '🎯' },
-            { label: 'Performance-Based Rewards', emoji: '💰' },
+            { label: 'Every Approved Payout Paid', emoji: '💰' },
             { label: 'Human Review for Flags', emoji: '👤' },
             { label: 'Rules Locked at Purchase', emoji: '🔒' },
           ].map(({ label, emoji }) => (
