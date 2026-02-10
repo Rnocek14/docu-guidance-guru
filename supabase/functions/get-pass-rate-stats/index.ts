@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
 
     const { data: accounts, error: accErr } = await serviceClient
       .from("accounts")
-      .select("cohort_id, status")
+      .select("cohort_id, status, updated_at")
       .in("status", ["passed", "failed_confirmed"])
       .gte("updated_at", sinceIso);
     if (accErr) throw accErr;
@@ -97,13 +97,18 @@ Deno.serve(async (req) => {
     ];
     const tierMap = new Map(knownTiers.map((t) => [t.id, { passed: 0, total: 0 }]));
 
+    let mappedAccountCount = 0;
     for (const acc of accounts ?? []) {
       const tierId = cohortToTier.get(acc.cohort_id);
       if (!tierId) continue;
+      mappedAccountCount++;
       const entry = tierMap.get(tierId)!;
       entry.total++;
       if (acc.status === "passed") entry.passed++;
     }
+
+    const resolvedAccountCount = accounts?.length ?? 0;
+    const unmappedAccountCount = resolvedAccountCount - mappedAccountCount;
 
     let sampleSizeTotal = 0;
     const tiers = knownTiers.map((t) => {
@@ -128,6 +133,9 @@ Deno.serve(async (req) => {
         unmappedCohortCount,
         unknownTierKeyCount,
         sampleSizeTotal,
+        mappedAccountCount,
+        unmappedAccountCount,
+        resolvedAccountCount,
         windowDays: 30,
         asOf: new Date().toISOString(),
       }),
