@@ -129,7 +129,9 @@ Deno.serve(async (req) => {
       }),
     })
 
-    const paBody = await paResponse.json()
+    const raw = await paResponse.text()
+    let paBody: any
+    try { paBody = JSON.parse(raw) } catch { paBody = { raw } }
 
     if (!paResponse.ok) {
       return new Response(
