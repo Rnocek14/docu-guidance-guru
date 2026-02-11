@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, CreditCard, Shield, Settings, AlertTriangle } from 'lucide-react';
+import { Users, CreditCard, Shield, Settings, AlertTriangle, TrendingUp, TrendingDown, DollarSign, Banknote } from 'lucide-react';
 import { toast } from 'sonner';
 import { DisputeRateCard } from '@/components/admin/DisputeRateCard';
 import { RiskThrottlePanel } from '@/components/admin/RiskThrottlePanel';
@@ -16,16 +16,26 @@ export default function AdminDashboard() {
   const { data: stats } = useQuery({
     queryKey: ['admin-stats'],
     queryFn: async () => {
-      const [usersRes, accountsRes, payoutsRes] = await Promise.all([
+      const [usersRes, accountsRes, payoutsRes, accountPnlRes, paidPayoutsRes, pendingPayoutsAmtRes] = await Promise.all([
         supabase.from('profiles').select('id', { count: 'exact' }),
         supabase.from('accounts').select('status', { count: 'exact' }),
         supabase.from('payouts').select('status', { count: 'exact' }).eq('status', 'pending'),
+        supabase.from('accounts').select('total_pnl, current_balance, starting_balance'),
+        supabase.from('payouts').select('amount').in('status', ['paid', 'paid_confirmed']),
+        supabase.from('payouts').select('amount').eq('status', 'pending'),
       ]);
+
+      const totalPnl = (accountPnlRes.data || []).reduce((sum, a) => sum + Number(a.total_pnl || 0), 0);
+      const totalPaid = (paidPayoutsRes.data || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const totalPendingAmt = (pendingPayoutsAmtRes.data || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
       return {
         totalUsers: usersRes.count || 0,
         totalAccounts: accountsRes.count || 0,
         pendingPayouts: payoutsRes.count || 0,
+        totalPnl,
+        totalPaid,
+        totalPendingAmt,
       };
     },
   });
@@ -138,7 +148,7 @@ export default function AdminDashboard() {
         <RiskThrottlePanel />
 
         {/* Stats grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Users</CardTitle>
@@ -163,12 +173,62 @@ export default function AdminDashboard() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Aggregate P&L</CardTitle>
+              {(stats?.totalPnl ?? 0) >= 0
+                ? <TrendingUp className="h-4 w-4 text-green-500" />
+                : <TrendingDown className="h-4 w-4 text-destructive" />}
+            </CardHeader>
+            <CardContent>
+              <div className={`text-2xl font-bold ${(stats?.totalPnl ?? 0) >= 0 ? 'text-green-500' : 'text-destructive'}`}>
+                ${(stats?.totalPnl ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <p className="text-xs text-muted-foreground">All accounts combined</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Paid Out</CardTitle>
+              <Banknote className="h-4 w-4 text-green-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-500">
+                ${(stats?.totalPaid ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <p className="text-xs text-muted-foreground">Confirmed payouts</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Pending Payouts</CardTitle>
               <CreditCard className="h-4 w-4 text-warning" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats?.pendingPayouts || 0}</div>
-              <p className="text-xs text-muted-foreground">Awaiting approval</p>
+              <p className="text-xs text-muted-foreground">
+                ${(stats?.totalPendingAmt ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} awaiting approval
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Net Position</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const net = (stats?.totalPnl ?? 0) - (stats?.totalPaid ?? 0);
+                return (
+                  <>
+                    <div className={`text-2xl font-bold ${net >= 0 ? 'text-green-500' : 'text-destructive'}`}>
+                      ${net.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">P&L minus payouts</p>
+                  </>
+                );
+              })()}
             </CardContent>
           </Card>
         </div>
