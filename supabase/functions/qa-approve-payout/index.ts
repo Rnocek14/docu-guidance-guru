@@ -10,10 +10,14 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders })
   }
 
-  const headers = { ...corsHeaders, 'Content-Type': 'application/json' }
+  // ── Environment guard: never run in production ──
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+  const appEnv = Deno.env.get('APP_ENV') ?? ''
+  if (appEnv === 'production' || (!supabaseUrl.includes('sfxmgwkrjwuerfkqxokq') && appEnv !== 'test')) {
+    return new Response(JSON.stringify({ error: 'QA endpoint disabled in production' }), { status: 403, headers })
+  }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 

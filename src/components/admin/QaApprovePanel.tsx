@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
-import { FlaskConical, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { FlaskConical, CheckCircle2, XCircle, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface QaResult {
@@ -16,38 +17,42 @@ interface QaResult {
   before: Record<string, unknown>;
   after: Record<string, unknown>;
   payout_actions_response?: unknown;
+  error?: string;
+  details?: unknown;
 }
 
 export function QaApprovePanel() {
   const [selectedPayout, setSelectedPayout] = useState<string>('');
   const [running, setRunning] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
   const [qaResult, setQaResult] = useState<QaResult | null>(null);
 
-  // Fetch eligible SEEDV2/DEMO payouts
+  // Fetch eligible SEEDV2/DEMO payouts (client-side filter for reliability)
   const { data: eligiblePayouts } = useQuery({
     queryKey: ['qa-eligible-payouts'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('payouts')
         .select('id, status, amount, accounts!inner(account_number)')
-        .in('status', ['pending', 'under_review'])
-        .or('account_number.like.SEEDV2-%,account_number.like.DEMO-%', { referencedTable: 'accounts' });
+        .in('status', ['pending', 'under_review']);
 
       if (error) throw error;
-      return (data ?? []).map((p) => ({
-        id: p.id,
-        status: p.status,
-        amount: Number(p.amount),
-        account_number: (Array.isArray(p.accounts) ? p.accounts[0] : p.accounts)?.account_number ?? 'unknown',
-      }));
+      return (data ?? [])
+        .map((p) => {
+          const acct = Array.isArray(p.accounts) ? p.accounts[0] : p.accounts;
+          return {
+            id: p.id,
+            status: p.status,
+            amount: Number(p.amount),
+            account_number: (acct as { account_number: string })?.account_number ?? 'unknown',
+          };
+        })
+        .filter((p) => p.account_number.startsWith('SEEDV2-') || p.account_number.startsWith('DEMO-'));
     },
   });
 
   const runQaApprove = async () => {
-    if (!selectedPayout) {
-      toast.error('Select a payout first');
-      return;
-    }
+    if (!selectedPayout || !confirmed) return;
 
     setRunning(true);
     setQaResult(null);
@@ -86,6 +91,7 @@ export function QaApprovePanel() {
       toast.error('Network error: ' + String(err));
     } finally {
       setRunning(false);
+      setConfirmed(false);
     }
   };
 
@@ -101,6 +107,11 @@ export function QaApprovePanel() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="flex items-center gap-2 text-xs text-warning">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span>This will approve a real payout and transition account state. SEEDV2/DEMO accounts only.</span>
+        </div>
+
         <div className="flex items-end gap-3">
           <div className="flex-1">
             <Select value={selectedPayout} onValueChange={setSelectedPayout}>
@@ -119,28 +130,40 @@ export function QaApprovePanel() {
               </SelectContent>
             </Select>
           </div>
-          <Button onClick={runQaApprove} disabled={running || !selectedPayout} size="sm">
-            {running ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <FlaskConical className="h-4 w-4 mr-1" />}
-            Run Test
-          </Button>
         </div>
+
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="qa-confirm"
+            checked={confirmed}
+            onCheckedChange={(v) => setConfirmed(v === true)}
+          />
+          <label htmlFor="qa-confirm" className="text-xs text-muted-foreground cursor-pointer select-none">
+            I understand this will approve the payout and change account state
+          </label>
+        </div>
+
+        <Button onClick={runQaApprove} disabled={running || !selectedPayout || !confirmed} size="sm">
+          {running ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <FlaskConical className="h-4 w-4 mr-1" />}
+          Run Test
+        </Button>
 
         {qaResult && (
           <div className="space-y-2 text-sm">
             <div className="flex items-center gap-2">
               {qaResult.result === 'PASS' ? (
-                <Badge variant="default" className="bg-green-600"><CheckCircle2 className="h-3 w-3 mr-1" />PASS</Badge>
+                <Badge className="bg-primary text-primary-foreground"><CheckCircle2 className="h-3 w-3 mr-1" />PASS</Badge>
               ) : (
                 <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />FAIL</Badge>
               )}
-              <span className="text-muted-foreground">{qaResult.account_number}</span>
+              <span className="text-muted-foreground">{qaResult.account_number ?? qaResult.error}</span>
             </div>
 
             {qaResult.assertions && (
               <div className="grid grid-cols-1 gap-1 text-xs font-mono bg-muted/50 rounded p-2">
                 {Object.entries(qaResult.assertions).map(([key, val]) => (
                   <div key={key} className="flex items-center gap-2">
-                    {val ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <XCircle className="h-3 w-3 text-destructive" />}
+                    {val ? <CheckCircle2 className="h-3 w-3 text-primary" /> : <XCircle className="h-3 w-3 text-destructive" />}
                     <span>{key}</span>
                   </div>
                 ))}
