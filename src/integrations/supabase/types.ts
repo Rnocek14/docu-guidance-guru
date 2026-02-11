@@ -269,6 +269,7 @@ export type Database = {
       }
       ai_usage_log: {
         Row: {
+          ai_status: string
           completion_tokens: number
           created_at: string
           error: string | null
@@ -282,6 +283,7 @@ export type Database = {
           total_tokens: number
         }
         Insert: {
+          ai_status?: string
           completion_tokens?: number
           created_at?: string
           error?: string | null
@@ -295,6 +297,7 @@ export type Database = {
           total_tokens?: number
         }
         Update: {
+          ai_status?: string
           completion_tokens?: number
           created_at?: string
           error?: string | null
@@ -2129,6 +2132,41 @@ export type Database = {
         }
         Relationships: []
       }
+      support_email_actions: {
+        Row: {
+          action_type: string
+          actor_user_id: string | null
+          created_at: string
+          email_id: string
+          id: string
+          metadata: Json
+        }
+        Insert: {
+          action_type: string
+          actor_user_id?: string | null
+          created_at?: string
+          email_id: string
+          id?: string
+          metadata?: Json
+        }
+        Update: {
+          action_type?: string
+          actor_user_id?: string | null
+          created_at?: string
+          email_id?: string
+          id?: string
+          metadata?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_email_actions_email_id_fkey"
+            columns: ["email_id"]
+            isOneToOne: false
+            referencedRelation: "support_emails"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       support_emails: {
         Row: {
           ai_attempted_at: string | null
@@ -2141,6 +2179,8 @@ export type Database = {
           assigned_at: string | null
           assigned_to: string | null
           auto_send_blocked_reason: string | null
+          auto_send_eligible_at: string | null
+          auto_send_ready: boolean
           auto_sendable: boolean
           body_html: string | null
           body_text: string
@@ -2180,6 +2220,8 @@ export type Database = {
           assigned_at?: string | null
           assigned_to?: string | null
           auto_send_blocked_reason?: string | null
+          auto_send_eligible_at?: string | null
+          auto_send_ready?: boolean
           auto_sendable?: boolean
           body_html?: string | null
           body_text?: string
@@ -2219,6 +2261,8 @@ export type Database = {
           assigned_at?: string | null
           assigned_to?: string | null
           auto_send_blocked_reason?: string | null
+          auto_send_eligible_at?: string | null
+          auto_send_ready?: boolean
           auto_sendable?: boolean
           body_html?: string | null
           body_text?: string
@@ -2757,6 +2801,10 @@ export type Database = {
             }
             Returns: string
           }
+      get_ai_daily_token_sum: {
+        Args: { p_date?: string; p_function_name: string }
+        Returns: number
+      }
       get_cohort_account_stats: {
         Args: never
         Returns: {

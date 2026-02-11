@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { useKeyboardNavigation } from '@/hooks/use-keyboard-navigation';
 import {
   Mail, Send, Tag, CheckCircle, AlertCircle, Archive,
   User, RefreshCw, Search, Zap, Clock, Brain, Shield,
@@ -44,6 +45,13 @@ const STATUS_CONFIG: Record<string, { icon: typeof Mail; label: string }> = {
   archived: { icon: Archive, label: 'Archived' },
 };
 
+const QUICK_FILTERS = [
+  { key: 'needs_human', label: 'Needs Human', icon: AlertTriangle },
+  { key: 'review_suggested', label: 'Review', icon: Eye },
+  { key: 'ready', label: 'Ready', icon: CheckCircle },
+  { key: 'failed', label: 'Failed', icon: AlertCircle },
+] as const;
+
 interface SupportEmail {
   id: string;
   from_address: string;
@@ -63,6 +71,7 @@ interface SupportEmail {
   ai_latency_ms: number | null;
   auto_sendable: boolean;
   auto_send_blocked_reason: string | null;
+  auto_send_ready: boolean;
   human_override: boolean;
   assigned_to: string | null;
 }
@@ -76,6 +85,7 @@ export default function SupportEmails() {
   const [selectedEmail, setSelectedEmail] = useState<SupportEmail | null>(null);
   const [editedReply, setEditedReply] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const { data: emails, isLoading } = useQuery({
     queryKey: ['support-emails', filterTag, filterStatus, searchQuery],
@@ -98,7 +108,6 @@ export default function SupportEmails() {
     },
   });
 
-  // AI cost stats
   const { data: aiCostToday } = useQuery({
     queryKey: ['ai-cost-today'],
     queryFn: async () => {
@@ -116,6 +125,49 @@ export default function SupportEmails() {
     },
     refetchInterval: 30_000,
   });
+
+  // Keyboard navigation
+  const handleEmailSelect = useCallback((email: SupportEmail) => {
+    setSelectedEmail(email);
+    setEditedReply(email.draft_reply || '');
+  }, []);
+
+  const { selectedIndex, setSelectedIndex } = useKeyboardNavigation({
+    items: emails || [],
+    onSelect: handleEmailSelect,
+    enabled: true,
+    searchInputRef,
+    onSearchClear: () => setSearchQuery(''),
+    hasSearchText: searchQuery.length > 0,
+  });
+
+  // Sync keyboard selection to detail pane
+  useEffect(() => {
+    if (emails && selectedIndex >= 0 && selectedIndex < emails.length) {
+      const email = emails[selectedIndex];
+      if (email.id !== selectedEmail?.id) {
+        setSelectedEmail(email);
+        setEditedReply(email.draft_reply || '');
+      }
+    }
+  }, [selectedIndex, emails, selectedEmail?.id]);
+
+  // Keyboard shortcuts for actions (A=archive, R=focus reply, T=tag dropdown)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      if (isInInput) return;
+      if (!selectedEmail) return;
+
+      if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        handleArchive(selectedEmail.id);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [selectedEmail]);
 
   const sendReply = useMutation({
     mutationFn: async ({ emailId, replyText }: { emailId: string; replyText: string }) => {
@@ -142,11 +194,6 @@ export default function SupportEmails() {
     },
     onError: (err: Error) => toast.error(`Failed to send: ${err.message}`),
   });
-
-  const handleSelectEmail = (email: SupportEmail) => {
-    setSelectedEmail(email);
-    setEditedReply(email.draft_reply || '');
-  };
 
   const handleSend = () => {
     if (!selectedEmail || !editedReply.trim()) return;
@@ -215,33 +262,31 @@ export default function SupportEmails() {
   return (
     <DashboardLayout title="AI Email Triage" navItems={adminNavItems}>
       <div className="space-y-4">
-        {/* Stats row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-          {Object.entries(STATUS_CONFIG).map(([s, { icon: Icon, label }]) => (
-            <Card
-              key={s}
-              className={`cursor-pointer hover:border-primary/50 transition-colors ${filterStatus === s ? 'border-primary' : ''}`}
-              onClick={() => setFilterStatus(prev => prev === s ? 'all' : s)}
+        {/* Quick filter chips */}
+        <div className="flex flex-wrap gap-2 items-center">
+          {QUICK_FILTERS.map(({ key, label, icon: Icon }) => (
+            <Button
+              key={key}
+              variant={filterStatus === key ? 'default' : 'outline'}
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setFilterStatus(prev => prev === key ? 'all' : key)}
             >
-              <CardContent className="p-3 flex items-center gap-2">
-                <Icon className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-lg font-bold">{statusCounts[s] || 0}</p>
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                </div>
-              </CardContent>
-            </Card>
+              <Icon className="h-3 w-3" />
+              {label}
+              {(statusCounts[key] || 0) > 0 && (
+                <Badge variant="secondary" className="ml-1 h-5 min-w-5 px-1 text-xs">
+                  {statusCounts[key]}
+                </Badge>
+              )}
+            </Button>
           ))}
-          {/* AI cost card */}
-          <Card>
-            <CardContent className="p-3 flex items-center gap-2">
-              <Brain className="h-4 w-4 text-muted-foreground" />
-              <div>
-                <p className="text-lg font-bold">{((aiCostToday?.cost || 0) / 100).toFixed(2)}</p>
-                <p className="text-xs text-muted-foreground">AI $ today</p>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+            <Brain className="h-3 w-3" />
+            <span>${((aiCostToday?.cost || 0) / 100).toFixed(3)} today</span>
+            <span className="text-muted-foreground/50">|</span>
+            <span>{(aiCostToday?.tokens || 0).toLocaleString()} tokens</span>
+          </div>
         </div>
 
         {/* Search + Filters + Bulk Actions */}
@@ -249,7 +294,8 @@ export default function SupportEmails() {
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search emails..."
+              ref={searchInputRef}
+              placeholder='Search emails... (press "/")'
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9"
@@ -264,6 +310,18 @@ export default function SupportEmails() {
               <SelectItem value="all">All Tags</SelectItem>
               {Object.entries(TAG_LABELS).map(([k, v]) => (
                 <SelectItem key={k} value={k}>{v}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              {Object.keys(STATUS_CONFIG).map(s => (
+                <SelectItem key={s} value={s}>{STATUS_CONFIG[s].label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -292,10 +350,19 @@ export default function SupportEmails() {
           )}
         </div>
 
+        {/* Keyboard hints */}
+        <div className="flex gap-3 text-xs text-muted-foreground/60">
+          <span><kbd className="px-1 py-0.5 rounded border text-[10px]">J</kbd>/<kbd className="px-1 py-0.5 rounded border text-[10px]">K</kbd> navigate</span>
+          <span><kbd className="px-1 py-0.5 rounded border text-[10px]">Enter</kbd> select</span>
+          <span><kbd className="px-1 py-0.5 rounded border text-[10px]">A</kbd> archive</span>
+          <span><kbd className="px-1 py-0.5 rounded border text-[10px]">/</kbd> search</span>
+          <span><kbd className="px-1 py-0.5 rounded border text-[10px]">Esc</kbd> clear</span>
+        </div>
+
         {/* Main layout: list + detail */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Email list */}
-          <div className="space-y-1 max-h-[calc(100vh-360px)] overflow-y-auto">
+          <div className="space-y-1 max-h-[calc(100vh-420px)] overflow-y-auto">
             {emails && emails.length > 0 && (
               <div className="flex items-center gap-2 px-2 py-1">
                 <Checkbox
@@ -313,10 +380,12 @@ export default function SupportEmails() {
                 </CardContent>
               </Card>
             )}
-            {emails?.map((email) => (
+            {emails?.map((email, idx) => (
               <Card
                 key={email.id}
-                className={`cursor-pointer transition-colors hover:border-primary/50 ${selectedEmail?.id === email.id ? 'border-primary' : ''}`}
+                className={`cursor-pointer transition-colors hover:border-primary/50 ${
+                  selectedEmail?.id === email.id ? 'border-primary' : ''
+                } ${selectedIndex === idx ? 'ring-1 ring-primary/40' : ''}`}
               >
                 <CardContent className="p-3">
                   <div className="flex items-start gap-2">
@@ -326,7 +395,10 @@ export default function SupportEmails() {
                         onCheckedChange={() => toggleSelect(email.id)}
                       />
                     </div>
-                    <div className="min-w-0 flex-1" onClick={() => handleSelectEmail(email)}>
+                    <div className="min-w-0 flex-1" onClick={() => {
+                      handleEmailSelect(email);
+                      setSelectedIndex(idx);
+                    }}>
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
@@ -380,9 +452,9 @@ export default function SupportEmails() {
                         {TAG_LABELS[selectedEmail.tag]}
                       </Badge>
                       {selectedEmail.confidence > 0 && confidenceBadge(selectedEmail.confidence)}
-                      {selectedEmail.auto_sendable && (
+                      {selectedEmail.auto_send_ready && (
                         <Badge variant="outline" className="text-xs bg-green-500/10 text-green-600 border-green-500/20">
-                          <Zap className="h-3 w-3 mr-1" /> Auto-sendable
+                          <Zap className="h-3 w-3 mr-1" /> Auto-send ready
                         </Badge>
                       )}
                     </div>
@@ -395,27 +467,25 @@ export default function SupportEmails() {
                       <Brain className="h-3 w-3" />
                       {selectedEmail.ai_status}
                     </span>
-                    {selectedEmail.ai_model && (
-                      <span>{selectedEmail.ai_model}</span>
-                    )}
-                    {selectedEmail.ai_tokens_used && (
-                      <span>{selectedEmail.ai_tokens_used} tokens</span>
-                    )}
+                    {selectedEmail.ai_model && <span>{selectedEmail.ai_model}</span>}
+                    {selectedEmail.ai_tokens_used && <span>{selectedEmail.ai_tokens_used} tokens</span>}
                     {selectedEmail.ai_latency_ms && (
                       <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {selectedEmail.ai_latency_ms}ms
+                        <Clock className="h-3 w-3" />{selectedEmail.ai_latency_ms}ms
                       </span>
                     )}
                     {selectedEmail.auto_send_blocked_reason && (
                       <span className="text-yellow-600 flex items-center gap-1">
-                        <Shield className="h-3 w-3" />
-                        {selectedEmail.auto_send_blocked_reason}
+                        <Shield className="h-3 w-3" />{selectedEmail.auto_send_blocked_reason}
+                      </span>
+                    )}
+                    {selectedEmail.human_override && (
+                      <span className="text-orange-500 flex items-center gap-1">
+                        <Shield className="h-3 w-3" />overridden
                       </span>
                     )}
                   </div>
 
-                  {/* AI Summary */}
                   {selectedEmail.ai_summary && (
                     <div className="bg-muted/50 rounded-md p-3">
                       <p className="text-xs font-medium text-muted-foreground mb-1">AI Summary</p>
@@ -423,7 +493,6 @@ export default function SupportEmails() {
                     </div>
                   )}
 
-                  {/* Original email */}
                   <div>
                     <p className="text-xs font-medium text-muted-foreground mb-1">Original Email</p>
                     <div className="bg-muted/30 rounded-md p-3 max-h-48 overflow-y-auto">
@@ -431,7 +500,6 @@ export default function SupportEmails() {
                     </div>
                   </div>
 
-                  {/* Draft reply editor */}
                   {selectedEmail.status !== 'sent' && (
                     <div>
                       <p className="text-xs font-medium text-muted-foreground mb-1">Draft Reply</p>

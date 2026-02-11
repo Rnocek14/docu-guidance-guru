@@ -13,10 +13,8 @@ const VALID_TAGS = [
   "general_inquiry",
 ] as const;
 
-// Categories safe for auto-send (no money / risk / dispute topics)
 const AUTO_SEND_SAFE_TAGS: string[] = ["general_inquiry"];
 
-// Keywords that block auto-send regardless of confidence
 const AUTO_SEND_BLOCK_KEYWORDS = [
   "payout", "withdraw", "refund", "chargeback", "dispute",
   "breach", "violation", "ban", "freeze", "blocked",
@@ -24,14 +22,12 @@ const AUTO_SEND_BLOCK_KEYWORDS = [
   "angry", "furious", "unacceptable", "ridiculous",
 ];
 
-// Cost constants for gpt-4o-mini (per 1M tokens, in cents)
-const COST_PER_1M_INPUT = 15;   // $0.15 per 1M input tokens
-const COST_PER_1M_OUTPUT = 60;  // $0.60 per 1M output tokens
+const COST_PER_1M_INPUT = 15;
+const COST_PER_1M_OUTPUT = 60;
 const DAILY_TOKEN_CAP = 500_000;
 const PER_EMAIL_MAX_TOKENS = 2_000;
 const AI_MODEL = "gpt-4o-mini";
 
-// Confidence thresholds
 const CONFIDENCE_AUTO_TAG = 0.85;
 const CONFIDENCE_REVIEW_SUGGESTED = 0.60;
 const CONFIDENCE_AUTO_SEND = 0.92;
@@ -55,23 +51,24 @@ function estimateCostCents(promptTokens: number, completionTokens: number): numb
   return (promptTokens * COST_PER_1M_INPUT + completionTokens * COST_PER_1M_OUTPUT) / 1_000_000;
 }
 
-function determineAutoSendable(
+function determineAutoSend(
   tag: string,
   confidence: number,
   bodyText: string,
   subject: string,
-): { auto_sendable: boolean; blocked_reason: string | null } {
+): { auto_sendable: boolean; auto_send_ready: boolean; auto_send_eligible_at: string | null; blocked_reason: string | null } {
   if (confidence < CONFIDENCE_AUTO_SEND) {
-    return { auto_sendable: false, blocked_reason: `confidence_below_${CONFIDENCE_AUTO_SEND}` };
+    return { auto_sendable: false, auto_send_ready: false, auto_send_eligible_at: null, blocked_reason: `confidence_below_${CONFIDENCE_AUTO_SEND}` };
   }
   if (!AUTO_SEND_SAFE_TAGS.includes(tag)) {
-    return { auto_sendable: false, blocked_reason: `tag_not_in_safe_list:${tag}` };
+    return { auto_sendable: false, auto_send_ready: false, auto_send_eligible_at: null, blocked_reason: `tag_not_in_safe_list:${tag}` };
   }
   const blockedKw = detectBlockKeywords(`${subject} ${bodyText}`);
   if (blockedKw) {
-    return { auto_sendable: false, blocked_reason: `blocked_keyword:${blockedKw}` };
+    return { auto_sendable: false, auto_send_ready: false, auto_send_eligible_at: null, blocked_reason: `blocked_keyword:${blockedKw}` };
   }
-  return { auto_sendable: true, blocked_reason: null };
+  const now = new Date().toISOString();
+  return { auto_sendable: true, auto_send_ready: true, auto_send_eligible_at: now, blocked_reason: null };
 }
 
 function determineStatus(confidence: number, hasDraft: boolean): string {
@@ -91,15 +88,13 @@ Deno.serve(async (req: Request) => {
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     return new Response(JSON.stringify({ error: "Server misconfiguration: missing Supabase env" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
   if (!OPENAI_API_KEY) {
     return new Response(JSON.stringify({ error: "Server misconfiguration: missing OPENAI_API_KEY" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -121,17 +116,28 @@ Deno.serve(async (req: Request) => {
       ? fromAddress
       : (fromAddress as { address?: string })?.address || String(fromAddress);
 
-    // --- Check daily token cap ---
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
+    // --- Idempotency check: skip if already processed ---
+    if (resendInboundId) {
+      const { data: existing } = await supabaseAdmin
+        .from("support_emails")
+        .select("id")
+        .eq("resend_inbound_id", resendInboundId)
+        .maybeSingle();
 
-    const { data: usageToday } = await supabaseAdmin
-      .from("ai_usage_log")
-      .select("total_tokens")
-      .gte("created_at", todayStart.toISOString())
-      .eq("function_name", "process-support-email");
+      if (existing) {
+        console.log(`Duplicate inbound ID ${resendInboundId}, skipping`);
+        return new Response(
+          JSON.stringify({ success: true, duplicate: true, existing_id: existing.id }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
 
-    const totalTokensToday = (usageToday || []).reduce((sum, r) => sum + (r.total_tokens || 0), 0);
+    // --- Check daily token cap via O(1) RPC ---
+    const { data: tokenSum } = await supabaseAdmin.rpc("get_ai_daily_token_sum", {
+      p_function_name: "process-support-email",
+    });
+    const totalTokensToday = Number(tokenSum) || 0;
     const dailyCapReached = totalTokensToday >= DAILY_TOKEN_CAP;
 
     // --- Match sender to profile ---
@@ -141,7 +147,7 @@ Deno.serve(async (req: Request) => {
     const aiStart = Date.now();
     let aiResult: AiResult | null = null;
     let aiError: string | null = null;
-    let aiStatus: string = "pending";
+    let aiStatus = "pending";
     let promptTokens = 0;
     let completionTokens = 0;
     let totalTokens = 0;
@@ -179,13 +185,16 @@ Deno.serve(async (req: Request) => {
       : "general_inquiry";
 
     const confidence = aiResult?.confidence || 0;
-    const emailStatus = aiResult ? determineStatus(confidence, !!aiResult.draft_reply) : "new";
-    const { auto_sendable, blocked_reason } = aiResult
-      ? determineAutoSendable(tag, confidence, bodyText, subject)
-      : { auto_sendable: false, blocked_reason: "ai_not_available" };
+    const hasDraft = !!aiResult?.draft_reply;
+    const emailStatus = aiResult ? determineStatus(confidence, hasDraft) : "new";
+
+    // Only compute auto-send if we have a draft AND confidence is real
+    const autoSend = (aiResult && hasDraft)
+      ? determineAutoSend(tag, confidence, bodyText, subject)
+      : { auto_sendable: false, auto_send_ready: false, auto_send_eligible_at: null, blocked_reason: "ai_not_available" };
 
     // --- Insert email record ---
-    const { error: insertErr } = await supabaseAdmin.from("support_emails").insert({
+    const { data: inserted, error: insertErr } = await supabaseAdmin.from("support_emails").insert({
       from_address: senderEmail,
       to_address: typeof toAddress === "string" ? toAddress : String(toAddress),
       subject,
@@ -199,28 +208,35 @@ Deno.serve(async (req: Request) => {
       matched_account_id: matchedAccountId,
       status: emailStatus,
       resend_inbound_id: resendInboundId,
-      // AI telemetry
       ai_status: aiStatus,
       ai_model: aiStatus === "complete" ? AI_MODEL : null,
       ai_tokens_used: totalTokens || null,
       ai_latency_ms: aiLatencyMs,
       ai_attempted_at: new Date().toISOString(),
       ai_error: aiError,
-      // Auto-send
-      auto_sendable,
-      auto_send_blocked_reason: blocked_reason,
-    });
+      auto_sendable: autoSend.auto_sendable,
+      auto_send_ready: autoSend.auto_send_ready,
+      auto_send_eligible_at: autoSend.auto_send_eligible_at,
+      auto_send_blocked_reason: autoSend.blocked_reason,
+    }).select("id").single();
 
     if (insertErr) {
+      // Handle idempotency conflict (unique index on resend_inbound_id)
+      if (insertErr.code === "23505" && resendInboundId) {
+        console.log(`Conflict on resend_inbound_id ${resendInboundId}, treating as success`);
+        return new Response(
+          JSON.stringify({ success: true, duplicate: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
       console.error("Insert error:", insertErr);
       return new Response(JSON.stringify({ success: false, error: insertErr.message }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // --- Log AI usage for cost tracking ---
-    if (aiStatus !== "skipped_cap") {
+    // --- Log AI usage ONLY when OpenAI was actually called ---
+    if (aiStatus === "complete" || aiStatus === "failed") {
       await supabaseAdmin.from("ai_usage_log").insert({
         function_name: "process-support-email",
         model: AI_MODEL,
@@ -229,14 +245,26 @@ Deno.serve(async (req: Request) => {
         total_tokens: totalTokens,
         latency_ms: aiLatencyMs,
         estimated_cost_cents: estimateCostCents(promptTokens, completionTokens),
+        support_email_id: inserted?.id || null,
+        ai_status: aiStatus,
         error: aiError,
+      });
+    }
+
+    // --- Log ingestion action ---
+    if (inserted?.id) {
+      await supabaseAdmin.from("support_email_actions").insert({
+        email_id: inserted.id,
+        action_type: "ingested",
+        actor_user_id: null,
+        metadata: { ai_status: aiStatus, tag, confidence, auto_sendable: autoSend.auto_sendable },
       });
     }
 
     console.log(
       `Processed email from ${senderEmail}: tag=${tag}, confidence=${confidence}, ` +
       `ai_status=${aiStatus}, tokens=${totalTokens}, latency=${aiLatencyMs}ms, ` +
-      `auto_sendable=${auto_sendable}, status=${emailStatus}`
+      `auto_sendable=${autoSend.auto_sendable}, status=${emailStatus}`
     );
 
     return new Response(
@@ -247,7 +275,7 @@ Deno.serve(async (req: Request) => {
         summary: aiResult?.summary,
         ai_status: aiStatus,
         email_status: emailStatus,
-        auto_sendable,
+        auto_sendable: autoSend.auto_sendable,
         tokens_used: totalTokens,
         latency_ms: aiLatencyMs,
       }),
@@ -256,8 +284,7 @@ Deno.serve(async (req: Request) => {
   } catch (error) {
     console.error("Error processing support email:", error);
     return new Response(JSON.stringify({ success: false, error: String(error) }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
@@ -294,7 +321,6 @@ async function enrichSenderContext(
       .map(a => `Account ${a.account_number}: status=${a.status}, balance=$${a.current_balance}, trading_days=${a.trading_days_count}${a.passed_at ? ", passed" : ""}`)
       .join("\n");
 
-    // Recent payouts
     const { data: payouts } = await supabaseAdmin
       .from("payouts")
       .select("amount, status, requested_at, review_notes")
@@ -307,7 +333,6 @@ async function enrichSenderContext(
         payouts.map(p => `$${p.amount} — ${p.status} (requested ${p.requested_at})`).join("\n");
     }
 
-    // Recent flags
     const { data: violations } = await supabaseAdmin
       .from("flags")
       .select("flag_type, reason, severity, status, created_at")
