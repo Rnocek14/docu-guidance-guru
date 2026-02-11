@@ -393,7 +393,10 @@ Deno.serve(async (req: Request) => {
           .eq('account_id', accountId)
           .limit(1)
           .single()
-        platformAccountId = paRow?.platform_account_id ?? `${PREFIX}unknown`
+        if (!paRow?.platform_account_id) {
+          throw new Error(`No platform_account_id found for account ${accountId}. Cannot ingest trades without it.`)
+        }
+        platformAccountId = paRow.platform_account_id
       }
 
       for (const t of trades) {
@@ -687,10 +690,11 @@ Deno.serve(async (req: Request) => {
     await ingestTrades(perfNearCapId, 'PERF-NEAR-CAP', perfNearCapTrades())
 
     // Create and process 3 payouts (approved → paid → confirmed)
-    // Need a staff user for approval - use the seed user as approver
-    // Two staff UUIDs for separation of duties (approver ≠ payer)
-    const DEMO_STAFF_ID = '00000000-0000-0000-0000-000000000099'
-    const DEMO_STAFF_PAYER = '00000000-0000-0000-0000-000000000098'
+    // Staff UUIDs for payout approval chain
+    // DEMO_STAFF_ID = demo trader (exists in auth.users) — used as approver
+    // DEMO_STAFF_PAYER = seed staff user (exists in auth.users) — used as payer (separation of duties)
+    const DEMO_STAFF_ID = userId  // The real demo trader — exists in auth.users, satisfies payouts.reviewed_by FK
+    const DEMO_STAFF_PAYER = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee01'  // Seed staff user — exists in auth.users
     
     for (let i = 1; i <= 3; i++) {
       info(`  Processing payout ${i}/3...`)
