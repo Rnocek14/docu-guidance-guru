@@ -365,16 +365,19 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── Helper: ingest trades via canonical RPC ──
-    async function ingestTrades(accountId: string, trades: SyntheticTrade[]): Promise<{ breached: boolean; passed: boolean; spawnedId?: string }> {
+    // accountName is needed to match the platform_account_id registered in platform_accounts
+    async function ingestTrades(accountId: string, accountName: string, trades: SyntheticTrade[]): Promise<{ breached: boolean; passed: boolean; spawnedId?: string }> {
       let breached = false
       let passed = false
       let spawnedId: string | undefined
+
+      const platformAccountId = `${PREFIX}${accountName}`
 
       for (const t of trades) {
         const { data: result, error: rpcErr } = await supabase.rpc('ingest_trade_atomic', {
           p_account_id: accountId,
           p_platform_trade_id: t.platform_trade_id,
-          p_platform_account_id: `${PREFIX}platform`,
+          p_platform_account_id: platformAccountId,
           p_symbol: t.symbol,
           p_side: t.side,
           p_quantity: t.qty,
@@ -406,10 +409,14 @@ Deno.serve(async (req: Request) => {
           breached = true
           info(`  BREACH: ${result.breach_type} actual=${result.breach_actual}% limit=${result.breach_threshold}%`)
           
-          // Insert violation (same as ingest-trade edge function does)
-          await supabase.from('violations').upsert({
+          // Insert violation — two partial unique indexes exist:
+          //   (account_id, rule_type, trade_id) WHERE trade_id IS NOT NULL
+          //   (account_id, rule_type, breach_day) WHERE trade_id IS NULL
+          // Supabase JS onConflict can't target partial indexes, so use plain insert
+          // and catch 23505 (unique violation) as idempotent success.
+          const violationPayload = {
             account_id: accountId,
-            trade_id: result.trade_id,
+            trade_id: result.trade_id ?? null,
             platform_trade_id: t.platform_trade_id,
             breach_day: t.trading_day,
             rule_type: result.breach_type,
@@ -417,7 +424,11 @@ Deno.serve(async (req: Request) => {
             actual_value: result.breach_actual,
             rule_threshold: result.breach_threshold,
             detected_at: new Date().toISOString(),
-          }, { onConflict: 'account_id,rule_type,trade_id', ignoreDuplicates: true })
+          }
+          const { error: violErr } = await supabase.from('violations').insert(violationPayload)
+          if (violErr && !violErr.message?.includes('duplicate key')) {
+            err(`  Violation insert failed: ${violErr.message}`)
+          }
 
           // Insert breach event
           await supabase.from('account_events').upsert({
@@ -472,31 +483,34 @@ Deno.serve(async (req: Request) => {
       return { breached, passed, spawnedId }
     }
 
-    // ── Helper: create payout via service_role (mimics submit_payout_request) ──
+    // ── Helper: request payout via canonical RPC ──
     async function createPayout(accountId: string, amount: number): Promise<string | null> {
-      // Insert payout directly (service_role bypasses RLS and auth.uid() check)
-      const { data, error } = await supabase.from('payouts').insert({
-        account_id: accountId,
-        amount: amount,
-        status: 'pending',
-        submitted_amount: amount,
-        calculated_eligible_amount: amount,
-        requested_at: new Date().toISOString(),
-      }).select('id').single()
+      const { data, error } = await supabase.rpc('submit_payout_request', {
+        _account_id: accountId,
+        _requested_amount: amount,
+      })
 
       if (error) {
-        err(`Payout insert failed: ${error.message}`)
-        return null
+        err(`Payout request RPC failed: ${error.message}`)
+        // Fallback: direct insert (needed when account status doesn't satisfy RPC preconditions)
+        const { data: fallback, error: fallbackErr } = await supabase.from('payouts').insert({
+          account_id: accountId,
+          amount: amount,
+          status: 'pending',
+          submitted_amount: amount,
+          calculated_eligible_amount: amount,
+          requested_at: new Date().toISOString(),
+        }).select('id').single()
+        if (fallbackErr) { err(`Payout fallback insert also failed: ${fallbackErr.message}`); return null }
+        await supabase.from('accounts').update({ status: 'payout_requested', updated_at: new Date().toISOString() }).eq('id', accountId)
+        info(`  Created payout (fallback): ${fallback.id} ($${amount})`)
+        return fallback.id
       }
 
-      // Transition account to payout_requested
-      await supabase.from('accounts').update({
-        status: 'payout_requested',
-        updated_at: new Date().toISOString(),
-      }).eq('id', accountId)
-
-      info(`  Created payout: ${data.id} ($${amount})`)
-      return data.id
+      const payoutId = data?.payout_id
+      if (!payoutId) { err(`Payout RPC returned no payout_id: ${JSON.stringify(data)}`); return null }
+      info(`  Created payout (canonical): ${payoutId} ($${amount})`)
+      return payoutId
     }
 
     // ── Helper: approve + initiate + confirm payout via RPCs ──
@@ -521,7 +535,7 @@ Deno.serve(async (req: Request) => {
         _payout_id: payoutId,
         _provider: 'wise',
         _amount: payout!.amount,
-        _initiated_by: userId, // Use the trader as initiator (different from approver for separation of duties)
+        _initiated_by: DEMO_STAFF_PAYER, // Use a different staff UUID for separation of duties
       })
       if (initErr) { err(`Initiate failed: ${initErr.message}`); return }
       if (!initiateResult?.success) { err(`Initiate rejected: ${JSON.stringify(initiateResult)}`); return }
@@ -547,17 +561,17 @@ Deno.serve(async (req: Request) => {
     // ── S1: Eval Near-Pass (active, just below target) ──
     info('\n=== S1: Eval Near-Pass ===')
     const evalNearPassId = await createAccount('EVAL-NEAR-PASS', EVAL_COHORT_ID)
-    await ingestTrades(evalNearPassId, evalNearPassTrades())
+    await ingestTrades(evalNearPassId, 'EVAL-NEAR-PASS', evalNearPassTrades())
 
     // ── S2: Eval Breach (daily loss violation) ──
     info('\n=== S2: Eval Breach ===')
     const evalBreachId = await createAccount('EVAL-BREACH', EVAL_COHORT_ID)
-    await ingestTrades(evalBreachId, evalBreachTrades())
+    await ingestTrades(evalBreachId, 'EVAL-BREACH', evalBreachTrades())
 
     // ── S3: Eval Fail (drawdown → breached, then confirmed via review-actions) ──
     info('\n=== S3: Eval Fail ===')
     const evalFailId = await createAccount('EVAL-FAIL', EVAL_COHORT_ID)
-    const failResult = await ingestTrades(evalFailId, evalFailTrades())
+    const failResult = await ingestTrades(evalFailId, 'EVAL-FAIL', evalFailTrades())
     if (failResult.breached) {
       // Confirm failure (staff action) - direct update since confirm_failure
       // is an edge function action, not a standalone RPC
@@ -590,7 +604,7 @@ Deno.serve(async (req: Request) => {
     // ── S4: Eval Pass → spawns Verification ──
     info('\n=== S4: Eval Pass → Verification Spawn ===')
     const evalPassId = await createAccount('EVAL-PASS', EVAL_COHORT_ID)
-    const passResult = await ingestTrades(evalPassId, evalPassTrades())
+    const passResult = await ingestTrades(evalPassId, 'EVAL-PASS', evalPassTrades())
     
     let spawnedVeriId = passResult.spawnedId
     if (!passResult.passed) {
@@ -606,14 +620,17 @@ Deno.serve(async (req: Request) => {
     // ── S5: Verification Active (from spawn or standalone) ──
     info('\n=== S5: Verification Active ===')
     let veriActiveId: string
+    let veriActiveName: string
     if (spawnedVeriId) {
-      // Ingest trades into the spawned account
       veriActiveId = spawnedVeriId
-      await ingestTrades(veriActiveId, veriActiveTrades())
+      // Look up spawned account name
+      const { data: spawnedAcct } = await supabase.from('accounts').select('account_number').eq('id', spawnedVeriId).single()
+      veriActiveName = spawnedAcct?.account_number?.replace(PREFIX, '') ?? 'VERI-SPAWNED'
+      await ingestTrades(veriActiveId, veriActiveName, veriActiveTrades())
     } else {
-      // Fallback: create standalone veri account  
-      veriActiveId = await createAccount('VERI-ACTIVE', VERI_COHORT_ID)
-      await ingestTrades(veriActiveId, veriActiveTrades())
+      veriActiveName = 'VERI-ACTIVE'
+      veriActiveId = await createAccount(veriActiveName, VERI_COHORT_ID)
+      await ingestTrades(veriActiveId, veriActiveName, veriActiveTrades())
     }
 
     // ── S6: Verification Pass → spawns Performance ──
@@ -623,23 +640,27 @@ Deno.serve(async (req: Request) => {
       rootId: evalPassId,
       phaseIndex: 1,
     })
-    const veriPassResult = await ingestTrades(veriPassId, veriPassTrades())
+    const veriPassResult = await ingestTrades(veriPassId, 'VERI-PASS', veriPassTrades())
     
     let spawnedPerfId = veriPassResult.spawnedId
 
     // ── S7: Performance Eligible (has profit, old enough for payout) ──
     info('\n=== S7: Performance Eligible ===')
     let perfEligibleId: string
+    let perfEligibleName: string
     if (spawnedPerfId) {
       perfEligibleId = spawnedPerfId
-      await ingestTrades(perfEligibleId, perfEligibleTrades())
+      const { data: spawnedAcct } = await supabase.from('accounts').select('account_number').eq('id', spawnedPerfId).single()
+      perfEligibleName = spawnedAcct?.account_number?.replace(PREFIX, '') ?? 'PERF-SPAWNED'
+      await ingestTrades(perfEligibleId, perfEligibleName, perfEligibleTrades())
     } else {
-      perfEligibleId = await createAccount('PERF-ELIGIBLE', PERF_COHORT_ID, {
+      perfEligibleName = 'PERF-ELIGIBLE'
+      perfEligibleId = await createAccount(perfEligibleName, PERF_COHORT_ID, {
         parentId: veriPassId,
         rootId: evalPassId,
         phaseIndex: 2,
       })
-      await ingestTrades(perfEligibleId, perfEligibleTrades())
+      await ingestTrades(perfEligibleId, perfEligibleName, perfEligibleTrades())
     }
 
     // ── S8: Performance Near-Cap (multiple paid payouts) ──
@@ -649,13 +670,13 @@ Deno.serve(async (req: Request) => {
       rootId: evalPassId,
       phaseIndex: 2,
     })
-    await ingestTrades(perfNearCapId, perfNearCapTrades())
+    await ingestTrades(perfNearCapId, 'PERF-NEAR-CAP', perfNearCapTrades())
 
     // Create and process 3 payouts (approved → paid → confirmed)
     // Need a staff user for approval - use the seed user as approver
-    // In production, approver ≠ requester, but for demo we need 2 different UUIDs
-    // We'll use a deterministic "demo staff" UUID
+    // Two staff UUIDs for separation of duties (approver ≠ payer)
     const DEMO_STAFF_ID = '00000000-0000-0000-0000-000000000099'
+    const DEMO_STAFF_PAYER = '00000000-0000-0000-0000-000000000098'
     
     for (let i = 1; i <= 3; i++) {
       info(`  Processing payout ${i}/3...`)
@@ -684,7 +705,7 @@ Deno.serve(async (req: Request) => {
       rootId: evalPassId,
       phaseIndex: 2,
     })
-    await ingestTrades(perfPayoutReqId, perfEligibleTrades().map(t => ({
+    await ingestTrades(perfPayoutReqId, 'PERF-PAYOUT-REQ', perfEligibleTrades().map(t => ({
       ...t,
       platform_trade_id: t.platform_trade_id.replace('perf-eligible', 'perf-payout-req'),
     })))
