@@ -57,7 +57,7 @@ function makeTrades(seed: string, specs: Array<{ daysAgo: number; pnl: number; s
   return specs.map((s, i) => ({
     platform_trade_id: `${seed}-trade-${i + 1}`,
     symbol: s.symbol ?? 'NQ',
-    side: s.pnl >= 0 ? 'long' : 'short',
+    side: s.pnl >= 0 ? 'buy' : 'sell',
     qty: 1,
     entry_price: 20000,
     net_pnl: s.pnl,
@@ -194,10 +194,24 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { headers: corsHeaders })
   }
 
-  // Auth check: CRON_SECRET or admin JWT
+  // Auth check: CRON_SECRET (env or internal_secrets fallback) or admin JWT
   const authHeader = req.headers.get('authorization') ?? ''
-  const cronSecret = Deno.env.get('CRON_SECRET')
-  
+  let cronSecret = Deno.env.get('CRON_SECRET') ?? ''
+
+  // Fallback: read CRON_SECRET from internal_secrets if env var is missing/short
+  if (!cronSecret || cronSecret.length < 16) {
+    console.warn('CRON_SECRET env var missing/short — falling back to internal_secrets table')
+    const tmpUrl = Deno.env.get('SUPABASE_URL')!
+    const tmpKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const tmpClient = createClient(tmpUrl, tmpKey, { auth: { persistSession: false } })
+    const { data: secretRow } = await tmpClient
+      .from('internal_secrets')
+      .select('value')
+      .eq('key', 'CRON_SECRET')
+      .single()
+    cronSecret = secretRow?.value ?? ''
+  }
+
   if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
     // OK — cron-authenticated
   } else {
