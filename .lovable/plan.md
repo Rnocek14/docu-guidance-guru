@@ -1,79 +1,132 @@
 
-# Trader Dashboard: Mock Data + Enhanced UI
 
-## Overview
-Seed realistic mock data for rnocek14@gmail.com and enhance the trader dashboard to be genuinely impressive — equity curve chart, better stats, and a polished experience that doubles as a real product screenshot for the hero image.
+# Multi-Account Trader Dashboard Redesign
 
-## What the user currently sees
-- Empty dashboard with a "Start Your Evaluation" card (no accounts, trades, or payouts exist)
-- User exists with `trader` + `admin` roles, profile name "Riley Nocek"
+## Problem
 
-## Step 1: Seed Mock Data via SQL Migration
+With 12 seeded accounts across all lifecycle states, the current dashboard only shows a single "active" account (the first one found). Traders have no way to switch between accounts, see a portfolio overview, or filter trades/payouts by account. This is worse than every competitor.
 
-Insert realistic trading data for user `65c43a0a-7182-448f-9753-ed9818030602`:
+## Design: Account Switcher + Portfolio Overview
 
-**Account** (evaluation phase, actively trading, doing well):
-- Cohort: "Standard Challenge" (`30c85b00-c613-4d33-83e5-c5af8a8ea6d5`)
-- Starting balance: $100,000
-- Current balance: $107,450
-- Highest balance: $108,200
-- Total P&L: +$7,450 (7.45% — close to the 10% target)
-- 12 trading days (past the 5-day minimum)
-- Daily P&L: +$320
-- Status: `active`
-- Rule snapshot frozen from cohort
+### Core UX Pattern: Persistent Account Selector
 
-**Trades** (~25 realistic closed trades over 12 days):
-- Mix of ES, NQ, CL futures
-- Varied position sizes (1-4 contracts)
-- ~65% win rate, realistic P&L distribution
-- Spread across the last 3 weeks
-- 1 open position (ES, entered today)
+A compact account switcher appears at the top of the Dashboard, Trades, and Payouts pages. The Dashboard page also gets a new "Portfolio Overview" section above the single-account detail view.
 
-This gives the dashboard rich data to display without needing to touch any edge functions or RPCs.
+```text
++-----------------------------------------------+
+|  Dashboard                                     |
++-----------------------------------------------+
+|  Portfolio Overview (all accounts)             |
+|  [3 Active] [2 Passed] [4 Failed] [1 Payout]  |
+|  Total Balance: $423,500  |  Total P&L: +$18k |
++-----------------------------------------------+
+|  [ Account Switcher Tabs / Dropdown ]          |
+|  DEMO-EVAL-01 (Active) | DEMO-PERF-01 (PA)   |
++-----------------------------------------------+
+|  (existing single-account detail view below)   |
+|  Phase indicator, stats, equity curve, etc.    |
++-----------------------------------------------+
+```
 
-## Step 2: Add Equity Curve Chart to Trader Dashboard
+### 1. Portfolio Overview Strip (Dashboard only)
 
-Create a new `EquityCurveChart` component using Recharts (already installed). It will:
-- Query closed trades for the active account, sorted by `closed_at`
-- Compute a running cumulative P&L series (starting from `starting_balance`)
-- Render an `AreaChart` with gradient fill (green when above start, following existing chart patterns from admin pages)
-- Show the starting balance as a reference line
-- Display in the main dashboard between the stats grid and the progress section
+A summary card at the top showing aggregate stats across ALL accounts:
+- Account counts by status (active / passed / failed / payout)
+- Total combined balance across active accounts
+- Total lifetime P&L
+- Total payouts received
 
-## Step 3: Enhance the Dashboard Layout
+This gives traders an instant "how am I doing overall" answer -- something no competitor shows.
 
-Current layout: phase indicator, payout readiness (PA only), 4 stat cards, 2 progress cards, account status card.
+### 2. Account Switcher Component
 
-Enhanced layout:
-1. Welcome + phase indicator (unchanged)
-2. **4 stat cards** (unchanged — balance, P&L, drawdown, trading days)
-3. **NEW: Equity curve chart** (full-width, prominent)
-4. **2 progress cards** (profit target + drawdown monitor — unchanged)
-5. Account status card (unchanged)
+A new `AccountSwitcher` component used on the Dashboard page. It renders as:
+- **Desktop**: Horizontal scrollable tab-style pills showing account number + phase badge + P&L
+- **Mobile**: A dropdown/select showing the same info
 
-## Step 4: Replace Fake Hero Image
+Clicking an account updates the dashboard to show that account's full detail view (equity curve, rule health, what's next, etc.).
 
-Remove the AI-generated `hero-dashboard.jpg` and instead:
-- Remove the `<img>` from Hero.tsx
-- Remove the import and the image file itself
-- The landing page returns to the clean text-only hero (which looked great before)
+The selected account ID is stored in URL search params (`?account=uuid`) so it's shareable and survives refresh.
 
-Alternatively: once the dashboard is live with real data, take an actual screenshot and use that. For now, remove the fake.
+### 3. Trades Page: Account Filter
 
-## Files Changed
+Add an account filter dropdown at the top of the Trades page. Options:
+- "All Accounts" (default -- current behavior)
+- Each account listed by number + phase
+
+### 4. Payouts Page: Account Filter
+
+Same filter pattern as Trades. Already shows account numbers in the table, but filtering lets traders focus.
+
+### 5. Sidebar Enhancement
+
+Add a small account count badge next to "Accounts" in the sidebar nav showing total active accounts.
+
+## Files to Create/Modify
 
 | File | Change |
 |------|--------|
-| SQL migration | Seed account + 25 trades for rnocek14 |
-| `src/components/trader/EquityCurveChart.tsx` | **New** — Recharts area chart component |
-| `src/pages/trader/TraderDashboard.tsx` | Add equity curve below stat cards |
-| `src/components/landing/Hero.tsx` | Remove fake hero image |
-| `src/assets/hero-dashboard.jpg` | **Delete** |
+| `src/components/trader/PortfolioOverview.tsx` | **New** -- aggregate stats strip |
+| `src/components/trader/AccountSwitcher.tsx` | **New** -- tab/dropdown account selector |
+| `src/pages/trader/TraderDashboard.tsx` | Add PortfolioOverview + AccountSwitcher; replace `activeAccount` logic with URL-param-driven selection |
+| `src/pages/trader/TraderTrades.tsx` | Add account filter dropdown |
+| `src/pages/trader/TraderPayouts.tsx` | Add account filter dropdown |
+| `src/components/layout/DashboardLayout.tsx` | No change needed (nav items are static) |
 
-## Technical Notes
+## Technical Details
 
-- The equity curve uses the same `ChartContainer` / `ChartConfig` pattern already established in admin charts
-- Trade data is computed client-side from the existing `trades` table query (no new RPC needed)
-- The cumulative P&L is calculated by sorting trades by `closed_at` and running a prefix sum
-- No schema changes required — only INSERT statements for mock data
+### Account Switcher State Management
+
+```typescript
+// In TraderDashboard.tsx
+const [searchParams, setSearchParams] = useSearchParams();
+const selectedAccountId = searchParams.get('account');
+
+// Default to first "best" account (active > passed > payout > others)
+const sortedAccounts = useMemo(() => {
+  const priority = { active: 0, passed: 1, payout_requested: 2, ... };
+  return [...(accounts ?? [])].sort((a, b) => 
+    (priority[a.status] ?? 99) - (priority[b.status] ?? 99)
+  );
+}, [accounts]);
+
+const selectedAccount = selectedAccountId 
+  ? accounts?.find(a => a.id === selectedAccountId) 
+  : sortedAccounts[0];
+```
+
+### Portfolio Overview Component
+
+Shows 4 stat cards in a compact row:
+- Active Accounts count (with phase breakdown tooltip)
+- Combined Balance (sum of all active/passed account balances)
+- Lifetime P&L (sum of total_pnl across all accounts)
+- Total Payouts (query payouts table for paid totals)
+
+### Account Switcher Component
+
+Each pill/tab shows:
+- Account number (e.g., `#DEMO-EVAL-01`)
+- Phase badge (Eval / Veri / PA) with color coding
+- P&L as a compact +$X.Xk or -$X.Xk
+- Status indicator dot (green = active, yellow = review, red = failed, blue = passed)
+
+### Trades/Payouts Filter
+
+Simple `Select` component from shadcn with options populated from the accounts query. Filters the existing query by adding `.eq('account_id', selectedId)` when not "all".
+
+### What This Looks Like vs Competitors
+
+Most prop firm dashboards:
+- Show one account at a time
+- Require navigating to a separate "accounts list" page
+- No portfolio-level view
+- No cross-account filtering
+
+Meridian after this change:
+- Portfolio overview showing holistic trader health
+- Instant account switching without page navigation
+- Account-filtered trades and payouts
+- URL-shareable account views
+- Phase-aware visual design (eval = blue, veri = purple, PA = green, failed = red)
+
