@@ -80,7 +80,7 @@ export default function TraderDashboard() {
   };
 
   const isPerformanceAccount = activeAccount && 
-    (activeAccount.status === 'passed' || activeAccount.status.startsWith('payout_'));
+    activeAccount.cohort?.cohort_phase === 'performance';
 
   // Fetch payout eligibility for PA-phase accounts
   const { data: eligibility } = useQuery({

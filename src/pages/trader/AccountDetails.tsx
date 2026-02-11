@@ -148,7 +148,8 @@ export default function AccountDetails() {
     enabled: shouldFetchConsistency,
   });
   const status = statusLabels[account?.status || 'active'] || statusLabels.active;
-  const showPayoutButton = account?.status === 'passed';
+  const showPayoutButton = cohortPhase === 'performance' && 
+    (account?.status === 'active' || account?.status === 'payout_requested' || account?.status === 'payout_approved');
   
   // Staff visibility guards (bulletproof: handles undefined, disabled query, falsy id)
   const staff = !!isStaff;
