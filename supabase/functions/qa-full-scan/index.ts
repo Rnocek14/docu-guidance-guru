@@ -215,9 +215,11 @@ Deno.serve(async (req) => {
             const { data: afterAudit } = await svc.from('audit_logs').select('id').eq('account_id', breachAccountId)
             const afterCount = afterAudit?.length ?? 0
 
+            // Accept either new audit row OR idempotent dedup (same action replayed)
+            const auditOk = afterCount > beforeCount || parsed?.audit_deduplicated === true
             const assertions = {
               account_terminal: afterAcct?.status === 'failed_confirmed',
-              audit_increased: afterCount > beforeCount,
+              audit_present: auditOk,
             }
             const allPass = Object.values(assertions).every(Boolean)
             results.push({
