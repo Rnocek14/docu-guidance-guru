@@ -235,10 +235,21 @@ Deno.serve(async (req: Request) => {
   const log: string[] = []
   const errors: string[] = []
 
+  // Fetch seed secret from internal_secrets for seed_submit_payout_request gate
+  let seedSecret = ''
+
   function info(msg: string) { log.push(msg); console.log(msg) }
   function err(msg: string) { errors.push(msg); console.error(msg) }
 
   try {
+    // Fetch seed secret for canonical payout request RPC
+    const { data: secretRow } = await supabase
+      .from('internal_secrets')
+      .select('value')
+      .eq('key', 'seed_secret')
+      .single()
+    seedSecret = secretRow?.value ?? ''
+    if (!seedSecret) { throw new Error('No seed_secret found in internal_secrets. Run the migration first.') }
     // ── 0. Find demo user ──
     const { data: profile, error: profileErr } = await supabase
       .from('profiles')
@@ -366,12 +377,24 @@ Deno.serve(async (req: Request) => {
 
     // ── Helper: ingest trades via canonical RPC ──
     // accountName is needed to match the platform_account_id registered in platform_accounts
-    async function ingestTrades(accountId: string, accountName: string, trades: SyntheticTrade[]): Promise<{ breached: boolean; passed: boolean; spawnedId?: string }> {
+    async function ingestTrades(accountId: string, accountName: string | null, trades: SyntheticTrade[]): Promise<{ breached: boolean; passed: boolean; spawnedId?: string }> {
       let breached = false
       let passed = false
       let spawnedId: string | undefined
 
-      const platformAccountId = `${PREFIX}${accountName}`
+      // Look up platform_account_id from DB (handles spawned accounts correctly)
+      let platformAccountId: string
+      if (accountName) {
+        platformAccountId = `${PREFIX}${accountName}`
+      } else {
+        const { data: paRow } = await supabase
+          .from('platform_accounts')
+          .select('platform_account_id')
+          .eq('account_id', accountId)
+          .limit(1)
+          .single()
+        platformAccountId = paRow?.platform_account_id ?? `${PREFIX}unknown`
+      }
 
       for (const t of trades) {
         const { data: result, error: rpcErr } = await supabase.rpc('ingest_trade_atomic', {
@@ -483,33 +506,27 @@ Deno.serve(async (req: Request) => {
       return { breached, passed, spawnedId }
     }
 
-    // ── Helper: request payout via canonical RPC ──
+    // ── Helper: request payout via canonical seed RPC ──
     async function createPayout(accountId: string, amount: number): Promise<string | null> {
-      const { data, error } = await supabase.rpc('submit_payout_request', {
+      const { data, error } = await supabase.rpc('seed_submit_payout_request', {
         _account_id: accountId,
         _requested_amount: amount,
+        _user_id: userId,
+        _seed_secret: seedSecret,
       })
 
       if (error) {
-        err(`Payout request RPC failed: ${error.message}`)
-        // Fallback: direct insert (needed when account status doesn't satisfy RPC preconditions)
-        const { data: fallback, error: fallbackErr } = await supabase.from('payouts').insert({
-          account_id: accountId,
-          amount: amount,
-          status: 'pending',
-          submitted_amount: amount,
-          calculated_eligible_amount: amount,
-          requested_at: new Date().toISOString(),
-        }).select('id').single()
-        if (fallbackErr) { err(`Payout fallback insert also failed: ${fallbackErr.message}`); return null }
-        await supabase.from('accounts').update({ status: 'payout_requested', updated_at: new Date().toISOString() }).eq('id', accountId)
-        info(`  Created payout (fallback): ${fallback.id} ($${amount})`)
-        return fallback.id
+        err(`Payout seed RPC failed: ${error.message}`)
+        return null
+      }
+
+      if (!data?.success) {
+        err(`Payout seed RPC rejected: ${JSON.stringify(data)}`)
+        return null
       }
 
       const payoutId = data?.payout_id
-      if (!payoutId) { err(`Payout RPC returned no payout_id: ${JSON.stringify(data)}`); return null }
-      info(`  Created payout (canonical): ${payoutId} ($${amount})`)
+      info(`  Created payout (canonical seed RPC): ${payoutId} ($${amount})`)
       return payoutId
     }
 
@@ -623,10 +640,8 @@ Deno.serve(async (req: Request) => {
     let veriActiveName: string
     if (spawnedVeriId) {
       veriActiveId = spawnedVeriId
-      // Look up spawned account name
-      const { data: spawnedAcct } = await supabase.from('accounts').select('account_number').eq('id', spawnedVeriId).single()
-      veriActiveName = spawnedAcct?.account_number?.replace(PREFIX, '') ?? 'VERI-SPAWNED'
-      await ingestTrades(veriActiveId, veriActiveName, veriActiveTrades())
+      // Use null name → ingestTrades will look up platform_account_id from DB
+      await ingestTrades(veriActiveId, null, veriActiveTrades())
     } else {
       veriActiveName = 'VERI-ACTIVE'
       veriActiveId = await createAccount(veriActiveName, VERI_COHORT_ID)
@@ -650,9 +665,8 @@ Deno.serve(async (req: Request) => {
     let perfEligibleName: string
     if (spawnedPerfId) {
       perfEligibleId = spawnedPerfId
-      const { data: spawnedAcct } = await supabase.from('accounts').select('account_number').eq('id', spawnedPerfId).single()
-      perfEligibleName = spawnedAcct?.account_number?.replace(PREFIX, '') ?? 'PERF-SPAWNED'
-      await ingestTrades(perfEligibleId, perfEligibleName, perfEligibleTrades())
+      // Use null name → ingestTrades will look up platform_account_id from DB
+      await ingestTrades(perfEligibleId, null, perfEligibleTrades())
     } else {
       perfEligibleName = 'PERF-ELIGIBLE'
       perfEligibleId = await createAccount(perfEligibleName, PERF_COHORT_ID, {
