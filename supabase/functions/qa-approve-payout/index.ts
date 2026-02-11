@@ -107,18 +107,27 @@ Deno.serve(async (req) => {
     const beforeAudit = beforeAuditRes.data
     const beforeEvents = beforeEventsRes.data
 
-    // ── Call real approval RPC (caller = admin) ──
-    const requestId = crypto.randomUUID()
-    const { data: rpcResult, error: rpcError } = await supabase.rpc('approve_payout_atomic', {
-      _payout_id: payout_id,
-      _approved_by: caller.id,
-      _reason: 'QA automated approval test',
-      _request_id: requestId,
+    // ── Call payout-actions edge function (full production path) ──
+    const payoutActionsUrl = `${supabaseUrl}/functions/v1/payout-actions`
+    const paResponse = await fetch(payoutActionsUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${jwt}`,
+        'apikey': anonKey,
+      },
+      body: JSON.stringify({
+        action: 'approve',
+        payout_id,
+        reason: 'QA automated approval test',
+      }),
     })
 
-    if (rpcError) {
+    const paBody = await paResponse.json()
+
+    if (!paResponse.ok) {
       return new Response(
-        JSON.stringify({ error: 'approve_payout_atomic failed', details: rpcError.message, code: rpcError.code }),
+        JSON.stringify({ error: 'payout-actions approve failed', status: paResponse.status, details: paBody }),
         { status: 500, headers }
       )
     }
@@ -145,7 +154,6 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({
       result,
       assertions,
-      request_id: requestId,
       payout_id,
       account_number: acct.account_number,
       before: {
@@ -160,7 +168,7 @@ Deno.serve(async (req) => {
         audit: afterAuditRes.data,
         events: afterEventsRes.data,
       },
-      rpc_result: rpcResult,
+      payout_actions_response: paBody,
     }, null, 2), { status: 200, headers })
 
   } catch (err) {
