@@ -8,6 +8,7 @@ import { Users, CreditCard, Shield, Settings, AlertTriangle, TrendingUp, Trendin
 import { toast } from 'sonner';
 import { DisputeRateCard } from '@/components/admin/DisputeRateCard';
 import { RiskThrottlePanel } from '@/components/admin/RiskThrottlePanel';
+import { QaApprovePanel } from '@/components/admin/QaApprovePanel';
 
 export default function AdminDashboard() {
   const queryClient = useQueryClient();
@@ -240,6 +241,9 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* QA Test Runner (SEEDV2/DEMO only) */}
+        <QaApprovePanel />
 
         {/* Reminder card */}
         <Card className="border-warning/50 bg-warning/5">
