@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-qa-secret',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
 Deno.serve(async (req) => {
@@ -13,86 +13,108 @@ Deno.serve(async (req) => {
   const headers = { ...corsHeaders, 'Content-Type': 'application/json' }
 
   try {
-    // Parse body first
-    const body = await req.json()
-    const { payout_id, qa_secret: bodyQaSecret } = body
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-    // ── Auth: QA_SECRET or CRON_SECRET ──
-    const qaSecretHeader = req.headers.get('x-qa-secret')
-    const cronSecretHeader = req.headers.get('x-cron-secret')
-    const expectedQaSecret = Deno.env.get('QA_SECRET')
-    const expectedCronSecret = Deno.env.get('CRON_SECRET')
-
-    const qaMatch = expectedQaSecret && (qaSecretHeader === expectedQaSecret || bodyQaSecret === expectedQaSecret)
-    const cronMatch = expectedCronSecret && cronSecretHeader === expectedCronSecret
-
-    if (!qaMatch && !cronMatch) {
-      return new Response(JSON.stringify({ error: 'Forbidden: invalid secret' }), { status: 403, headers })
+    // ── Auth: caller JWT ──
+    const authHeader = req.headers.get('authorization') ?? ''
+    const jwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+    if (!jwt) {
+      return new Response(JSON.stringify({ error: 'Missing Authorization bearer token' }), { status: 401, headers })
     }
 
+    const authed = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+      auth: { persistSession: false },
+    })
+
+    const { data: userRes, error: userErr } = await authed.auth.getUser()
+    if (userErr || !userRes?.user) {
+      return new Response(JSON.stringify({ error: 'Invalid JWT', details: userErr?.message }), { status: 401, headers })
+    }
+    const caller = userRes.user
+
+    // Service client for DB ops
+    const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } })
+
+    // ── Role check: admin only ──
+    const { data: isAdmin, error: roleErr } = await supabase.rpc('has_role', {
+      _user_id: caller.id,
+      _role: 'admin',
+    })
+
+    if (roleErr || isAdmin !== true) {
+      return new Response(JSON.stringify({ error: 'Forbidden: admin role required' }), { status: 403, headers })
+    }
+
+    const { payout_id } = await req.json()
     if (!payout_id) {
       return new Response(JSON.stringify({ error: 'Missing payout_id' }), { status: 400, headers })
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const supabase = createClient(supabaseUrl, serviceRoleKey)
-
-    // ── Guard: only SEEDV2/DEMO accounts ──
-    const { data: payout, error: payoutErr } = await supabase
+    // ── Guard: payout exists + SEEDV2/DEMO only ──
+    const { data: payoutRow, error: payoutErr } = await supabase
       .from('payouts')
-      .select('id, status, amount, account_id, accounts!inner(id, account_number, status, user_id)')
+      .select('id, status, amount, account_id')
       .eq('id', payout_id)
       .single()
 
-    if (payoutErr || !payout) {
+    if (payoutErr || !payoutRow) {
       return new Response(JSON.stringify({ error: 'Payout not found', details: payoutErr?.message }), { status: 404, headers })
     }
 
-    const account = Array.isArray(payout.accounts) ? payout.accounts[0] : payout.accounts
-    const acctNum: string = account.account_number
+    const { data: acct, error: acctErr } = await supabase
+      .from('accounts')
+      .select('id, account_number, status')
+      .eq('id', payoutRow.account_id)
+      .single()
 
-    if (!acctNum.startsWith('SEEDV2-') && !acctNum.startsWith('DEMO-')) {
+    if (acctErr || !acct) {
+      return new Response(JSON.stringify({ error: 'Account not found', details: acctErr?.message }), { status: 404, headers })
+    }
+
+    if (!acct.account_number.startsWith('SEEDV2-') && !acct.account_number.startsWith('DEMO-')) {
       return new Response(
-        JSON.stringify({ error: 'QA function restricted to SEEDV2/DEMO accounts only', account_number: acctNum }),
+        JSON.stringify({ error: 'Restricted to SEEDV2/DEMO only', account_number: acct.account_number }),
         { status: 403, headers }
       )
     }
 
-    if (!['pending', 'under_review'].includes(payout.status)) {
+    if (!['pending', 'under_review'].includes(payoutRow.status)) {
       return new Response(
-        JSON.stringify({ error: `Payout not in approvable state (current: ${payout.status})` }),
+        JSON.stringify({ error: `Not approvable (status=${payoutRow.status})` }),
         { status: 400, headers }
       )
     }
 
-    // ── Capture before-state ──
-    const beforePayout = { status: payout.status, amount: payout.amount }
-    const beforeAccount = { status: account.status, account_number: acctNum }
+    // ── BEFORE snapshots ──
+    const [beforeAuditRes, beforeEventsRes] = await Promise.all([
+      supabase
+        .from('audit_logs')
+        .select('action, user_id, reason, created_at')
+        .eq('account_id', acct.id)
+        .order('created_at', { ascending: false })
+        .limit(5),
+      supabase
+        .from('account_events')
+        .select('event_type, created_at')
+        .eq('account_id', acct.id)
+        .order('created_at', { ascending: false })
+        .limit(10),
+    ])
 
-    const { data: beforeAudit } = await supabase
-      .from('audit_logs')
-      .select('action, user_id, reason, created_at')
-      .eq('account_id', account.id)
-      .order('created_at', { ascending: false })
-      .limit(5)
+    const beforeAudit = beforeAuditRes.data
+    const beforeEvents = beforeEventsRes.data
 
-    const { data: beforeEvents } = await supabase
-      .from('account_events')
-      .select('event_type, created_at')
-      .eq('account_id', account.id)
-      .order('created_at', { ascending: false })
-      .limit(10)
-
-    // ── Call the real approve_payout_atomic RPC ──
+    // ── Call real approval RPC (caller = admin) ──
     const requestId = crypto.randomUUID()
-    const { data: rpcResult, error: rpcError } = await supabase
-      .rpc('approve_payout_atomic', {
-        _payout_id: payout_id,
-        _approved_by: account.user_id, // use account owner as approver for QA
-        _reason: 'QA automated approval test',
-        _request_id: requestId,
-      })
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('approve_payout_atomic', {
+      _payout_id: payout_id,
+      _approved_by: caller.id,
+      _reason: 'QA automated approval test',
+      _request_id: requestId,
+    })
 
     if (rpcError) {
       return new Response(
@@ -101,84 +123,44 @@ Deno.serve(async (req) => {
       )
     }
 
-    // ── Write audit log (service role, matching payout-actions pattern) ──
-    const idempotencyKey = `qa-approve:${payout_id}:${requestId}`
-    
-    // Compute prev_hash from latest audit log
-    const { data: latestAudit } = await supabase
-      .from('audit_logs')
-      .select('row_hash')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
-
-    const prevHash = latestAudit?.row_hash ?? 'GENESIS'
-
-    await supabase.from('audit_logs').upsert({
-      user_id: account.user_id,
-      account_id: account.id,
-      action: 'payout_approved',
-      details: { payout_id, amount: payout.amount, qa_test: true, request_id: requestId },
-      reason: 'QA automated approval test',
-      idempotency_key: idempotencyKey,
-      request_id: requestId,
-      prev_hash: prevHash,
-      row_hash: 'qa-' + requestId,
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
-
-    // ── Write account event ──
-    await supabase.from('account_events').upsert({
-      account_id: account.id,
-      event_type: 'payout_approved',
-      event_data: { payout_id, amount: payout.amount, qa_test: true },
-      idempotency_key: `qa-event:${payout_id}:${requestId}`,
-      request_id: requestId,
-    }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
-
-    // ── Capture after-state ──
-    const { data: afterPayout } = await supabase
-      .from('payouts')
-      .select('status, reviewed_at, approved_by')
-      .eq('id', payout_id)
-      .single()
-
-    const { data: afterAccount } = await supabase
-      .from('accounts')
-      .select('status, account_number')
-      .eq('id', account.id)
-      .single()
-
-    const { data: afterAudit } = await supabase
-      .from('audit_logs')
-      .select('action, user_id, reason, created_at')
-      .eq('account_id', account.id)
-      .order('created_at', { ascending: false })
-      .limit(5)
-
-    const { data: afterEvents } = await supabase
-      .from('account_events')
-      .select('event_type, created_at')
-      .eq('account_id', account.id)
-      .order('created_at', { ascending: false })
-      .limit(10)
+    // ── AFTER snapshots ──
+    const [afterPayoutRes, afterAccountRes, afterAuditRes, afterEventsRes] = await Promise.all([
+      supabase.from('payouts').select('status, reviewed_at, approved_by').eq('id', payout_id).single(),
+      supabase.from('accounts').select('status, account_number').eq('id', acct.id).single(),
+      supabase.from('audit_logs').select('action, user_id, reason, created_at').eq('account_id', acct.id).order('created_at', { ascending: false }).limit(5),
+      supabase.from('account_events').select('event_type, created_at').eq('account_id', acct.id).order('created_at', { ascending: false }).limit(10),
+    ])
 
     // ── Assertions ──
     const assertions = {
-      payout_status_changed: afterPayout?.status === 'approved',
-      account_status_changed: afterAccount?.status === 'payout_approved',
-      audit_log_created: (afterAudit?.length ?? 0) > (beforeAudit?.length ?? 0),
-      account_event_created: (afterEvents?.length ?? 0) > (beforeEvents?.length ?? 0),
+      payout_status_approved: afterPayoutRes.data?.status === 'approved',
+      payout_has_reviewer: !!afterPayoutRes.data?.approved_by,
+      account_status_payout_approved: afterAccountRes.data?.status === 'payout_approved',
+      audit_log_increased: (afterAuditRes.data?.length ?? 0) > (beforeAudit?.length ?? 0),
+      events_increased: (afterEventsRes.data?.length ?? 0) > (beforeEvents?.length ?? 0),
     }
 
-    const allPassed = Object.values(assertions).every(Boolean)
+    const result = Object.values(assertions).every(Boolean) ? 'PASS' : 'FAIL'
 
     return new Response(JSON.stringify({
-      result: allPassed ? 'PASS' : 'FAIL',
+      result,
       assertions,
-      rpc_result: rpcResult,
-      before: { payout: beforePayout, account: beforeAccount, audit_count: beforeAudit?.length, event_count: beforeEvents?.length },
-      after: { payout: afterPayout, account: afterAccount, audit: afterAudit, events: afterEvents },
       request_id: requestId,
+      payout_id,
+      account_number: acct.account_number,
+      before: {
+        payout_status: payoutRow.status,
+        account_status: acct.status,
+        audit_count: beforeAudit?.length ?? 0,
+        event_count: beforeEvents?.length ?? 0,
+      },
+      after: {
+        payout: afterPayoutRes.data,
+        account: afterAccountRes.data,
+        audit: afterAuditRes.data,
+        events: afterEventsRes.data,
+      },
+      rpc_result: rpcResult,
     }, null, 2), { status: 200, headers })
 
   } catch (err) {
