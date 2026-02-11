@@ -222,6 +222,7 @@ export const adminNavItems: NavItem[] = [
   { label: 'Tier Readiness', href: '/admin/tier-readiness', icon: <Shield className="h-5 w-5" /> },
   { label: 'Launch Readiness', href: '/admin/readiness', icon: <Shield className="h-5 w-5" /> },
   { label: 'QA Scan', href: '/admin/qa-scan', icon: <Activity className="h-5 w-5" /> },
+  { label: 'Email Triage', href: '/admin/support-emails', icon: <FileText className="h-5 w-5" /> },
 ];
 
 export const supportNavItems: NavItem[] = [

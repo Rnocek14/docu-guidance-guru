@@ -37,6 +37,7 @@ import OpsMetrics from "./pages/admin/OpsMetrics";
 import TierReadiness from "./pages/admin/TierReadiness";
 import AdminReadiness from "./pages/admin/AdminReadiness";
 import QaScanRunner from "./pages/admin/QaScanRunner";
+import SupportEmails from "./pages/admin/SupportEmails";
 import SupportDashboard from "./pages/support/SupportDashboard";
 import AccountDetails from "./pages/trader/AccountDetails";
 
@@ -239,6 +240,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <QaScanRunner />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/support-emails"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <SupportEmails />
                 </ProtectedRoute>
               }
             />
