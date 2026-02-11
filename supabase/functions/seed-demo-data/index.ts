@@ -484,37 +484,66 @@ Deno.serve(async (req: Request) => {
           }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
         }
 
-        // Handle auto-pass (same logic as ingest-trade edge function)
+        // ── PRODUCTION-EQUIVALENT AUTO-PASS GATING ──
+        // Mirror production ingest-trade: only call try_auto_pass when
+        // checkPassEligibility conditions are met (profit target + min trading days).
+        // This prevents the seed from auto-passing accounts that shouldn't pass yet.
         if (!result?.breach_detected && result?.previous_status === 'active') {
-          const { data: passResult, error: passErr } = await supabase.rpc('try_auto_pass', {
-            _account_id: accountId,
-            _request_id: `seed-${accountId}`,
-          })
+          const rules = result.rule_snapshot as Record<string, unknown> | null
+          const profitTargetPct = Number(rules?.profit_target_percent ?? 0)
+          const minTradingDays = Number(rules?.min_trading_days ?? 0)
+          const startingBalance = Number(result.starting_balance ?? STARTING_BALANCE)
+          const newBalance = Number(result.new_balance ?? startingBalance)
+          const tradingDaysCount = Number(result.trading_days_count ?? 0)
+          const currentProfitPct = ((newBalance - startingBalance) / startingBalance) * 100
 
-          if (!passErr && passResult?.success && passResult?.updated) {
-            passed = true
-            info(`  AUTO-PASS triggered`)
+          const profitMet = currentProfitPct >= profitTargetPct
+          const daysMet = tradingDaysCount >= minTradingDays
 
-            // Insert passed event
-            await supabase.from('account_events').upsert({
-              account_id: accountId,
-              event_type: 'passed',
-              idempotency_key: `seed.passed:${accountId}`,
-              event_data: {
-                phase: (result.rule_snapshot as Record<string, unknown>)?.cohort_phase ?? 'unknown',
-                new_balance: result.new_balance,
-              },
-            }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
+          if (profitMet && daysMet) {
+            // Check for unconfirmed violations and pending flags
+            const { count: violCount } = await supabase.from('violations')
+              .select('*', { count: 'exact', head: true })
+              .eq('account_id', accountId).is('confirmed_at', null)
+            const { count: flagCount } = await supabase.from('flags')
+              .select('*', { count: 'exact', head: true })
+              .eq('account_id', accountId).eq('status', 'pending')
+            
+            if ((violCount ?? 0) === 0 && (flagCount ?? 0) === 0) {
+              const { data: passResult, error: passErr } = await supabase.rpc('try_auto_pass', {
+                _account_id: accountId,
+                _request_id: `seed-${accountId}`,
+              })
 
-            // Spawn next phase
-            const { data: spawnResult, error: spawnErr } = await supabase.rpc('spawn_next_phase_account', {
-              _from_account_id: accountId,
-            })
-            if (!spawnErr && spawnResult?.spawned) {
-              spawnedId = spawnResult.to_account_id
-              info(`  SPAWNED: ${spawnResult.to_account_id} (already_existed: ${spawnResult.already_existed})`)
-            } else if (spawnResult && !spawnResult.spawned) {
-              info(`  Spawn skipped: ${spawnResult.reason}`)
+              if (!passErr && passResult?.success && passResult?.updated) {
+                passed = true
+                info(`  AUTO-PASS triggered (profit: ${currentProfitPct.toFixed(2)}% >= ${profitTargetPct}%, days: ${tradingDaysCount} >= ${minTradingDays})`)
+
+                // Insert passed event
+                await supabase.from('account_events').upsert({
+                  account_id: accountId,
+                  event_type: 'passed',
+                  idempotency_key: `seed.passed:${accountId}`,
+                  event_data: {
+                    phase: (rules?.cohort_phase as string) ?? 'unknown',
+                    new_balance: newBalance,
+                    profit_pct: currentProfitPct.toFixed(2),
+                  },
+                }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
+
+                // Spawn next phase
+                const { data: spawnResult, error: spawnErr } = await supabase.rpc('spawn_next_phase_account', {
+                  _from_account_id: accountId,
+                })
+                if (!spawnErr && spawnResult?.spawned) {
+                  spawnedId = spawnResult.to_account_id
+                  info(`  SPAWNED: ${spawnResult.to_account_id} (already_existed: ${spawnResult.already_existed})`)
+                } else if (spawnResult && !spawnResult.spawned) {
+                  info(`  Spawn skipped: ${spawnResult.reason}`)
+                }
+              }
+            } else {
+              info(`  Pass blocked: ${violCount ?? 0} unconfirmed violations, ${flagCount ?? 0} pending flags`)
             }
           }
         }
