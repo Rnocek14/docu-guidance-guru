@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +15,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { TrendingUp, TrendingDown } from 'lucide-react';
+import { AccountFilter } from '@/components/trader/AccountFilter';
 
 interface Trade {
   id: string;
@@ -26,6 +28,7 @@ interface Trade {
   opened_at: string;
   closed_at: string | null;
   status: string;
+  account_id: string;
   account: {
     account_number: string;
   };
@@ -33,20 +36,42 @@ interface Trade {
 
 export default function TraderTrades() {
   const { user } = useAuth();
+  const [filterAccountId, setFilterAccountId] = useState('all');
+
+  // Fetch accounts for the filter
+  const { data: accounts } = useQuery({
+    queryKey: ['trader-accounts-filter', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('accounts')
+        .select('id, account_number, status, cohort:cohorts(cohort_phase)')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []).map((a: any) => ({
+        id: a.id,
+        account_number: a.account_number,
+        status: a.status,
+        cohort_phase: a.cohort?.cohort_phase,
+      }));
+    },
+    enabled: !!user?.id,
+  });
 
   const { data: trades, isLoading } = useQuery({
-    queryKey: ['trader-trades', user?.id],
+    queryKey: ['trader-trades', user?.id, filterAccountId],
     queryFn: async () => {
-      // First get user's account IDs
-      const { data: accounts } = await supabase
+      const { data: accts } = await supabase
         .from('accounts')
         .select('id, account_number')
         .eq('user_id', user?.id);
 
-      if (!accounts?.length) return [];
+      if (!accts?.length) return [];
 
-      const accountIds = accounts.map((a) => a.id);
-      const accountMap = Object.fromEntries(accounts.map((a) => [a.id, a.account_number]));
+      const accountIds = filterAccountId === 'all'
+        ? accts.map((a) => a.id)
+        : [filterAccountId];
+      const accountMap = Object.fromEntries(accts.map((a) => [a.id, a.account_number]));
 
       const { data, error } = await supabase
         .from('trades')
@@ -68,11 +93,18 @@ export default function TraderTrades() {
   return (
     <DashboardLayout title="My Trades" navItems={traderNavItems}>
       <div className="space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Trade History</h2>
-          <p className="text-muted-foreground">
-            View all trades across your accounts.
-          </p>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">Trade History</h2>
+            <p className="text-muted-foreground">
+              View all trades across your accounts.
+            </p>
+          </div>
+          <AccountFilter
+            accounts={accounts || []}
+            value={filterAccountId}
+            onChange={setFilterAccountId}
+          />
         </div>
 
         <Card>

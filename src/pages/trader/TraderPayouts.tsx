@@ -19,6 +19,7 @@ import { DollarSign, Clock, CheckCircle, XCircle, Loader2, ChevronDown, ChevronU
 import { isTerminalPaid, IN_PROGRESS_PAYOUT_STATUSES } from '@/lib/types';
 import { getStatusCopy, getTimelineIndex } from '@/lib/payout-copy';
 import { PayoutTimeline } from '@/components/trader/PayoutTimeline';
+import { AccountFilter } from '@/components/trader/AccountFilter';
 
 interface Payout {
   id: string;
@@ -37,16 +38,36 @@ interface Payout {
 export default function TraderPayouts() {
   const { user } = useAuth();
   const [expandedPayoutId, setExpandedPayoutId] = useState<string | null>(null);
+  const [filterAccountId, setFilterAccountId] = useState('all');
   const tracked = useRef(false);
 
   useEffect(() => {
     if (!tracked.current) { tracked.current = true; track('payouts_view'); }
   }, []);
 
-  const { data: payouts, isLoading } = useQuery({
-    queryKey: ['trader-payouts', user?.id],
+  // Fetch accounts for the filter
+  const { data: filterAccounts } = useQuery({
+    queryKey: ['trader-accounts-filter-payouts', user?.id],
     queryFn: async () => {
-      // First get user's account IDs
+      const { data, error } = await supabase
+        .from('accounts')
+        .select('id, account_number, status, cohort:cohorts(cohort_phase)')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []).map((a: any) => ({
+        id: a.id,
+        account_number: a.account_number,
+        status: a.status,
+        cohort_phase: a.cohort?.cohort_phase,
+      }));
+    },
+    enabled: !!user?.id,
+  });
+
+  const { data: payouts, isLoading } = useQuery({
+    queryKey: ['trader-payouts', user?.id, filterAccountId],
+    queryFn: async () => {
       const { data: accounts } = await supabase
         .from('accounts')
         .select('id, account_number')
@@ -54,7 +75,9 @@ export default function TraderPayouts() {
 
       if (!accounts?.length) return [];
 
-      const accountIds = accounts.map((a) => a.id);
+      const accountIds = filterAccountId === 'all'
+        ? accounts.map((a) => a.id)
+        : [filterAccountId];
       const accountMap = Object.fromEntries(accounts.map((a) => [a.id, a.account_number]));
 
       const { data, error } = await supabase
@@ -100,11 +123,18 @@ export default function TraderPayouts() {
   return (
     <DashboardLayout title="My Payouts" navItems={traderNavItems}>
       <div className="space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Payout History</h2>
-          <p className="text-muted-foreground">
-            Track your payout requests and payment status.
-          </p>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">Payout History</h2>
+            <p className="text-muted-foreground">
+              Track your payout requests and payment status.
+            </p>
+          </div>
+          <AccountFilter
+            accounts={filterAccounts || []}
+            value={filterAccountId}
+            onChange={setFilterAccountId}
+          />
         </div>
 
         {/* Summary cards */}
