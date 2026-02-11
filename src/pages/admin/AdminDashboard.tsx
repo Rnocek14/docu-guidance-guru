@@ -16,16 +16,21 @@ export default function AdminDashboard() {
   const { data: stats } = useQuery({
     queryKey: ['admin-stats'],
     queryFn: async () => {
-      const [usersRes, accountsRes, payoutsRes, accountPnlRes, paidPayoutsRes, pendingPayoutsAmtRes] = await Promise.all([
+      const [usersRes, accountsRes, payoutsRes, evalAccountsRes, paidPayoutsRes, pendingPayoutsAmtRes] = await Promise.all([
         supabase.from('profiles').select('id', { count: 'exact' }),
         supabase.from('accounts').select('status', { count: 'exact' }),
         supabase.from('payouts').select('status', { count: 'exact' }).eq('status', 'pending'),
-        supabase.from('accounts').select('total_pnl, current_balance, starting_balance'),
+        // Revenue: count eval accounts × their cohort entry_fee
+        supabase.from('accounts').select('id, cohorts!inner(entry_fee, cohort_phase)').not('cohorts.entry_fee', 'is', null),
         supabase.from('payouts').select('amount').in('status', ['paid', 'paid_confirmed']),
         supabase.from('payouts').select('amount').eq('status', 'pending'),
       ]);
 
-      const totalPnl = (accountPnlRes.data || []).reduce((sum, a) => sum + Number(a.total_pnl || 0), 0);
+      // Revenue = sum of entry fees from accounts whose cohort has an entry_fee (eval phase)
+      const totalRevenue = (evalAccountsRes.data || []).reduce((sum, a) => {
+        const fee = Number((a.cohorts as any)?.entry_fee || 0);
+        return sum + fee;
+      }, 0);
       const totalPaid = (paidPayoutsRes.data || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
       const totalPendingAmt = (pendingPayoutsAmtRes.data || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
@@ -33,7 +38,7 @@ export default function AdminDashboard() {
         totalUsers: usersRes.count || 0,
         totalAccounts: accountsRes.count || 0,
         pendingPayouts: payoutsRes.count || 0,
-        totalPnl,
+        totalRevenue,
         totalPaid,
         totalPendingAmt,
       };
@@ -173,27 +178,25 @@ export default function AdminDashboard() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Aggregate P&L</CardTitle>
-              {(stats?.totalPnl ?? 0) >= 0
-                ? <TrendingUp className="h-4 w-4 text-green-500" />
-                : <TrendingDown className="h-4 w-4 text-destructive" />}
+              <CardTitle className="text-sm font-medium">Revenue</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className={`text-2xl font-bold ${(stats?.totalPnl ?? 0) >= 0 ? 'text-green-500' : 'text-destructive'}`}>
-                ${(stats?.totalPnl ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <div className="text-2xl font-bold">
+                ${(stats?.totalRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              <p className="text-xs text-muted-foreground">All accounts combined</p>
+              <p className="text-xs text-muted-foreground">Entry fees collected</p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Paid Out</CardTitle>
-              <Banknote className="h-4 w-4 text-green-500" />
+              <Banknote className="h-4 w-4 text-destructive" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-500">
-                ${(stats?.totalPaid ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <div className="text-2xl font-bold text-destructive">
+                −${(stats?.totalPaid ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <p className="text-xs text-muted-foreground">Confirmed payouts</p>
             </CardContent>
@@ -214,18 +217,23 @@ export default function AdminDashboard() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Net Position</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Net Profit</CardTitle>
+              {(() => {
+                const net = (stats?.totalRevenue ?? 0) - (stats?.totalPaid ?? 0);
+                return net >= 0
+                  ? <TrendingUp className="h-4 w-4 text-green-500" />
+                  : <TrendingDown className="h-4 w-4 text-destructive" />;
+              })()}
             </CardHeader>
             <CardContent>
               {(() => {
-                const net = (stats?.totalPnl ?? 0) - (stats?.totalPaid ?? 0);
+                const net = (stats?.totalRevenue ?? 0) - (stats?.totalPaid ?? 0);
                 return (
                   <>
                     <div className={`text-2xl font-bold ${net >= 0 ? 'text-green-500' : 'text-destructive'}`}>
                       ${net.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <p className="text-xs text-muted-foreground">P&L minus payouts</p>
+                    <p className="text-xs text-muted-foreground">Revenue minus payouts</p>
                   </>
                 );
               })()}
