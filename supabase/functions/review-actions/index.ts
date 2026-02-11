@@ -228,7 +228,8 @@ Deno.serve(async (req) => {
       effectiveIdempotencyKey = 'audit.' + await generateDeterministicKey(keyInput)
     }
     
-    const requestId = effectiveIdempotencyKey
+    // request_id is a UUID column — generate a proper UUID (not the hash-based idempotency key)
+    const requestId = crypto.randomUUID()
     
     const previousStatus = account.status
     let wasDuplicate = false
@@ -366,7 +367,7 @@ Deno.serve(async (req) => {
           user_id: userId,
           account_id: body.account_id,
           action: 'status_changed',
-          request_id: effectiveIdempotencyKey,
+          request_id: crypto.randomUUID(),
           idempotency_key: noteIdempotencyKey,
           reason: body.reason || 'Review note added',
           details: {
