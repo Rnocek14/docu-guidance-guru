@@ -555,7 +555,7 @@ Deno.serve(async (req: Request) => {
         _payout_id: payoutId,
         _provider: 'wise',
         _amount: payout!.amount,
-        _initiated_by: DEMO_STAFF_PAYER, // Use a different staff UUID for separation of duties
+        _initiated_by: SEED_INITIATOR_ID, // Synthetic UUID: NOT NULL, no FK, != approver
       })
       if (initErr) { err(`Initiate failed: ${initErr.message}`); return }
       if (!initiateResult?.success) { err(`Initiate rejected: ${JSON.stringify(initiateResult)}`); return }
@@ -690,11 +690,10 @@ Deno.serve(async (req: Request) => {
     await ingestTrades(perfNearCapId, 'PERF-NEAR-CAP', perfNearCapTrades())
 
     // Create and process 3 payouts (approved → paid → confirmed)
-    // Staff UUIDs for payout approval chain
-    // DEMO_STAFF_ID = demo trader (exists in auth.users) — used as approver
-    // DEMO_STAFF_PAYER = seed staff user (exists in auth.users) — used as payer (separation of duties)
-    const DEMO_STAFF_ID = userId  // The real demo trader — exists in auth.users, satisfies payouts.reviewed_by FK
-    const DEMO_STAFF_PAYER = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee01'  // Seed staff user — exists in auth.users
+    // Approver must be a real auth.users UUID (payouts.reviewed_by FK)
+    // Initiator only needs to be NOT NULL and != approver (no FK on payout_payments.initiated_by or payouts.paid_by)
+    const DEMO_APPROVER = userId  // Real demo trader — satisfies reviewed_by FK
+    const SEED_INITIATOR_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'  // Synthetic UUID, no FK, != userId
     
     for (let i = 1; i <= 3; i++) {
       info(`  Processing payout ${i}/3...`)
@@ -709,7 +708,7 @@ Deno.serve(async (req: Request) => {
 
       const payoutId = await createPayout(perfNearCapId, payoutAmount)
       if (payoutId) {
-        await processPayoutToCompletion(payoutId, DEMO_STAFF_ID, `seed-cap-${i}`)
+        await processPayoutToCompletion(payoutId, DEMO_APPROVER, `seed-cap-${i}`)
       }
 
       // Wait a tick for timestamp uniqueness
