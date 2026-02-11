@@ -1,9 +1,15 @@
 -- ============================================================
--- INTEGRITY SCAN PACK v1.0
+-- INTEGRITY SCAN PACK v2.0
 -- ============================================================
 -- Run periodically (recommended: daily cron) to detect invariant breaks.
 -- Every query MUST return 0 rows when the system is healthy.
 -- Any non-zero result is a P0 alert requiring immediate investigation.
+-- ============================================================
+-- v2.0 changes:
+--   - Fixed I4: split into I4a (transition OUT) and I4b (transition IN)
+--   - Added I20: Trades present but no daily stats
+--   - Added I21: Payout status transition without matching audit log
+--   - Corrected column references (rule_type not rule_key)
 -- ============================================================
 
 -- =============================
@@ -33,12 +39,24 @@ FROM accounts a JOIN cohorts c ON c.id = a.cohort_id
 WHERE c.cohort_phase IN ('verification', 'performance')
   AND (a.root_account_id IS NULL OR a.parent_account_id IS NULL);
 
--- I4: Passed accounts without phase transition records
--- Risk: Trader timeline empty, graduation audit trail missing
-SELECT 'I4_PASSED_NO_TRANSITION' as invariant, a.id, a.account_number, a.passed_at
+-- I4a: Passed eval/veri accounts without a transition OUT
+-- Risk: Graduation didn't spawn next-phase account
+-- Semantics: from_account_id = this passed account
+SELECT 'I4a_PASSED_NO_TRANSITION_OUT' as invariant, a.id, a.account_number, a.passed_at, c.cohort_phase
 FROM accounts a
+JOIN cohorts c ON c.id = a.cohort_id
 WHERE a.passed_at IS NOT NULL
+  AND c.cohort_phase IN ('evaluation', 'verification')
   AND NOT EXISTS (SELECT 1 FROM account_phase_transitions apt WHERE apt.from_account_id = a.id);
+
+-- I4b: Veri/perf accounts without a transition IN
+-- Risk: Spawned account has no traceable origin
+-- Semantics: to_account_id = this spawned account
+SELECT 'I4b_SPAWNED_NO_TRANSITION_IN' as invariant, a.id, a.account_number, c.cohort_phase
+FROM accounts a
+JOIN cohorts c ON c.id = a.cohort_id
+WHERE c.cohort_phase IN ('verification', 'performance')
+  AND NOT EXISTS (SELECT 1 FROM account_phase_transitions apt WHERE apt.to_account_id = a.id);
 
 -- I5: Accounts missing rule_snapshot
 -- Risk: Breach detection cannot function, rules mutable
@@ -185,3 +203,36 @@ JOIN payouts p ON p.account_id = a.id
 WHERE p.status IN ('paid', 'paid_confirmed')
   AND pr.kyc_status != 'verified'
 GROUP BY pr.user_id, pr.kyc_status;
+
+-- =============================
+-- SECTION 7: TRADE + STATS COVERAGE (NEW in v2)
+-- =============================
+
+-- I20: Accounts with trades but no daily stats
+-- Risk: Equity curves empty, consistency enforcement blind
+SELECT 'I20_TRADES_NO_STATS' as invariant, a.id, a.account_number,
+  t.trade_count, a.status
+FROM accounts a
+CROSS JOIN LATERAL (
+  SELECT count(*) as trade_count FROM trades t WHERE t.account_id = a.id
+) t
+WHERE t.trade_count > 0
+  AND NOT EXISTS (SELECT 1 FROM account_daily_stats ads WHERE ads.account_id = a.id);
+
+-- I21: Payout status transition without matching audit log entry
+-- More specific than I13: checks each individual payout
+SELECT 'I21_PAYOUT_STATUS_NO_AUDIT' as invariant, p.id as payout_id, p.status,
+  a.account_number
+FROM payouts p
+JOIN accounts a ON a.id = p.account_id
+WHERE p.status IN ('approved', 'payment_initiated', 'paid', 'paid_confirmed', 'rejected')
+  AND NOT EXISTS (
+    SELECT 1 FROM audit_logs al
+    WHERE al.account_id = a.id
+      AND (
+        (p.status IN ('approved') AND al.action = 'payout_approved')
+        OR (p.status IN ('rejected') AND al.action = 'payout_rejected')
+        OR (p.status IN ('paid', 'paid_confirmed') AND al.action = 'payout_paid')
+        OR (p.status = 'payment_initiated' AND al.action = 'status_changed')
+      )
+  );
