@@ -267,6 +267,56 @@ export type Database = {
           },
         ]
       }
+      ai_usage_log: {
+        Row: {
+          completion_tokens: number
+          created_at: string
+          error: string | null
+          estimated_cost_cents: number
+          function_name: string
+          id: string
+          latency_ms: number | null
+          model: string
+          prompt_tokens: number
+          support_email_id: string | null
+          total_tokens: number
+        }
+        Insert: {
+          completion_tokens?: number
+          created_at?: string
+          error?: string | null
+          estimated_cost_cents?: number
+          function_name: string
+          id?: string
+          latency_ms?: number | null
+          model: string
+          prompt_tokens?: number
+          support_email_id?: string | null
+          total_tokens?: number
+        }
+        Update: {
+          completion_tokens?: number
+          created_at?: string
+          error?: string | null
+          estimated_cost_cents?: number
+          function_name?: string
+          id?: string
+          latency_ms?: number | null
+          model?: string
+          prompt_tokens?: number
+          support_email_id?: string | null
+          total_tokens?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_usage_log_support_email_id_fkey"
+            columns: ["support_email_id"]
+            isOneToOne: false
+            referencedRelation: "support_emails"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       analytics_events: {
         Row: {
           created_at: string
@@ -2081,7 +2131,17 @@ export type Database = {
       }
       support_emails: {
         Row: {
+          ai_attempted_at: string | null
+          ai_error: string | null
+          ai_latency_ms: number | null
+          ai_model: string | null
+          ai_status: string
           ai_summary: string | null
+          ai_tokens_used: number | null
+          assigned_at: string | null
+          assigned_to: string | null
+          auto_send_blocked_reason: string | null
+          auto_sendable: boolean
           body_html: string | null
           body_text: string
           confidence: number
@@ -2090,9 +2150,15 @@ export type Database = {
           draft_reply: string | null
           error: string | null
           from_address: string
+          human_override: boolean
           id: string
           matched_account_id: string | null
           matched_user_id: string | null
+          original_draft_reply: string | null
+          original_tag: string | null
+          overridden_at: string | null
+          overridden_by: string | null
+          override_reason: string | null
           resend_inbound_id: string | null
           resend_message_id: string | null
           sent_at: string | null
@@ -2104,7 +2170,17 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          ai_attempted_at?: string | null
+          ai_error?: string | null
+          ai_latency_ms?: number | null
+          ai_model?: string | null
+          ai_status?: string
           ai_summary?: string | null
+          ai_tokens_used?: number | null
+          assigned_at?: string | null
+          assigned_to?: string | null
+          auto_send_blocked_reason?: string | null
+          auto_sendable?: boolean
           body_html?: string | null
           body_text?: string
           confidence?: number
@@ -2113,9 +2189,15 @@ export type Database = {
           draft_reply?: string | null
           error?: string | null
           from_address: string
+          human_override?: boolean
           id?: string
           matched_account_id?: string | null
           matched_user_id?: string | null
+          original_draft_reply?: string | null
+          original_tag?: string | null
+          overridden_at?: string | null
+          overridden_by?: string | null
+          override_reason?: string | null
           resend_inbound_id?: string | null
           resend_message_id?: string | null
           sent_at?: string | null
@@ -2127,7 +2209,17 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          ai_attempted_at?: string | null
+          ai_error?: string | null
+          ai_latency_ms?: number | null
+          ai_model?: string | null
+          ai_status?: string
           ai_summary?: string | null
+          ai_tokens_used?: number | null
+          assigned_at?: string | null
+          assigned_to?: string | null
+          auto_send_blocked_reason?: string | null
+          auto_sendable?: boolean
           body_html?: string | null
           body_text?: string
           confidence?: number
@@ -2136,9 +2228,15 @@ export type Database = {
           draft_reply?: string | null
           error?: string | null
           from_address?: string
+          human_override?: boolean
           id?: string
           matched_account_id?: string | null
           matched_user_id?: string | null
+          original_draft_reply?: string | null
+          original_tag?: string | null
+          overridden_at?: string | null
+          overridden_by?: string | null
+          override_reason?: string | null
           resend_inbound_id?: string | null
           resend_message_id?: string | null
           sent_at?: string | null
@@ -2459,6 +2557,18 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      ai_daily_cost: {
+        Row: {
+          avg_latency_ms: number | null
+          call_count: number | null
+          day: string | null
+          function_name: string | null
+          model: string | null
+          total_cost_cents: number | null
+          total_tokens: number | null
+        }
+        Relationships: []
       }
     }
     Functions: {
