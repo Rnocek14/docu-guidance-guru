@@ -1,0 +1,14 @@
+-- ============================================================
+-- Comprehensive Seed: 12 Accounts Across All Risk Scenarios
+-- ============================================================
+-- RERUNNABLE: deletes only DEMO-% prefixed artifacts
+-- IMPORTANT: Must disable breaker triggers before running
+--   (see migration for exact ALTER TABLE statements)
+-- ============================================================
+-- Covers:
+--   EVAL:  near-pass, breach, failed, passed-cooling, passed-ready, drawdown-risk
+--   VERI:  active, passed
+--   PERF:  eligible, payout-requested, near-cap (3 paid payouts), best-day-issue
+-- Lifetime paid: $900 / $1,043 cap ($143 headroom)
+-- Throttle denominator: 1 failed_confirmed + 4 passed in window
+-- ============================================================
