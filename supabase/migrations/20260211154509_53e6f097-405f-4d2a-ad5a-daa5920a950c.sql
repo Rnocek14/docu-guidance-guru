@@ -1,0 +1,1 @@
+UPDATE internal_secrets SET value = 'd61980112023cc589900fbc2a73b37361abbed7402aebca7d2f4e84591bf41db', updated_at = now() WHERE key = 'CRON_SECRET';
