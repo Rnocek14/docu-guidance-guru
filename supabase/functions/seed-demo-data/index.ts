@@ -212,8 +212,14 @@ Deno.serve(async (req: Request) => {
     cronSecret = secretRow?.value ?? ''
   }
 
+  // Also accept service_role key directly (used by Lovable curl tool)
+  const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  const bearerToken = authHeader.replace('Bearer ', '')
+
   if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
     // OK — cron-authenticated
+  } else if (svcKey && bearerToken === svcKey) {
+    // OK — service_role authenticated (internal tooling)
   } else {
     // Check for admin JWT
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
@@ -629,7 +635,15 @@ Deno.serve(async (req: Request) => {
     // ── S2: Eval Breach (daily loss violation) ──
     info('\n=== S2: Eval Breach ===')
     const evalBreachId = await createAccount('EVAL-BREACH', EVAL_COHORT_ID)
-    await ingestTrades(evalBreachId, 'EVAL-BREACH', evalBreachTrades())
+    const breachResult = await ingestTrades(evalBreachId, 'EVAL-BREACH', evalBreachTrades())
+    // Triggers are disabled during seed, so manually set breached_detected
+    if (breachResult.breached) {
+      await supabase.from('accounts').update({
+        status: 'breached_detected',
+        updated_at: new Date().toISOString(),
+      }).eq('id', evalBreachId)
+      info('  Manually set status → breached_detected (triggers disabled)')
+    }
 
     // ── S3: Eval Fail (drawdown → breached, then confirmed via review-actions) ──
     info('\n=== S3: Eval Fail ===')
@@ -671,16 +685,29 @@ Deno.serve(async (req: Request) => {
     
     let spawnedVeriId = passResult.spawnedId
     if (!passResult.passed) {
-      // If auto-pass didn't trigger (maybe consistency rules blocked),
-      // force-pass for seed purposes
+      // Auto-pass didn't trigger (triggers disabled), force-pass manually
       info('  Auto-pass did not trigger, forcing pass for seed...')
-      await supabase.rpc('try_auto_pass', { _account_id: evalPassId, _request_id: 'seed-force' })
+      await supabase.from('accounts').update({
+        status: 'passed',
+        passed_at: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', evalPassId)
+      
+      await supabase.from('account_events').upsert({
+        account_id: evalPassId,
+        event_type: 'passed',
+        idempotency_key: `seed.passed:${evalPassId}`,
+        event_data: { phase: 'evaluation', seed_forced: true },
+      }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
+      
       const { data: spawnResult } = await supabase.rpc('spawn_next_phase_account', { _from_account_id: evalPassId })
       spawnedVeriId = spawnResult?.to_account_id
-      if (spawnedVeriId) info(`  Force-spawned verification: ${spawnedVeriId}`)
+      if (spawnedVeriId) {
+        info(`  Force-spawned verification: ${spawnedVeriId}`)
+      } else {
+        info('  spawn_next_phase_account did not spawn, creating manually...')
+      }
     }
-
-    // ── S5: Verification Active (from spawn or standalone) ──
     info('\n=== S5: Verification Active ===')
     let veriActiveId: string
     let veriActiveName: string
@@ -708,6 +735,38 @@ Deno.serve(async (req: Request) => {
     const veriPassResult = await ingestTrades(veriPassId, 'VERI-PASS', veriPassTrades())
     
     let spawnedPerfId = veriPassResult.spawnedId
+    if (!veriPassResult.passed) {
+      // Auto-pass didn't trigger (triggers disabled), force-pass manually
+      info('  Veri auto-pass did not trigger, forcing pass for seed...')
+      await supabase.from('accounts').update({
+        status: 'passed',
+        passed_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', veriPassId)
+      
+      await supabase.from('account_events').upsert({
+        account_id: veriPassId,
+        event_type: 'passed',
+        idempotency_key: `seed.passed:${veriPassId}`,
+        event_data: { phase: 'verification', seed_forced: true },
+      }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
+      
+      // Create phase transition record
+      await supabase.from('account_phase_transitions').insert({
+        from_account_id: veriPassId,
+        from_cohort_id: VERI_COHORT_ID,
+        to_account_id: veriPassId, // placeholder, will update if spawn works
+        to_cohort_id: PERF_COHORT_ID,
+      }).then(() => {}) // ignore errors (transition may already exist)
+      
+      const { data: spawnResult } = await supabase.rpc('spawn_next_phase_account', { _from_account_id: veriPassId })
+      spawnedPerfId = spawnResult?.to_account_id
+      if (spawnedPerfId) {
+        info(`  Force-spawned performance: ${spawnedPerfId}`)
+      } else {
+        info('  spawn_next_phase_account did not spawn, creating manually...')
+      }
+    }
 
     // ── S7: Performance Eligible (has profit, old enough for payout) ──
     info('\n=== S7: Performance Eligible ===')
@@ -717,6 +776,14 @@ Deno.serve(async (req: Request) => {
       perfEligibleId = spawnedPerfId
       // Use null name → ingestTrades will look up platform_account_id from DB
       await ingestTrades(perfEligibleId, null, perfEligibleTrades())
+      // Ensure perf account is active (spawn may have set it differently)
+      await supabase.from('accounts').update({
+        status: 'active',
+        passed_at: null,
+        payout_cycle_started_at: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', perfEligibleId)
+      info('  Ensured PERF-ELIGIBLE → active')
     } else {
       perfEligibleName = 'PERF-ELIGIBLE'
       perfEligibleId = await createAccount(perfEligibleName, PERF_COHORT_ID, {
@@ -777,6 +844,14 @@ Deno.serve(async (req: Request) => {
       await new Promise(r => setTimeout(r, 50))
     }
 
+    // Reset PERF-NEAR-CAP to active (perf accounts stay active, not passed)
+    await supabase.from('accounts').update({
+      status: 'active',
+      passed_at: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', perfNearCapId)
+    info('  Reset PERF-NEAR-CAP → active (perf accounts stay active)')
+
     // ── S9: Performance Payout Requested (pending review) ──
     info('\n=== S9: Performance Payout Requested ===')
     const perfPayoutReqId = await createAccount('PERF-PAYOUT-REQ', PERF_COHORT_ID, {
@@ -789,13 +864,22 @@ Deno.serve(async (req: Request) => {
       platform_trade_id: t.platform_trade_id.replace('perf-eligible', 'perf-payout-req'),
     })))
     
-    // Set passed so payout can be requested
+    // Temporarily set passed so seed_submit_payout_request RPC accepts it
     await supabase.from('accounts').update({
       status: 'passed',
       passed_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
     }).eq('id', perfPayoutReqId)
     
-    await createPayout(perfPayoutReqId, 200)
+    const payoutReqPayoutId = await createPayout(perfPayoutReqId, 200)
+    
+    // Set final state: payout_requested (the canonical status when a payout is pending)
+    if (payoutReqPayoutId) {
+      await supabase.from('accounts').update({
+        status: 'payout_requested',
+        updated_at: new Date().toISOString(),
+      }).eq('id', perfPayoutReqId)
+      info('  Set PERF-PAYOUT-REQ → payout_requested')
+    }
 
     // ══════════════════════════════════════════════
     // VERIFICATION
