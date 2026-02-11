@@ -661,7 +661,11 @@ Deno.serve(async (req: Request) => {
       await ingestTrades(veriActiveId, null, veriActiveTrades())
     } else {
       veriActiveName = 'VERI-ACTIVE'
-      veriActiveId = await createAccount(veriActiveName, VERI_COHORT_ID)
+      veriActiveId = await createAccount(veriActiveName, VERI_COHORT_ID, {
+        parentId: evalPassId,
+        rootId: evalPassId,
+        phaseIndex: 1,
+      })
       await ingestTrades(veriActiveId, veriActiveName, veriActiveTrades())
     }
 
@@ -723,6 +727,21 @@ Deno.serve(async (req: Request) => {
       const payoutId = await createPayout(perfNearCapId, payoutAmount)
       if (payoutId) {
         await processPayoutToCompletion(payoutId, DEMO_APPROVER, `seed-cap-${i}`)
+        
+        // After payout is paid, the cycle resets. Re-inject profit headroom
+        // by lowering payout_cycle_start_balance so next payout sees profit.
+        const { data: acctState } = await supabase.from('accounts')
+          .select('current_balance')
+          .eq('id', perfNearCapId)
+          .single()
+        if (acctState) {
+          await supabase.from('accounts').update({
+            payout_cycle_start_balance: acctState.current_balance - 500,
+            status: 'passed',
+            passed_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq('id', perfNearCapId)
+        }
       }
 
       // Wait a tick for timestamp uniqueness
