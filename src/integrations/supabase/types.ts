@@ -2079,6 +2079,78 @@ export type Database = {
         }
         Relationships: []
       }
+      support_emails: {
+        Row: {
+          ai_summary: string | null
+          body_html: string | null
+          body_text: string
+          confidence: number
+          created_at: string
+          draft_approved: boolean
+          draft_reply: string | null
+          error: string | null
+          from_address: string
+          id: string
+          matched_account_id: string | null
+          matched_user_id: string | null
+          resend_inbound_id: string | null
+          resend_message_id: string | null
+          sent_at: string | null
+          sent_by: string | null
+          status: string
+          subject: string
+          tag: string
+          to_address: string | null
+          updated_at: string
+        }
+        Insert: {
+          ai_summary?: string | null
+          body_html?: string | null
+          body_text?: string
+          confidence?: number
+          created_at?: string
+          draft_approved?: boolean
+          draft_reply?: string | null
+          error?: string | null
+          from_address: string
+          id?: string
+          matched_account_id?: string | null
+          matched_user_id?: string | null
+          resend_inbound_id?: string | null
+          resend_message_id?: string | null
+          sent_at?: string | null
+          sent_by?: string | null
+          status?: string
+          subject?: string
+          tag?: string
+          to_address?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ai_summary?: string | null
+          body_html?: string | null
+          body_text?: string
+          confidence?: number
+          created_at?: string
+          draft_approved?: boolean
+          draft_reply?: string | null
+          error?: string | null
+          from_address?: string
+          id?: string
+          matched_account_id?: string | null
+          matched_user_id?: string | null
+          resend_inbound_id?: string | null
+          resend_message_id?: string | null
+          sent_at?: string | null
+          sent_by?: string | null
+          status?: string
+          subject?: string
+          tag?: string
+          to_address?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       system_settings: {
         Row: {
           id: string
