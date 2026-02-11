@@ -76,7 +76,7 @@ export default function TraderPayouts() {
     enabled: !!user?.id,
   });
 
-  const { data: payoutsData, isLoading } = useQuery({
+  const { data: payoutsData, isLoading, isPlaceholderData } = useQuery({
     queryKey: ['trader-payouts', user?.id, filterAccountId, page],
     queryFn: async () => {
       const { data: accounts } = await supabase
@@ -111,10 +111,12 @@ export default function TraderPayouts() {
       return { payouts, total: count || 0 };
     },
     enabled: !!user?.id,
+    placeholderData: (prev) => prev,
   });
 
   const payouts = payoutsData?.payouts;
-  const totalPages = Math.ceil((payoutsData?.total || 0) / PAGE_SIZE);
+  const total = payoutsData?.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const handleFilterChange = (val: string) => {
     setFilterAccountId(val);
@@ -204,7 +206,7 @@ export default function TraderPayouts() {
               </div>
             ) : payouts?.length ? (
               <>
-                <div className="rounded-md border overflow-x-auto">
+              <div className={`rounded-md border overflow-x-auto${isPlaceholderData ? ' opacity-60 transition-opacity' : ''}`}>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -264,20 +266,20 @@ export default function TraderPayouts() {
                   </TableBody>
                 </Table>
               </div>
-              {totalPages > 1 && (
-                <Pagination className="mt-4">
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious
-                        onClick={() => setPage((p) => Math.max(0, p - 1))}
-                        className={page === 0 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                      />
-                    </PaginationItem>
-                    {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                      const start = Math.max(0, Math.min(page - 2, totalPages - 5));
-                      const pageNum = start + i;
-                      if (pageNum >= totalPages) return null;
-                      return (
+              {total > 0 && totalPages > 1 && (() => {
+                const windowSize = Math.min(totalPages, 5);
+                const start = Math.max(0, Math.min(page - 2, totalPages - windowSize));
+                const pages = Array.from({ length: windowSize }, (_, i) => start + i);
+                return (
+                  <Pagination className="mt-4">
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          onClick={() => setPage((p) => Math.max(0, p - 1))}
+                          className={page === 0 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        />
+                      </PaginationItem>
+                      {pages.map((pageNum) => (
                         <PaginationItem key={pageNum}>
                           <PaginationLink
                             isActive={pageNum === page}
@@ -287,17 +289,17 @@ export default function TraderPayouts() {
                             {pageNum + 1}
                           </PaginationLink>
                         </PaginationItem>
-                      );
-                    })}
-                    <PaginationItem>
-                      <PaginationNext
-                        onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                        className={page >= totalPages - 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                      />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
-              )}
+                      ))}
+                      <PaginationItem>
+                        <PaginationNext
+                          onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                          className={page >= totalPages - 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                );
+              })()}
               </>
             ) : (
               <p className="text-muted-foreground text-center py-8">

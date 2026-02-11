@@ -69,7 +69,7 @@ export default function TraderTrades() {
     enabled: !!user?.id,
   });
 
-  const { data: tradesData, isLoading } = useQuery({
+  const { data: tradesData, isLoading, isPlaceholderData } = useQuery({
     queryKey: ['trader-trades', user?.id, filterAccountId, page],
     queryFn: async () => {
       const { data: accts } = await supabase
@@ -104,10 +104,12 @@ export default function TraderTrades() {
       return { trades, total: count || 0 };
     },
     enabled: !!user?.id,
+    placeholderData: (prev) => prev,
   });
 
   const trades = tradesData?.trades;
-  const totalPages = Math.ceil((tradesData?.total || 0) / PAGE_SIZE);
+  const total = tradesData?.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const handleFilterChange = (val: string) => {
     setFilterAccountId(val);
@@ -135,7 +137,7 @@ export default function TraderTrades() {
           <CardHeader>
             <CardTitle>Trade History</CardTitle>
             <CardDescription>
-              {tradesData?.total ? `${tradesData.total} trades · Page ${page + 1} of ${totalPages}` : 'No trades found'}
+              {total > 0 ? `${total} trades · Page ${page + 1} of ${totalPages}` : 'No trades found'}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -147,7 +149,7 @@ export default function TraderTrades() {
               </div>
             ) : trades?.length ? (
               <>
-                <div className="rounded-md border overflow-x-auto">
+                <div className={`rounded-md border overflow-x-auto${isPlaceholderData ? ' opacity-60 transition-opacity' : ''}`}>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -208,20 +210,20 @@ export default function TraderTrades() {
                     </TableBody>
                   </Table>
                 </div>
-                {totalPages > 1 && (
-                  <Pagination className="mt-4">
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious
-                          onClick={() => setPage((p) => Math.max(0, p - 1))}
-                          className={page === 0 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                        />
-                      </PaginationItem>
-                      {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                        const start = Math.max(0, Math.min(page - 2, totalPages - 5));
-                        const pageNum = start + i;
-                        if (pageNum >= totalPages) return null;
-                        return (
+                {total > 0 && totalPages > 1 && (() => {
+                  const windowSize = Math.min(totalPages, 5);
+                  const start = Math.max(0, Math.min(page - 2, totalPages - windowSize));
+                  const pages = Array.from({ length: windowSize }, (_, i) => start + i);
+                  return (
+                    <Pagination className="mt-4">
+                      <PaginationContent>
+                        <PaginationItem>
+                          <PaginationPrevious
+                            onClick={() => setPage((p) => Math.max(0, p - 1))}
+                            className={page === 0 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                          />
+                        </PaginationItem>
+                        {pages.map((pageNum) => (
                           <PaginationItem key={pageNum}>
                             <PaginationLink
                               isActive={pageNum === page}
@@ -231,17 +233,17 @@ export default function TraderTrades() {
                               {pageNum + 1}
                             </PaginationLink>
                           </PaginationItem>
-                        );
-                      })}
-                      <PaginationItem>
-                        <PaginationNext
-                          onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                          className={page >= totalPages - 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                        />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
-                )}
+                        ))}
+                        <PaginationItem>
+                          <PaginationNext
+                            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                            className={page >= totalPages - 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                          />
+                        </PaginationItem>
+                      </PaginationContent>
+                    </Pagination>
+                  );
+                })()}
               </>
             ) : (
               <p className="text-muted-foreground text-center py-8">
