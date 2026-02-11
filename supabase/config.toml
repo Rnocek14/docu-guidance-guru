@@ -62,3 +62,6 @@ verify_jwt = false
 
 [functions.trigger-seed]
 verify_jwt = false
+
+[functions.qa-approve-payout]
+verify_jwt = false
