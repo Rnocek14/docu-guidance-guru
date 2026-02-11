@@ -10,6 +10,8 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders })
   }
 
+  const headers = { ...corsHeaders, 'Content-Type': 'application/json' }
+
   // ── Environment guard: never run in production ──
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const appEnv = Deno.env.get('APP_ENV') ?? ''
