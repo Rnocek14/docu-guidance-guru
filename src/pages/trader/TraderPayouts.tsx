@@ -20,6 +20,16 @@ import { isTerminalPaid, IN_PROGRESS_PAYOUT_STATUSES } from '@/lib/types';
 import { getStatusCopy, getTimelineIndex } from '@/lib/payout-copy';
 import { PayoutTimeline } from '@/components/trader/PayoutTimeline';
 import { AccountFilter } from '@/components/trader/AccountFilter';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
+
+const PAGE_SIZE = 20;
 
 interface Payout {
   id: string;
@@ -39,6 +49,7 @@ export default function TraderPayouts() {
   const { user } = useAuth();
   const [expandedPayoutId, setExpandedPayoutId] = useState<string | null>(null);
   const [filterAccountId, setFilterAccountId] = useState('all');
+  const [page, setPage] = useState(0);
   const tracked = useRef(false);
 
   useEffect(() => {
@@ -65,36 +76,50 @@ export default function TraderPayouts() {
     enabled: !!user?.id,
   });
 
-  const { data: payouts, isLoading } = useQuery({
-    queryKey: ['trader-payouts', user?.id, filterAccountId],
+  const { data: payoutsData, isLoading } = useQuery({
+    queryKey: ['trader-payouts', user?.id, filterAccountId, page],
     queryFn: async () => {
       const { data: accounts } = await supabase
         .from('accounts')
         .select('id, account_number')
         .eq('user_id', user?.id);
 
-      if (!accounts?.length) return [];
+      if (!accounts?.length) return { payouts: [] as Payout[], total: 0 };
 
       const accountIds = filterAccountId === 'all'
         ? accounts.map((a) => a.id)
         : [filterAccountId];
       const accountMap = Object.fromEntries(accounts.map((a) => [a.id, a.account_number]));
 
-      const { data, error } = await supabase
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      const { data, error, count } = await supabase
         .from('payouts')
-        .select('*')
+        .select('*', { count: 'exact' })
         .in('account_id', accountIds)
-        .order('requested_at', { ascending: false });
+        .order('requested_at', { ascending: false })
+        .range(from, to);
 
       if (error) throw error;
 
-      return (data || []).map((p) => ({
+      const payouts = (data || []).map((p) => ({
         ...p,
         account: { account_number: accountMap[p.account_id] || 'Unknown' },
       })) as Payout[];
+
+      return { payouts, total: count || 0 };
     },
     enabled: !!user?.id,
   });
+
+  const payouts = payoutsData?.payouts;
+  const totalPages = Math.ceil((payoutsData?.total || 0) / PAGE_SIZE);
+
+  const handleFilterChange = (val: string) => {
+    setFilterAccountId(val);
+    setPage(0);
+  };
 
   const getStatusBadge = (status: string) => {
     const statusCopy = getStatusCopy(status);
@@ -133,7 +158,7 @@ export default function TraderPayouts() {
           <AccountFilter
             accounts={filterAccounts || []}
             value={filterAccountId}
-            onChange={setFilterAccountId}
+            onChange={handleFilterChange}
           />
         </div>
 
@@ -178,7 +203,8 @@ export default function TraderPayouts() {
                 ))}
               </div>
             ) : payouts?.length ? (
-              <div className="rounded-md border overflow-x-auto">
+              <>
+                <div className="rounded-md border overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -238,6 +264,41 @@ export default function TraderPayouts() {
                   </TableBody>
                 </Table>
               </div>
+              {totalPages > 1 && (
+                <Pagination className="mt-4">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        onClick={() => setPage((p) => Math.max(0, p - 1))}
+                        className={page === 0 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                      />
+                    </PaginationItem>
+                    {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                      const start = Math.max(0, Math.min(page - 2, totalPages - 5));
+                      const pageNum = start + i;
+                      if (pageNum >= totalPages) return null;
+                      return (
+                        <PaginationItem key={pageNum}>
+                          <PaginationLink
+                            isActive={pageNum === page}
+                            onClick={() => setPage(pageNum)}
+                            className="cursor-pointer"
+                          >
+                            {pageNum + 1}
+                          </PaginationLink>
+                        </PaginationItem>
+                      );
+                    })}
+                    <PaginationItem>
+                      <PaginationNext
+                        onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                        className={page >= totalPages - 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              )}
+              </>
             ) : (
               <p className="text-muted-foreground text-center py-8">
                 No payout requests yet. Once your account reaches the Performance phase, you can request payouts here.
