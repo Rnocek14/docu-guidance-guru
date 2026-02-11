@@ -65,3 +65,6 @@ verify_jwt = false
 
 [functions.qa-approve-payout]
 verify_jwt = false
+
+[functions.qa-full-scan]
+verify_jwt = false
