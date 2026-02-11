@@ -106,8 +106,9 @@ export default function QaScanRunner() {
       if (!session) { toast.error('Not authenticated'); return; }
 
       const body: Record<string, string> = {};
-      if (selectedPayout) body.payout_id = selectedPayout;
-      if (selectedBreach) body.breach_account_id = selectedBreach;
+      // Only send IDs if user explicitly selected one (auto-pick happens server-side)
+      if (selectedPayout && selectedPayout !== '__none') body.payout_id = selectedPayout;
+      if (selectedBreach && selectedBreach !== '__none') body.breach_account_id = selectedBreach;
 
       const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/qa-full-scan`, {
         method: 'POST',
@@ -173,7 +174,7 @@ export default function QaScanRunner() {
                     <SelectValue placeholder="(optional) Select payout..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none">— None —</SelectItem>
+                    <SelectItem value="__none">— Auto-pick —</SelectItem>
                     {(eligiblePayouts ?? []).map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.account_number} — ${p.amount} ({p.status})
@@ -189,7 +190,7 @@ export default function QaScanRunner() {
                     <SelectValue placeholder="(optional) Select account..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none">— None —</SelectItem>
+                    <SelectItem value="__none">— Auto-pick —</SelectItem>
                     {(breachedAccounts ?? []).map((a) => (
                       <SelectItem key={a.id} value={a.id}>
                         {a.account_number} ({a.status})

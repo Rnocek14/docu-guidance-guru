@@ -55,6 +55,40 @@ Deno.serve(async (req) => {
     let body: Record<string, string> = {}
     try { body = await req.json() } catch { /* empty body ok */ }
 
+    // Normalize sentinels — treat "__none" or empty as absent
+    const isValidUuid = (v: string | undefined) => v && v !== '__none' && v !== '' && /^[0-9a-f]{8}-/.test(v)
+
+    // Auto-pick eligible payout if not provided
+    let payoutId = isValidUuid(body.payout_id) ? body.payout_id : undefined
+    if (!payoutId) {
+      const { data: autoPayout } = await svc
+        .from('payouts')
+        .select('id, accounts!inner(account_number)')
+        .in('status', ['pending', 'under_review'])
+        .order('requested_at', { ascending: false })
+        .limit(20)
+      const eligible = (autoPayout ?? []).find((p: any) => {
+        const acct = Array.isArray(p.accounts) ? p.accounts[0] : p.accounts
+        const num = acct?.account_number ?? ''
+        return num.startsWith('SEEDV2-') || num.startsWith('DEMO-')
+      })
+      if (eligible) payoutId = eligible.id
+    }
+
+    // Auto-pick eligible breached account if not provided
+    let breachAccountId = isValidUuid(body.breach_account_id) ? body.breach_account_id : undefined
+    if (!breachAccountId) {
+      const { data: autoBreach } = await svc
+        .from('accounts')
+        .select('id, account_number')
+        .in('status', ['breached_detected', 'under_review'])
+        .or('account_number.like.SEEDV2-%,account_number.like.DEMO-%')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (autoBreach) breachAccountId = autoBreach.id
+    }
+
     // ================================================================
     // SECTION A: Connectivity & Auth
     // ================================================================
@@ -111,7 +145,6 @@ Deno.serve(async (req) => {
     // ================================================================
     // SECTION B: Payout Pipeline (SEEDV2 payout approve)
     // ================================================================
-    const payoutId = body.payout_id
     if (payoutId) {
       try {
         const res = await fetch(`${supabaseUrl}/functions/v1/qa-approve-payout`, {
@@ -145,13 +178,12 @@ Deno.serve(async (req) => {
         results.push({ id: 'B1', section: 'Payout Pipeline', name: 'QA payout approve end-to-end', result: 'ERROR', detail: String(e) })
       }
     } else {
-      results.push({ id: 'B1', section: 'Payout Pipeline', name: 'QA payout approve end-to-end', result: 'SKIP', detail: 'No payout_id provided' })
+      results.push({ id: 'B1', section: 'Payout Pipeline', name: 'QA payout approve end-to-end', result: 'SKIP', detail: 'No eligible SEEDV2/DEMO pending payout found' })
     }
 
     // ================================================================
     // SECTION C: Risk Queue — breach confirm
     // ================================================================
-    const breachAccountId = body.breach_account_id
     if (breachAccountId) {
       try {
         // Verify account is SEEDV2/DEMO and breached
@@ -202,7 +234,7 @@ Deno.serve(async (req) => {
         results.push({ id: 'C1', section: 'Risk Actions', name: 'Breach confirm end-to-end', result: 'ERROR', detail: String(e) })
       }
     } else {
-      results.push({ id: 'C1', section: 'Risk Actions', name: 'Breach confirm end-to-end', result: 'SKIP', detail: 'No breach_account_id provided' })
+      results.push({ id: 'C1', section: 'Risk Actions', name: 'Breach confirm end-to-end', result: 'SKIP', detail: 'No eligible SEEDV2/DEMO breached account found' })
     }
 
     // ================================================================
