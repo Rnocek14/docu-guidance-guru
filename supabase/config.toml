@@ -64,4 +64,4 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.qa-approve-payout]
-verify_jwt = false
+verify_jwt = true
