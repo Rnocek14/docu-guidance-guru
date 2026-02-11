@@ -8,6 +8,7 @@ import { CheckoutDisclaimer } from "@/components/checkout/CheckoutDisclaimer";
 import { TierCard } from "@/components/checkout/TierCard";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { TIERS } from "@/lib/pricing-data";
 
@@ -37,6 +38,7 @@ const DEFAULT_TIER = LIVE_CHECKOUT_TIERS[0]?.id ?? "starter";
 
 export default function Checkout() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlTier = searchParams.get("tier");
   const initialTier =
@@ -84,6 +86,11 @@ export default function Checkout() {
 
   const handlePurchase = async () => {
     if (!disclaimerAccepted || !tier.isLive) return;
+    if (!user) {
+      toast.error('Please log in to continue with your purchase.');
+      navigate('/login', { state: { from: { pathname: `/checkout?tier=${selectedTier}` } } });
+      return;
+    }
     track('checkout_click_pay', { tier: selectedTier });
     setIsProcessing(true);
     try {
