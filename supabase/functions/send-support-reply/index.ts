@@ -16,15 +16,13 @@ Deno.serve(async (req: Request) => {
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     return new Response(JSON.stringify({ error: "Server misconfiguration: missing Supabase env" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
   if (!RESEND_API_KEY) {
     return new Response(JSON.stringify({ error: "Server misconfiguration: missing RESEND_API_KEY" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -33,14 +31,34 @@ Deno.serve(async (req: Request) => {
 
     if (!email_id || !reply_text) {
       return new Response(JSON.stringify({ error: "email_id and reply_text are required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!user_id) {
+      return new Response(JSON.stringify({ error: "user_id is required (must be staff)" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+
+    // Verify sender is staff
+    const { data: roles } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user_id);
+
+    const staffRoles = ["admin", "support", "risk_officer"];
+    const isStaff = roles?.some(r => staffRoles.includes(r.role));
+
+    if (!isStaff) {
+      return new Response(JSON.stringify({ error: "Unauthorized: must be staff to send replies" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Fetch the original email
     const { data: email, error: fetchErr } = await supabaseAdmin
@@ -51,17 +69,20 @@ Deno.serve(async (req: Request) => {
 
     if (fetchErr || !email) {
       return new Response(JSON.stringify({ error: "Email not found" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    if (email.status === "sent") {
-      return new Response(JSON.stringify({ error: "Reply already sent" }), {
-        status: 409,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Fail-closed: only allow sending from valid states
+    const sendableStatuses = ["ready", "review_suggested", "needs_human", "new", "failed"];
+    if (!sendableStatuses.includes(email.status)) {
+      return new Response(JSON.stringify({ error: `Cannot send from status '${email.status}'` }), {
+        status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Detect if draft was edited (human override)
+    const isOverride = email.draft_reply && reply_text !== email.draft_reply;
 
     // Send via Resend
     const replySubject = email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`;
@@ -84,9 +105,18 @@ Deno.serve(async (req: Request) => {
 
     if (!resendRes.ok) {
       console.error("Resend error:", resendData);
+
+      // Log failed attempt
+      await supabaseAdmin.from("support_email_actions").insert({
+        email_id,
+        action_type: "reply_failed",
+        actor_user_id: user_id,
+        metadata: { error: resendData.message || "Resend API error" },
+      });
+
       await supabaseAdmin
         .from("support_emails")
-        .update({ status: "failed", error: resendData.message || "Resend API error" })
+        .update({ status: "failed" })
         .eq("id", email_id);
 
       return new Response(
@@ -95,21 +125,41 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Mark as sent
+    // Mark as sent + record override if applicable
+    const updatePayload: Record<string, unknown> = {
+      status: "sent",
+      sent_at: new Date().toISOString(),
+      sent_by: user_id,
+      draft_reply: reply_text,
+      draft_approved: true,
+      resend_message_id: resendData.id || null,
+    };
+
+    if (isOverride) {
+      updatePayload.human_override = true;
+      updatePayload.overridden_by = user_id;
+      updatePayload.overridden_at = new Date().toISOString();
+      updatePayload.original_draft_reply = email.draft_reply;
+    }
+
     await supabaseAdmin
       .from("support_emails")
-      .update({
-        status: "sent",
-        sent_at: new Date().toISOString(),
-        sent_by: user_id || null,
-        draft_reply: reply_text,
-        draft_approved: true,
-        resend_message_id: resendData.id || null,
-        error: null,
-      })
+      .update(updatePayload)
       .eq("id", email_id);
 
-    console.log(`Reply sent for email ${email_id} to ${email.from_address}`);
+    // Log the action
+    await supabaseAdmin.from("support_email_actions").insert({
+      email_id,
+      action_type: "reply_sent",
+      actor_user_id: user_id,
+      metadata: {
+        resend_id: resendData.id,
+        human_override: !!isOverride,
+        reply_length: reply_text.length,
+      },
+    });
+
+    console.log(`Reply sent for email ${email_id} to ${email.from_address} by ${user_id}`);
 
     return new Response(
       JSON.stringify({ success: true, resend_id: resendData.id }),
@@ -118,8 +168,7 @@ Deno.serve(async (req: Request) => {
   } catch (error) {
     console.error("Error sending reply:", error);
     return new Response(JSON.stringify({ success: false, error: String(error) }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
