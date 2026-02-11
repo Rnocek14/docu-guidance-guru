@@ -2879,6 +2879,15 @@ export type Database = {
       }
       reset_payout_cycle: { Args: { _account_id: string }; Returns: undefined }
       resolve_user_jurisdiction: { Args: { _user_id: string }; Returns: Json }
+      seed_submit_payout_request: {
+        Args: {
+          _account_id: string
+          _requested_amount: number
+          _seed_secret: string
+          _user_id: string
+        }
+        Returns: Json
+      }
       select_payment_rail:
         | {
             Args: {
