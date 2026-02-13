@@ -2192,6 +2192,7 @@ export type Database = {
           from_address: string
           human_override: boolean
           id: string
+          inbound_message_id: string | null
           matched_account_id: string | null
           matched_user_id: string | null
           original_draft_reply: string | null
@@ -2233,6 +2234,7 @@ export type Database = {
           from_address: string
           human_override?: boolean
           id?: string
+          inbound_message_id?: string | null
           matched_account_id?: string | null
           matched_user_id?: string | null
           original_draft_reply?: string | null
@@ -2274,6 +2276,7 @@ export type Database = {
           from_address?: string
           human_override?: boolean
           id?: string
+          inbound_message_id?: string | null
           matched_account_id?: string | null
           matched_user_id?: string | null
           original_draft_reply?: string | null

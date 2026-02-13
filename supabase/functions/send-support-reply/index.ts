@@ -26,17 +26,33 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // --- Derive actor from JWT (not from body) ---
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return new Response(JSON.stringify({ error: "Unauthorized: missing token" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const supabaseAnon = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY") || "", {
+    global: { headers: { Authorization: authHeader } },
+  });
+
+  const token = authHeader.replace("Bearer ", "");
+  const { data: claimsData, error: claimsError } = await supabaseAnon.auth.getClaims(token);
+  if (claimsError || !claimsData?.claims) {
+    return new Response(JSON.stringify({ error: "Unauthorized: invalid token" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const userId = claimsData.claims.sub as string;
+
   try {
-    const { email_id, reply_text, user_id } = await req.json();
+    const { email_id, reply_text } = await req.json();
 
     if (!email_id || !reply_text) {
       return new Response(JSON.stringify({ error: "email_id and reply_text are required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (!user_id) {
-      return new Response(JSON.stringify({ error: "user_id is required (must be staff)" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -45,11 +61,11 @@ Deno.serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // Verify sender is staff
+    // Verify sender is staff using JWT-derived userId
     const { data: roles } = await supabaseAdmin
       .from("user_roles")
       .select("role")
-      .eq("user_id", user_id);
+      .eq("user_id", userId);
 
     const staffRoles = ["admin", "support", "risk_officer"];
     const isStaff = roles?.some(r => staffRoles.includes(r.role));
@@ -84,9 +100,15 @@ Deno.serve(async (req: Request) => {
     // Detect if draft was edited (human override)
     const isOverride = email.draft_reply && reply_text !== email.draft_reply;
 
-    // Send via Resend
+    // Build reply headers for threading
     const replySubject = email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`;
+    const replyHeaders: Record<string, string> = {};
+    if (email.inbound_message_id) {
+      replyHeaders["In-Reply-To"] = email.inbound_message_id;
+      replyHeaders["References"] = email.inbound_message_id;
+    }
 
+    // Send via Resend
     const resendRes = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -98,6 +120,7 @@ Deno.serve(async (req: Request) => {
         to: [email.from_address],
         subject: replySubject,
         text: reply_text,
+        headers: Object.keys(replyHeaders).length > 0 ? replyHeaders : undefined,
       }),
     });
 
@@ -110,7 +133,7 @@ Deno.serve(async (req: Request) => {
       await supabaseAdmin.from("support_email_actions").insert({
         email_id,
         action_type: "reply_failed",
-        actor_user_id: user_id,
+        actor_user_id: userId,
         metadata: { error: resendData.message || "Resend API error" },
       });
 
@@ -129,7 +152,7 @@ Deno.serve(async (req: Request) => {
     const updatePayload: Record<string, unknown> = {
       status: "sent",
       sent_at: new Date().toISOString(),
-      sent_by: user_id,
+      sent_by: userId,
       draft_reply: reply_text,
       draft_approved: true,
       resend_message_id: resendData.id || null,
@@ -137,7 +160,7 @@ Deno.serve(async (req: Request) => {
 
     if (isOverride) {
       updatePayload.human_override = true;
-      updatePayload.overridden_by = user_id;
+      updatePayload.overridden_by = userId;
       updatePayload.overridden_at = new Date().toISOString();
       updatePayload.original_draft_reply = email.draft_reply;
     }
@@ -151,7 +174,7 @@ Deno.serve(async (req: Request) => {
     await supabaseAdmin.from("support_email_actions").insert({
       email_id,
       action_type: "reply_sent",
-      actor_user_id: user_id,
+      actor_user_id: userId,
       metadata: {
         resend_id: resendData.id,
         human_override: !!isOverride,
@@ -159,7 +182,7 @@ Deno.serve(async (req: Request) => {
       },
     });
 
-    console.log(`Reply sent for email ${email_id} to ${email.from_address} by ${user_id}`);
+    console.log(`Reply sent for email ${email_id} to ${email.from_address} by ${userId}`);
 
     return new Response(
       JSON.stringify({ success: true, resend_id: resendData.id }),

@@ -111,6 +111,8 @@ Deno.serve(async (req: Request) => {
     const bodyText = payload.text || payload.plain || payload.body || "";
     const bodyHtml = payload.html || null;
     const resendInboundId = payload.id || payload.message_id || null;
+    // Capture inbound Message-ID for reply threading
+    const inboundMessageId = payload.headers?.["message-id"] || payload.message_id_header || null;
 
     const senderEmail = typeof fromAddress === "string"
       ? fromAddress
@@ -134,8 +136,11 @@ Deno.serve(async (req: Request) => {
     }
 
     // --- Check daily token cap via O(1) RPC ---
+    // Pass explicit ops-day date (America/Chicago) to avoid midnight-UTC cap weirdness
+    const opsDate = new Date().toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
     const { data: tokenSum } = await supabaseAdmin.rpc("get_ai_daily_token_sum", {
       p_function_name: "process-support-email",
+      p_date: opsDate,
     });
     const totalTokensToday = Number(tokenSum) || 0;
     const dailyCapReached = totalTokensToday >= DAILY_TOKEN_CAP;
@@ -218,6 +223,7 @@ Deno.serve(async (req: Request) => {
       auto_send_ready: autoSend.auto_send_ready,
       auto_send_eligible_at: autoSend.auto_send_eligible_at,
       auto_send_blocked_reason: autoSend.blocked_reason,
+      inbound_message_id: inboundMessageId,
     }).select("id").single();
 
     if (insertErr) {
