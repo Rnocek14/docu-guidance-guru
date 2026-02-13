@@ -172,13 +172,16 @@ export default function SupportEmails() {
   const sendReply = useMutation({
     mutationFn: async ({ emailId, replyText }: { emailId: string; replyText: string }) => {
       const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('You must be logged in to send replies. Please log in and try again.');
+      }
       const res = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-support-reply`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({ email_id: emailId, reply_text: replyText }),
         }
@@ -513,11 +516,12 @@ export default function SupportEmails() {
                       <div className="flex gap-2 mt-2">
                         <Button
                           onClick={handleSend}
-                          disabled={!editedReply.trim() || sendReply.isPending}
+                          disabled={!editedReply.trim() || sendReply.isPending || !user}
                           className="gap-2"
+                          title={!user ? 'Login required to send replies' : undefined}
                         >
                           <Send className="h-4 w-4" />
-                          {sendReply.isPending ? 'Sending...' : 'Send Reply'}
+                          {!user ? 'Login Required' : sendReply.isPending ? 'Sending...' : 'Send Reply'}
                         </Button>
                         <Button variant="outline" onClick={() => handleArchive(selectedEmail.id)}>
                           <Archive className="h-4 w-4 mr-1" /> Archive
