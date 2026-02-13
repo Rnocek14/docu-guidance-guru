@@ -116,9 +116,12 @@ Deno.serve(async (req: Request) => {
     // Capture inbound Message-ID for reply threading
     const inboundMessageId = payload.headers?.["message-id"] || payload.message_id_header || null;
 
-    const senderEmail = typeof fromAddress === "string"
+    // Extract bare email from "Name <email>" format or object
+    const rawSender = typeof fromAddress === "string"
       ? fromAddress
       : (fromAddress as { address?: string })?.address || String(fromAddress);
+    const emailMatch = rawSender.match(/<([^>]+)>/);
+    const senderEmail = emailMatch ? emailMatch[1] : rawSender.trim();
 
     // --- Idempotency check: skip if already processed ---
     if (resendInboundId) {
