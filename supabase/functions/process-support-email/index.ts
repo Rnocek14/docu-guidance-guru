@@ -40,6 +40,23 @@ async function hashContext(text: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Anchor patterns: account numbers, dollar amounts, dates
+const ANCHOR_PATTERNS = [
+  /\b[A-Z]{2,}-[\w-]+\b/i,       // Account numbers like DEMO-001, SEEDV2-PERF-ELIGIBLE
+  /\$[\d,.]+/,                     // Dollar amounts like $102,500
+  /\b\d{4}-\d{2}-\d{2}\b/,        // ISO dates like 2026-01-15
+  /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}/i, // "Jan 15" dates
+];
+
+function extractAnchors(text: string): string[] {
+  const anchors: string[] = [];
+  for (const pattern of ANCHOR_PATTERNS) {
+    const matches = text.match(new RegExp(pattern.source, pattern.flags + "g"));
+    if (matches) anchors.push(...matches);
+  }
+  return anchors;
+}
+
 function validateFactsUsed(
   factsUsed: string[],
   accountContext: string,
@@ -48,13 +65,19 @@ function validateFactsUsed(
   const contextLower = accountContext.toLowerCase();
   const filtered: string[] = [];
   const hallucinated: string[] = [];
+
   for (const fact of factsUsed) {
-    // Check if key fragments of the fact appear in context
-    // Split fact into tokens and require majority match
+    // Token overlap check
     const tokens = fact.toLowerCase().split(/[\s:=,$]+/).filter(t => t.length > 2);
     const matchCount = tokens.filter(t => contextLower.includes(t)).length;
     const matchRatio = tokens.length > 0 ? matchCount / tokens.length : 0;
-    if (matchRatio >= 0.5) {
+
+    // Anchor check: any anchors in the fact must also appear in context
+    const factAnchors = extractAnchors(fact);
+    const anchorsGrounded = factAnchors.length === 0 ||
+      factAnchors.some(a => accountContext.toLowerCase().includes(a.toLowerCase()));
+
+    if (matchRatio >= 0.5 && anchorsGrounded) {
       filtered.push(fact);
     } else {
       hallucinated.push(fact);
@@ -335,6 +358,26 @@ Deno.serve(async (req: Request) => {
         actor_user_id: null,
         metadata: { ai_status: aiStatus, tag, confidence, auto_sendable: autoSend.auto_sendable },
       });
+
+      // --- Log hallucination event if facts were filtered ---
+      if (factsNeedsHuman && aiResult?.facts_used?.length) {
+        const { hallucinated } = validateFactsUsed(aiResult.facts_used, accountContext);
+        if (hallucinated.length > 0) {
+          await supabaseAdmin.from("support_email_actions").insert({
+            email_id: inserted.id,
+            action_type: "ai_hallucination_filtered",
+            actor_user_id: null,
+            metadata: {
+              hallucinated,
+              kept: validatedFacts,
+              prompt_version: PROMPT_VERSION,
+              context_hash: ctxHash,
+              original_count: aiResult.facts_used.length,
+              filtered_count: hallucinated.length,
+            },
+          });
+        }
+      }
     }
 
     console.log(
