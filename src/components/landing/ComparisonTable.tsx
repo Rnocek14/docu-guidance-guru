@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { Check, X, Minus } from 'lucide-react';
+import { Check, X, Minus, ShieldCheck } from 'lucide-react';
 import { track } from '@/lib/track';
 
 interface CompareRow {
   feature: string;
   others: string;
-  othersOk: boolean | null; // null = neutral
+  othersOk: boolean | null;
   us: string;
   usOk: boolean;
 }
@@ -82,44 +82,51 @@ export function ComparisonTable() {
     <section className="py-20 lg:py-28 border-t border-border">
       <div className="container mx-auto px-4">
         <div className="text-center mb-12">
+          <div className="inline-flex items-center gap-2 text-sm text-primary font-semibold uppercase tracking-wider mb-3">
+            <ShieldCheck className="h-4 w-4" />
+            Honest Comparison
+          </div>
           <h2 className="text-3xl sm:text-4xl font-bold mb-4">Us vs. The Industry</h2>
           <p className="text-muted-foreground text-lg max-w-xl mx-auto">
             We chose tighter rules and lower splits so we can reliably pay approved requests.
           </p>
         </div>
 
-        <div className="max-w-4xl mx-auto overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left py-3 px-4 font-semibold text-foreground">Feature</th>
-                <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Typical Prop Firms</th>
-                <th className="text-left py-3 px-4 font-semibold text-primary">Meridian</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.feature} className="border-b border-border/50 hover:bg-card/50 transition-colors">
-                  <td className="py-3.5 px-4 font-medium text-foreground">{row.feature}</td>
-                  <td className="py-3.5 px-4 text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <StatusIcon ok={row.othersOk} />
-                      {row.others}
-                    </div>
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <div className="flex items-center gap-2">
-                      <StatusIcon ok={row.usOk} />
-                      <span className="font-medium">{row.us}</span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="max-w-4xl mx-auto">
+          {/* Header row */}
+          <div className="hidden sm:grid grid-cols-[1.2fr_1fr_1fr] gap-3 mb-3 px-4">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Feature</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Typical Prop Firms</span>
+            <span className="text-xs font-semibold text-primary uppercase tracking-wider">Meridian</span>
+          </div>
+
+          {/* Rows */}
+          <div className="space-y-2">
+            {rows.map((row) => (
+              <div
+                key={row.feature}
+                className="grid sm:grid-cols-[1.2fr_1fr_1fr] gap-3 rounded-xl border border-border bg-card/40 p-4 hover:bg-card/70 transition-colors"
+              >
+                {/* Feature name */}
+                <div className="font-medium text-sm text-foreground">{row.feature}</div>
+
+                {/* Others */}
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <StatusIcon ok={row.othersOk} />
+                  <span>{row.others}</span>
+                </div>
+
+                {/* Us */}
+                <div className="flex items-center gap-2 text-sm">
+                  <StatusIcon ok={row.usOk} />
+                  <span className="font-medium text-foreground">{row.us}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <p className="text-xs text-muted-foreground text-center mt-6 max-w-2xl mx-auto">
+        <p className="text-xs text-muted-foreground text-center mt-8 max-w-2xl mx-auto">
           Comparisons based on publicly available information from major prop trading evaluation firms.
           "Typical" reflects common industry practices, not universal claims about any specific firm.
         </p>
