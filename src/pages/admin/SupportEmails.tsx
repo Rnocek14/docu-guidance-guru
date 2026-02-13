@@ -74,6 +74,10 @@ interface SupportEmail {
   auto_send_ready: boolean;
   human_override: boolean;
   assigned_to: string | null;
+  needs_human: boolean;
+  facts_used: string[] | null;
+  safety_notes: string | null;
+  prompt_version: string | null;
 }
 
 export default function SupportEmails() {
@@ -124,6 +128,47 @@ export default function SupportEmails() {
       };
     },
     refetchInterval: 30_000,
+  });
+
+  // Ops metrics: escalation rate by tag, hallucination count
+  const { data: opsMetrics } = useQuery({
+    queryKey: ['support-ops-metrics'],
+    queryFn: async () => {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
+
+      // Escalation rate by tag
+      const { data: allRecent } = await supabase
+        .from('support_emails')
+        .select('tag, needs_human')
+        .gte('created_at', sevenDaysAgo);
+
+      const byTag: Record<string, { total: number; escalated: number }> = {};
+      for (const e of allRecent || []) {
+        if (!byTag[e.tag]) byTag[e.tag] = { total: 0, escalated: 0 };
+        byTag[e.tag].total++;
+        if (e.needs_human) byTag[e.tag].escalated++;
+      }
+
+      // Hallucination count
+      const { count: hallucinationCount } = await supabase
+        .from('support_email_actions')
+        .select('id', { count: 'exact', head: true })
+        .eq('action_type', 'ai_hallucination_filtered')
+        .gte('created_at', sevenDaysAgo);
+
+      const totalEmails = (allRecent || []).length;
+      const totalEscalated = (allRecent || []).filter(e => e.needs_human).length;
+
+      return {
+        byTag,
+        totalEmails,
+        totalEscalated,
+        escalationRate: totalEmails > 0 ? (totalEscalated / totalEmails * 100).toFixed(1) : '0',
+        hallucinationCount: hallucinationCount || 0,
+        hallucinationRate: totalEmails > 0 ? ((hallucinationCount || 0) / totalEmails * 100).toFixed(1) : '0',
+      };
+    },
+    refetchInterval: 60_000,
   });
 
   // Keyboard navigation
@@ -288,11 +333,27 @@ export default function SupportEmails() {
               )}
             </Button>
           ))}
-          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-            <Brain className="h-3 w-3" />
-            <span>${((aiCostToday?.cost || 0) / 100).toFixed(3)} today</span>
-            <span className="text-muted-foreground/50">|</span>
-            <span>{(aiCostToday?.tokens || 0).toLocaleString()} tokens</span>
+          <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <Brain className="h-3 w-3" />
+              ${((aiCostToday?.cost || 0) / 100).toFixed(3)}/day
+            </span>
+            <span>{(aiCostToday?.tokens || 0).toLocaleString()} tok</span>
+            {opsMetrics && (
+              <>
+                <span className="text-muted-foreground/30">|</span>
+                <span className="flex items-center gap-1" title="Escalation rate (7d)">
+                  <AlertTriangle className="h-3 w-3" />
+                  {opsMetrics.escalationRate}% escalated
+                </span>
+                {opsMetrics.hallucinationCount > 0 && (
+                  <span className="text-destructive flex items-center gap-1" title="Hallucinations filtered (7d)">
+                    <Shield className="h-3 w-3" />
+                    {opsMetrics.hallucinationCount} filtered
+                  </span>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -422,8 +483,18 @@ export default function SupportEmails() {
                           <Badge variant="outline" className={TAG_COLORS[email.tag] || ''}>
                             {TAG_LABELS[email.tag] || email.tag}
                           </Badge>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 flex-wrap justify-end">
                             {email.confidence > 0 && confidenceBadge(email.confidence)}
+                            {email.needs_human && (
+                              <Badge variant="outline" className="text-[10px] px-1 py-0 bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
+                                Human
+                              </Badge>
+                            )}
+                            {email.safety_notes && email.safety_notes.includes('filtered') && (
+                              <Badge variant="outline" className="text-[10px] px-1 py-0 bg-destructive/10 text-destructive border-destructive/20">
+                                Filtered
+                              </Badge>
+                            )}
                           </div>
                           <span className="text-xs text-muted-foreground">
                             {formatDistanceToNow(new Date(email.created_at), { addSuffix: true })}
