@@ -266,15 +266,26 @@ Deno.serve(async (req: Request) => {
     let factsSafetyNote = aiResult?.safety_notes || "";
 
     if (aiResult?.facts_used?.length) {
-      const { filtered, hallucinated } = validateFactsUsed(aiResult.facts_used, accountContext);
-      validatedFacts = filtered;
-      if (hallucinated.length > 0) {
+      if (!accountContext) {
+        // AI cited facts but we have no context to validate against — treat all as ungrounded
         factsNeedsHuman = true;
+        validatedFacts = [];
         factsSafetyNote = [
           factsSafetyNote,
-          `AI cited ${hallucinated.length} fact(s) not grounded in account context (filtered out): ${hallucinated.join("; ")}`,
+          `AI cited ${aiResult.facts_used.length} fact(s) but no account context available (all cleared)`,
         ].filter(Boolean).join(" | ");
-        console.warn("Hallucinated facts filtered:", hallucinated);
+        console.warn("Facts cited without context, all cleared:", aiResult.facts_used);
+      } else {
+        const { filtered, hallucinated } = validateFactsUsed(aiResult.facts_used, accountContext);
+        validatedFacts = filtered;
+        if (hallucinated.length > 0) {
+          factsNeedsHuman = true;
+          factsSafetyNote = [
+            factsSafetyNote,
+            `AI cited ${hallucinated.length} fact(s) not grounded in account context (filtered out): ${hallucinated.join("; ")}`,
+          ].filter(Boolean).join(" | ");
+          console.warn("Hallucinated facts filtered:", hallucinated);
+        }
       }
     }
 
