@@ -110,7 +110,9 @@ Deno.serve(async (req: Request) => {
     const subject = payload.subject || "(no subject)";
     const bodyText = payload.text || payload.plain || payload.body || "";
     const bodyHtml = payload.html || null;
-    const resendInboundId = payload.id || payload.message_id || null;
+    const rawInboundId = payload.id || payload.message_id || null;
+    // Normalize empty strings to null to prevent unique-constraint collisions
+    const resendInboundId = rawInboundId && String(rawInboundId).trim() !== "" ? String(rawInboundId).trim() : null;
     // Capture inbound Message-ID for reply threading
     const inboundMessageId = payload.headers?.["message-id"] || payload.message_id_header || null;
 
