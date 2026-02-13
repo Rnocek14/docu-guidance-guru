@@ -313,6 +313,7 @@ Deno.serve(async (req: Request) => {
       auto_send_blocked_reason: autoSend.blocked_reason,
       inbound_message_id: inboundMessageId,
       facts_used: validatedFacts.length ? validatedFacts : null,
+      facts_filtered: factsNeedsHuman,
       needs_human: finalNeedsHuman,
       safety_notes: factsSafetyNote || null,
       prompt_version: PROMPT_VERSION,
