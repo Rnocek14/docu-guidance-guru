@@ -11,6 +11,7 @@ import { StatsCounter } from '@/components/landing/StatsCounter';
 import { HowItWorks } from '@/components/landing/HowItWorks';
 import { PricingSection } from '@/components/landing/PricingSection';
 import { ComparisonTable } from '@/components/landing/ComparisonTable';
+import { TrustStrip } from '@/components/landing/TrustStrip';
 import { Testimonials } from '@/components/landing/Testimonials';
 import { PlatformLogos } from '@/components/landing/PlatformLogos';
 import { FAQ } from '@/components/landing/FAQ';
@@ -60,6 +61,7 @@ export default function Index() {
       <StatsCounter />
       <HowItWorks />
       <PricingSection />
+      <TrustStrip />
 
       {/* Reset / Retry Card */}
       <section className="py-16 border-t border-border">
