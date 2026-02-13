@@ -180,7 +180,7 @@ export default function SupportEmails() {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
-          body: JSON.stringify({ email_id: emailId, reply_text: replyText, user_id: user?.id }),
+          body: JSON.stringify({ email_id: emailId, reply_text: replyText }),
         }
       );
       const json = await res.json();
