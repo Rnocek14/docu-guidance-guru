@@ -75,6 +75,7 @@ interface SupportEmail {
   human_override: boolean;
   assigned_to: string | null;
   needs_human: boolean;
+  facts_filtered: boolean;
   facts_used: string[] | null;
   safety_notes: string | null;
   prompt_version: string | null;
@@ -108,7 +109,7 @@ export default function SupportEmails() {
 
       const { data, error } = await query;
       if (error) throw error;
-      return data as SupportEmail[];
+      return (data as unknown as SupportEmail[]).map(e => ({ ...e, facts_filtered: e.facts_filtered ?? false }));
     },
   });
 
@@ -130,43 +131,18 @@ export default function SupportEmails() {
     refetchInterval: 30_000,
   });
 
-  // Ops metrics: escalation rate by tag, hallucination count
+  // Ops metrics via O(1) RPC
   const { data: opsMetrics } = useQuery({
     queryKey: ['support-ops-metrics'],
     queryFn: async () => {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
-
-      // Escalation rate by tag
-      const { data: allRecent } = await supabase
-        .from('support_emails')
-        .select('tag, needs_human')
-        .gte('created_at', sevenDaysAgo);
-
-      const byTag: Record<string, { total: number; escalated: number }> = {};
-      for (const e of allRecent || []) {
-        if (!byTag[e.tag]) byTag[e.tag] = { total: 0, escalated: 0 };
-        byTag[e.tag].total++;
-        if (e.needs_human) byTag[e.tag].escalated++;
-      }
-
-      // Hallucination count
-      const { count: hallucinationCount } = await supabase
-        .from('support_email_actions')
-        .select('id', { count: 'exact', head: true })
-        .eq('action_type', 'ai_hallucination_filtered')
-        .gte('created_at', sevenDaysAgo);
-
-      const totalEmails = (allRecent || []).length;
-      const totalEscalated = (allRecent || []).filter(e => e.needs_human).length;
-
-      return {
-        byTag,
-        totalEmails,
-        totalEscalated,
-        escalationRate: totalEmails > 0 ? (totalEscalated / totalEmails * 100).toFixed(1) : '0',
-        hallucinationCount: hallucinationCount || 0,
-        hallucinationRate: totalEmails > 0 ? ((hallucinationCount || 0) / totalEmails * 100).toFixed(1) : '0',
-      };
+      const { data } = await supabase.rpc('get_support_ops_metrics', { p_days: 7 });
+      return data as {
+        total_emails: number;
+        total_escalated: number;
+        escalation_rate: number;
+        hallucination_count: number;
+        hallucination_rate: number;
+      } | null;
     },
     refetchInterval: 60_000,
   });
@@ -344,12 +320,12 @@ export default function SupportEmails() {
                 <span className="text-muted-foreground/30">|</span>
                 <span className="flex items-center gap-1" title="Escalation rate (7d)">
                   <AlertTriangle className="h-3 w-3" />
-                  {opsMetrics.escalationRate}% escalated
+                  {opsMetrics.escalation_rate}% escalated
                 </span>
-                {opsMetrics.hallucinationCount > 0 && (
+                {opsMetrics.hallucination_count > 0 && (
                   <span className="text-destructive flex items-center gap-1" title="Hallucinations filtered (7d)">
                     <Shield className="h-3 w-3" />
-                    {opsMetrics.hallucinationCount} filtered
+                    {opsMetrics.hallucination_count} filtered
                   </span>
                 )}
               </>
@@ -490,7 +466,7 @@ export default function SupportEmails() {
                                 Human
                               </Badge>
                             )}
-                            {email.safety_notes && email.safety_notes.includes('filtered') && (
+                            {email.facts_filtered && (
                               <Badge variant="outline" className="text-[10px] px-1 py-0 bg-destructive/10 text-destructive border-destructive/20">
                                 Filtered
                               </Badge>

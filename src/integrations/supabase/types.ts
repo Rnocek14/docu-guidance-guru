@@ -2871,6 +2871,7 @@ export type Database = {
         Returns: Json
       }
       get_rolling_pass_rate: { Args: { _window_days?: number }; Returns: Json }
+      get_support_ops_metrics: { Args: { p_days?: number }; Returns: Json }
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
