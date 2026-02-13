@@ -2189,12 +2189,14 @@ export type Database = {
           draft_approved: boolean
           draft_reply: string | null
           error: string | null
+          facts_used: Json | null
           from_address: string
           human_override: boolean
           id: string
           inbound_message_id: string | null
           matched_account_id: string | null
           matched_user_id: string | null
+          needs_human: boolean | null
           original_draft_reply: string | null
           original_tag: string | null
           overridden_at: string | null
@@ -2202,6 +2204,7 @@ export type Database = {
           override_reason: string | null
           resend_inbound_id: string | null
           resend_message_id: string | null
+          safety_notes: string | null
           sent_at: string | null
           sent_by: string | null
           status: string
@@ -2231,12 +2234,14 @@ export type Database = {
           draft_approved?: boolean
           draft_reply?: string | null
           error?: string | null
+          facts_used?: Json | null
           from_address: string
           human_override?: boolean
           id?: string
           inbound_message_id?: string | null
           matched_account_id?: string | null
           matched_user_id?: string | null
+          needs_human?: boolean | null
           original_draft_reply?: string | null
           original_tag?: string | null
           overridden_at?: string | null
@@ -2244,6 +2249,7 @@ export type Database = {
           override_reason?: string | null
           resend_inbound_id?: string | null
           resend_message_id?: string | null
+          safety_notes?: string | null
           sent_at?: string | null
           sent_by?: string | null
           status?: string
@@ -2273,12 +2279,14 @@ export type Database = {
           draft_approved?: boolean
           draft_reply?: string | null
           error?: string | null
+          facts_used?: Json | null
           from_address?: string
           human_override?: boolean
           id?: string
           inbound_message_id?: string | null
           matched_account_id?: string | null
           matched_user_id?: string | null
+          needs_human?: boolean | null
           original_draft_reply?: string | null
           original_tag?: string | null
           overridden_at?: string | null
@@ -2286,6 +2294,7 @@ export type Database = {
           override_reason?: string | null
           resend_inbound_id?: string | null
           resend_message_id?: string | null
+          safety_notes?: string | null
           sent_at?: string | null
           sent_by?: string | null
           status?: string
