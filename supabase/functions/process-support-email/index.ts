@@ -27,10 +27,41 @@ const COST_PER_1M_OUTPUT = 60;
 const DAILY_TOKEN_CAP = 500_000;
 const PER_EMAIL_MAX_TOKENS = 2_000;
 const AI_MODEL = "gpt-4o-mini";
+const PROMPT_VERSION = "support-v4.0";
 
 const CONFIDENCE_AUTO_TAG = 0.85;
 const CONFIDENCE_REVIEW_SUGGESTED = 0.60;
 const CONFIDENCE_AUTO_SEND = 0.92;
+
+async function hashContext(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function validateFactsUsed(
+  factsUsed: string[],
+  accountContext: string,
+): { filtered: string[]; hallucinated: string[] } {
+  if (!accountContext || !factsUsed.length) return { filtered: [], hallucinated: [] };
+  const contextLower = accountContext.toLowerCase();
+  const filtered: string[] = [];
+  const hallucinated: string[] = [];
+  for (const fact of factsUsed) {
+    // Check if key fragments of the fact appear in context
+    // Split fact into tokens and require majority match
+    const tokens = fact.toLowerCase().split(/[\s:=,$]+/).filter(t => t.length > 2);
+    const matchCount = tokens.filter(t => contextLower.includes(t)).length;
+    const matchRatio = tokens.length > 0 ? matchCount / tokens.length : 0;
+    if (matchRatio >= 0.5) {
+      filtered.push(fact);
+    } else {
+      hallucinated.push(fact);
+    }
+  }
+  return { filtered, hallucinated };
+}
 
 interface AiResult {
   tag: string;
@@ -206,9 +237,32 @@ Deno.serve(async (req: Request) => {
       ? determineAutoSend(tag, confidence, bodyText, subject)
       : { auto_sendable: false, auto_send_ready: false, auto_send_eligible_at: null, blocked_reason: "ai_not_available" };
 
+    // --- Validate facts_used against actual context ---
+    let validatedFacts: string[] = [];
+    let factsNeedsHuman = false;
+    let factsSafetyNote = aiResult?.safety_notes || "";
+
+    if (aiResult?.facts_used?.length) {
+      const { filtered, hallucinated } = validateFactsUsed(aiResult.facts_used, accountContext);
+      validatedFacts = filtered;
+      if (hallucinated.length > 0) {
+        factsNeedsHuman = true;
+        factsSafetyNote = [
+          factsSafetyNote,
+          `AI cited ${hallucinated.length} fact(s) not grounded in account context (filtered out): ${hallucinated.join("; ")}`,
+        ].filter(Boolean).join(" | ");
+        console.warn("Hallucinated facts filtered:", hallucinated);
+      }
+    }
+
+    const finalNeedsHuman = aiResult?.needs_human || factsNeedsHuman;
+
+    // Compute context hash for audit trail
+    const ctxHash = accountContext ? await hashContext(accountContext) : null;
+
     // --- Insert email record ---
     // If AI flagged needs_human, override status
-    const finalStatus = aiResult?.needs_human ? "needs_human" : emailStatus;
+    const finalStatus = finalNeedsHuman ? "needs_human" : emailStatus;
 
     const { data: inserted, error: insertErr } = await supabaseAdmin.from("support_emails").insert({
       from_address: senderEmail,
@@ -235,9 +289,11 @@ Deno.serve(async (req: Request) => {
       auto_send_eligible_at: autoSend.auto_send_eligible_at,
       auto_send_blocked_reason: autoSend.blocked_reason,
       inbound_message_id: inboundMessageId,
-      facts_used: aiResult?.facts_used?.length ? aiResult.facts_used : null,
-      needs_human: aiResult?.needs_human || false,
-      safety_notes: aiResult?.safety_notes || null,
+      facts_used: validatedFacts.length ? validatedFacts : null,
+      needs_human: finalNeedsHuman,
+      safety_notes: factsSafetyNote || null,
+      prompt_version: PROMPT_VERSION,
+      context_hash: ctxHash,
     }).select("id").single();
 
     if (insertErr) {

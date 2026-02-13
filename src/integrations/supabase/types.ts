@@ -2185,6 +2185,7 @@ export type Database = {
           body_html: string | null
           body_text: string
           confidence: number
+          context_hash: string | null
           created_at: string
           draft_approved: boolean
           draft_reply: string | null
@@ -2202,6 +2203,7 @@ export type Database = {
           overridden_at: string | null
           overridden_by: string | null
           override_reason: string | null
+          prompt_version: string | null
           resend_inbound_id: string | null
           resend_message_id: string | null
           safety_notes: string | null
@@ -2230,6 +2232,7 @@ export type Database = {
           body_html?: string | null
           body_text?: string
           confidence?: number
+          context_hash?: string | null
           created_at?: string
           draft_approved?: boolean
           draft_reply?: string | null
@@ -2247,6 +2250,7 @@ export type Database = {
           overridden_at?: string | null
           overridden_by?: string | null
           override_reason?: string | null
+          prompt_version?: string | null
           resend_inbound_id?: string | null
           resend_message_id?: string | null
           safety_notes?: string | null
@@ -2275,6 +2279,7 @@ export type Database = {
           body_html?: string | null
           body_text?: string
           confidence?: number
+          context_hash?: string | null
           created_at?: string
           draft_approved?: boolean
           draft_reply?: string | null
@@ -2292,6 +2297,7 @@ export type Database = {
           overridden_at?: string | null
           overridden_by?: string | null
           override_reason?: string | null
+          prompt_version?: string | null
           resend_inbound_id?: string | null
           resend_message_id?: string | null
           safety_notes?: string | null
