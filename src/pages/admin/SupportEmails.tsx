@@ -493,6 +493,35 @@ export default function SupportEmails() {
                     )}
                   </div>
 
+                  {/* Facts Used by AI */}
+                  {(selectedEmail as any).facts_used && Array.isArray((selectedEmail as any).facts_used) && (selectedEmail as any).facts_used.length > 0 && (
+                    <div className="bg-blue-500/5 border border-blue-500/20 rounded-md p-3">
+                      <p className="text-xs font-medium text-blue-600 mb-1.5 flex items-center gap-1">
+                        <Eye className="h-3 w-3" /> Facts Referenced by AI
+                      </p>
+                      <ul className="space-y-1">
+                        {((selectedEmail as any).facts_used as string[]).map((fact: string, i: number) => (
+                          <li key={i} className="text-xs text-muted-foreground font-mono bg-muted/50 rounded px-2 py-1">
+                            {fact}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Needs Human flag */}
+                  {(selectedEmail as any).needs_human && (
+                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-md p-3 flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-yellow-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs font-medium text-yellow-700">AI flagged for human review</p>
+                        {(selectedEmail as any).safety_notes && (
+                          <p className="text-xs text-muted-foreground mt-1">{(selectedEmail as any).safety_notes}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {selectedEmail.ai_summary && (
                     <div className="bg-muted/50 rounded-md p-3">
                       <p className="text-xs font-medium text-muted-foreground mb-1">AI Summary</p>

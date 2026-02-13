@@ -37,6 +37,9 @@ interface AiResult {
   confidence: number;
   summary: string;
   draft_reply: string;
+  facts_used: string[];
+  needs_human: boolean;
+  safety_notes: string;
 }
 
 function detectBlockKeywords(text: string): string | null {
@@ -204,6 +207,9 @@ Deno.serve(async (req: Request) => {
       : { auto_sendable: false, auto_send_ready: false, auto_send_eligible_at: null, blocked_reason: "ai_not_available" };
 
     // --- Insert email record ---
+    // If AI flagged needs_human, override status
+    const finalStatus = aiResult?.needs_human ? "needs_human" : emailStatus;
+
     const { data: inserted, error: insertErr } = await supabaseAdmin.from("support_emails").insert({
       from_address: senderEmail,
       to_address: typeof toAddress === "string" ? toAddress : String(toAddress),
@@ -216,7 +222,7 @@ Deno.serve(async (req: Request) => {
       draft_reply: aiResult?.draft_reply || null,
       matched_user_id: matchedUserId,
       matched_account_id: matchedAccountId,
-      status: emailStatus,
+      status: finalStatus,
       resend_inbound_id: resendInboundId,
       ai_status: aiStatus,
       ai_model: aiStatus === "complete" ? AI_MODEL : null,
@@ -229,6 +235,9 @@ Deno.serve(async (req: Request) => {
       auto_send_eligible_at: autoSend.auto_send_eligible_at,
       auto_send_blocked_reason: autoSend.blocked_reason,
       inbound_message_id: inboundMessageId,
+      facts_used: aiResult?.facts_used?.length ? aiResult.facts_used : null,
+      needs_human: aiResult?.needs_human || false,
+      safety_notes: aiResult?.safety_notes || null,
     }).select("id").single();
 
     if (insertErr) {
@@ -376,22 +385,37 @@ async function classifyWithOpenAI(
 Your job is to:
 1. Classify the email into exactly one tag: ${VALID_TAGS.join(", ")}
 2. Write a concise summary (1-2 sentences)
-3. Draft a professional, helpful reply
+3. Draft a professional, helpful reply that references specific account data when available
 
 Rules:
 - Never promise payout approvals — only admins can approve
-- Never share internal risk scores or breach thresholds
 - Be empathetic but factual
-- If you have account context, reference specific data to be helpful
 - Keep replies under 200 words
 - Sign off as "Meridian Support Team"
+
+Strict Data Rules:
+- You may reference numbers, dates, balances, trade counts, and statuses ONLY if they appear in the provided "Account Context" section.
+- If the email asks for specific amounts, dates, or details that are NOT present in Account Context, say: "I don't have that detail available — our team will follow up with the specifics."
+- Do NOT guess, estimate, or infer rule thresholds, breach limits, or approval outcomes.
+- Do NOT mention internal systems (risk scores, throttles, fraud checks, identity clusters, or flags beyond what is explicitly listed).
+- When you include a fact from Account Context, add it to the facts_used array as a short quoted snippet (e.g., "Account DEMO-001: status=active, balance=$102,500").
+
+Human Review Trigger — set needs_human=true if ANY of these apply:
+- Payout approval disputes or "why was I denied"
+- Legal threats, chargeback threats, or accusations of fraud
+- Refund requests or policy exception requests
+- Requests for rule exceptions or threshold changes
+- Emotional escalation (profanity, threats, all-caps anger)
 
 Respond in JSON format:
 {
   "tag": "one_of_the_valid_tags",
   "confidence": 0.0-1.0,
   "summary": "brief summary",
-  "draft_reply": "the full reply email text"
+  "draft_reply": "the full reply email text",
+  "facts_used": ["short snippet from account context", "..."],
+  "needs_human": false,
+  "safety_notes": ""
 }`;
 
   const userMessage = `Email from: ${senderEmail}
@@ -442,6 +466,9 @@ ${accountContext ? `\n--- Account Context ---\n${accountContext}` : "No matching
       confidence: parsed.confidence || 0,
       summary: parsed.summary || "",
       draft_reply: parsed.draft_reply || "",
+      facts_used: Array.isArray(parsed.facts_used) ? parsed.facts_used : [],
+      needs_human: !!parsed.needs_human,
+      safety_notes: parsed.safety_notes || "",
     },
     usage,
     error: null,
