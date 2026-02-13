@@ -34,7 +34,14 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const supabaseAnon = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY") || "", {
+  const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!SUPABASE_ANON_KEY) {
+    return new Response(JSON.stringify({ error: "Server misconfiguration: missing SUPABASE_ANON_KEY" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   });
 

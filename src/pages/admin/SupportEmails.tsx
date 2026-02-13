@@ -199,6 +199,10 @@ export default function SupportEmails() {
   });
 
   const handleSend = () => {
+    if (!user) {
+      toast.error('Login required to send replies');
+      return;
+    }
     if (!selectedEmail || !editedReply.trim()) return;
     sendReply.mutate({ emailId: selectedEmail.id, replyText: editedReply });
   };
