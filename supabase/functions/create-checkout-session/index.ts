@@ -229,8 +229,18 @@ Deno.serve(async (req) => {
       })
 
     if (queueInsertErr && !queueInsertErr.code?.includes('23505')) {
-      // Non-fatal: log but still return URL (webhook will create the row)
-      console.error(`Queue pre-insert failed (non-fatal): ${queueInsertErr.message}`, { sessionId: session.id })
+      // Non-fatal but log durably so we know how often early evidence is lost
+      console.error(`QUEUE_PRECREATE_FAILED: ${queueInsertErr.message}`, {
+        sessionId: session.id, userId, tierId,
+      })
+      // Durable error record for reconciliation
+      await serviceClient.from('staff_notifications').insert({
+        notification_type: 'queue_precreate_failed',
+        title: '⚠️ Checkout queue pre-insert failed',
+        body: `Pre-insert failed for session=${session.id} user=${userId} tier=${tierId}. Error: ${queueInsertErr.message}. Webhook fallback will attempt insert.`,
+        data: { stripe_session_id: session.id, user_id: userId, tier_id: tierId, error: queueInsertErr.message },
+        idempotency_key: `queue_precreate_failed:${session.id}`,
+      }).catch(() => { /* best-effort */ })
     }
 
     console.log(`Checkout session created: ${session.id} for user=${userId} tier=${tierId} origin=${APP_ORIGIN}`)
