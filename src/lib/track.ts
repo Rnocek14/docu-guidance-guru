@@ -39,6 +39,7 @@ export type AnalyticsEvent =
   | 'promo_click'
   | 'promo_dismiss'
   | 'compare_view'
+  | 'lp_click_rules'
   | 'testimonial_view'
   | 'platform_logos_view'
   | 'stats_counter_view'

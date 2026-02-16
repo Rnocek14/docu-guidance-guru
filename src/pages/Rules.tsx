@@ -83,7 +83,7 @@ export default function Rules() {
           <h1 className="text-4xl font-bold mb-4">Evaluation Rules</h1>
           <p className="text-muted-foreground text-lg">
             Complete transparency. These are the exact rules your account is evaluated against.
-            Rules are frozen at purchase — no mid-challenge changes.
+            Rules are published at purchase. Changes, if any, are announced in advance.
           </p>
         </div>
 

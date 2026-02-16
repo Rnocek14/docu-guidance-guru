@@ -60,9 +60,10 @@ export function Hero() {
                 Start Your Evaluation <ArrowRight className="h-4 w-4" />
               </a>
             </Button>
-            <Button asChild size="lg" variant="outline" className="h-12 px-8 text-base">
+            <Button asChild size="lg" variant="outline" className="h-12 px-8 text-base" onClick={() => track('lp_click_rules')}>
               <Link to="/rules">View Rules</Link>
             </Button>
+            <p className="text-xs text-muted-foreground -mt-1">Read in 2 minutes</p>
           </div>
 
           <p className="text-xs text-muted-foreground mt-4 animate-in fade-in duration-700 [animation-delay:750ms]">
