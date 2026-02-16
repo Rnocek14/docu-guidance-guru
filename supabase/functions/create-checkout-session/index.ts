@@ -6,6 +6,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
+// Server-authoritative rules version — never trust client value
+const RULES_VERSION = 'v1.0'
+
 // ============================================================
 // Tier → Stripe price mapping (created in Stripe dashboard)
 // Product descriptions: "Simulated trading evaluation access"
@@ -78,11 +81,10 @@ Deno.serve(async (req) => {
 
     // ── 2. Parse & validate request ─────────────────────────
     const body = await req.json()
-    const { tierId, disclaimerAccepted, rulesAcknowledged, rulesVersion } = body as {
+    const { tierId, disclaimerAccepted, rulesAcknowledged } = body as {
       tierId?: string
       disclaimerAccepted?: boolean
       rulesAcknowledged?: boolean
-      rulesVersion?: string
     }
 
     if (!tierId || !TIER_CONFIG[tierId]) {
@@ -196,7 +198,7 @@ Deno.serve(async (req) => {
         disclaimer_version: 'v1',
         rules_acknowledged: 'true',
         rules_acknowledged_at: new Date().toISOString(),
-        rules_version: rulesVersion || 'v1.0',
+        rules_version: RULES_VERSION,
         product_description: 'Simulated trading evaluation access',
       },
       payment_intent_data: {
