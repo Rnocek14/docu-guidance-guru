@@ -539,6 +539,9 @@ export type Database = {
           last_error: string | null
           payment_intent: string | null
           processing_started_at: string | null
+          rules_acknowledged: boolean
+          rules_acknowledged_at: string | null
+          rules_version: string
           status: string
           stripe_session_id: string
           tier_id: string
@@ -555,6 +558,9 @@ export type Database = {
           last_error?: string | null
           payment_intent?: string | null
           processing_started_at?: string | null
+          rules_acknowledged?: boolean
+          rules_acknowledged_at?: string | null
+          rules_version?: string
           status?: string
           stripe_session_id: string
           tier_id: string
@@ -571,6 +577,9 @@ export type Database = {
           last_error?: string | null
           payment_intent?: string | null
           processing_started_at?: string | null
+          rules_acknowledged?: boolean
+          rules_acknowledged_at?: string | null
+          rules_version?: string
           status?: string
           stripe_session_id?: string
           tier_id?: string
