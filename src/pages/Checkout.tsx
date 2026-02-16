@@ -3,6 +3,7 @@ import { track } from "@/lib/track";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft } from "lucide-react";
 import { CheckoutDisclaimer } from "@/components/checkout/CheckoutDisclaimer";
 import { TierCard } from "@/components/checkout/TierCard";
@@ -47,6 +48,7 @@ export default function Checkout() {
       : DEFAULT_TIER;
   const [selectedTier, setSelectedTier] = useState<string>(initialTier);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+  const [rulesAcknowledged, setRulesAcknowledged] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const tracked = useRef(false);
 
@@ -85,7 +87,7 @@ export default function Checkout() {
   };
 
   const handlePurchase = async () => {
-    if (!disclaimerAccepted || !tier.isLive) return;
+    if (!disclaimerAccepted || !rulesAcknowledged || !tier.isLive) return;
     if (!user) {
       toast.error('Please log in to continue with your purchase.');
       navigate('/login', { state: { from: { pathname: `/checkout?tier=${selectedTier}` } } });
@@ -95,7 +97,7 @@ export default function Checkout() {
     setIsProcessing(true);
     try {
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-        body: { tierId: selectedTier, disclaimerAccepted: true },
+        body: { tierId: selectedTier, disclaimerAccepted: true, rulesAcknowledged: true, rulesVersion: 'v1.0' },
       });
       if (error) throw error;
       if (data?.url) {
@@ -172,11 +174,31 @@ export default function Checkout() {
             onAcceptedChange={(v) => { setDisclaimerAccepted(v); track('checkout_disclaimer_toggle', { accepted: v }); }}
           />
 
+          {/* Rules acknowledgement — chargeback defense */}
+          <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-border bg-card p-4">
+            <Checkbox
+              checked={rulesAcknowledged}
+              onCheckedChange={(checked) => {
+                const val = checked === true;
+                setRulesAcknowledged(val);
+                if (val) track('checkout_rules_acknowledged', { tier: selectedTier, rules_version: 'v1.0' });
+              }}
+              className="mt-0.5"
+            />
+            <span className="text-sm text-foreground leading-snug">
+              I confirm I have read and understand the{' '}
+              <Link to="/rules" target="_blank" className="text-primary underline underline-offset-2 hover:text-primary/80">
+                Evaluation Rules
+              </Link>{' '}
+              and reward caps. This is a simulated trading evaluation.
+            </span>
+          </label>
+
           {/* Pay button */}
           <Button
             className="w-full h-12 text-base font-semibold"
             size="lg"
-            disabled={!disclaimerAccepted || isProcessing || !tier.isLive}
+            disabled={!disclaimerAccepted || !rulesAcknowledged || isProcessing || !tier.isLive}
             onClick={handlePurchase}
           >
             {!tier.isLive ? (

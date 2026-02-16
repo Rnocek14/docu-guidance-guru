@@ -24,6 +24,7 @@ export type AnalyticsEvent =
   | 'checkout_tier_select'
   | 'checkout_disclaimer_toggle'
   | 'checkout_click_pay'
+  | 'checkout_rules_acknowledged'
   | 'checkout_session_created'
   | 'checkout_session_failed'
   | 'payouts_view'

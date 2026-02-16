@@ -78,9 +78,11 @@ Deno.serve(async (req) => {
 
     // ── 2. Parse & validate request ─────────────────────────
     const body = await req.json()
-    const { tierId, disclaimerAccepted } = body as {
+    const { tierId, disclaimerAccepted, rulesAcknowledged, rulesVersion } = body as {
       tierId?: string
       disclaimerAccepted?: boolean
+      rulesAcknowledged?: boolean
+      rulesVersion?: string
     }
 
     if (!tierId || !TIER_CONFIG[tierId]) {
@@ -104,6 +106,14 @@ Deno.serve(async (req) => {
     if (!disclaimerAccepted) {
       return new Response(
         JSON.stringify({ error: 'Disclaimer must be accepted before purchase' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // P0: Rules acknowledgement must be accepted (chargeback defense)
+    if (!rulesAcknowledged) {
+      return new Response(
+        JSON.stringify({ error: 'Rules acknowledgement required before purchase' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -184,6 +194,9 @@ Deno.serve(async (req) => {
         entry_fee: String(tier.entryFee),
         disclaimer_accepted: 'true',
         disclaimer_version: 'v1',
+        rules_acknowledged: 'true',
+        rules_acknowledged_at: new Date().toISOString(),
+        rules_version: rulesVersion || 'v1.0',
         product_description: 'Simulated trading evaluation access',
       },
       payment_intent_data: {
