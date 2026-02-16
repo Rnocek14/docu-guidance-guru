@@ -69,26 +69,48 @@ export async function handleCheckoutCompleted(
 
   console.log(`Processing checkout: user=${userId} tier=${tierId} session=${session.id}`)
 
-  // ── Step 1: Ensure queue row exists (insert-only, never overwrites status) ──
-  const { error: insertErr } = await supabase
+  // ── Step 1: Ensure queue row exists ──
+  // Try to update the pre-created row (from create-checkout-session EF) first.
+  // If it doesn't exist (edge case: EF insert failed), fall back to insert.
+  const { data: updated, error: updateErr } = await supabase
     .from('checkout_fulfillment_queue')
-    .insert({
-      stripe_session_id: session.id,
-      user_id: userId,
-      tier_id: tierId,
+    .update({
       payment_intent: session.payment_intent as string,
       amount_cents: session.amount_total || 0,
       currency: session.currency || 'usd',
       status: 'queued',
-      rules_acknowledged: metadata.rules_acknowledged === 'true',
-      rules_acknowledged_at: metadata.rules_acknowledged_at || null,
-      rules_version: metadata.rules_version || 'v1.0',
+      updated_at: new Date().toISOString(),
     })
+    .eq('stripe_session_id', session.id)
+    .eq('status', 'session_created')
+    .select('id')
 
-  // 23505 = unique_violation → row already exists, which is fine (Stripe retry)
-  if (insertErr && !insertErr.code?.includes('23505')) {
-    console.error(`Queue insert failed: ${insertErr.message}`, { sessionId: session.id })
-    return
+  if (updateErr) {
+    console.error(`Queue update failed: ${updateErr.message}`, { sessionId: session.id })
+  }
+
+  // Fallback insert if no row was updated (EF pre-insert failed, or already past session_created)
+  if (!updated || updated.length === 0) {
+    const { error: insertErr } = await supabase
+      .from('checkout_fulfillment_queue')
+      .insert({
+        stripe_session_id: session.id,
+        user_id: userId,
+        tier_id: tierId,
+        payment_intent: session.payment_intent as string,
+        amount_cents: session.amount_total || 0,
+        currency: session.currency || 'usd',
+        status: 'queued',
+        rules_acknowledged: metadata.rules_acknowledged === 'true',
+        rules_acknowledged_at: metadata.rules_acknowledged_at || null,
+        rules_version: metadata.rules_version || 'v1.0',
+      })
+
+    // 23505 = unique_violation → row already exists (Stripe retry or already queued)
+    if (insertErr && !insertErr.code?.includes('23505')) {
+      console.error(`Queue insert failed: ${insertErr.message}`, { sessionId: session.id })
+      return
+    }
   }
 
   // Now read the current state (whether we just inserted or it already existed)

@@ -211,6 +211,28 @@ Deno.serve(async (req) => {
       cancel_url: `${APP_ORIGIN}/checkout?payment=cancelled`,
     })
 
+    // ── 5. Persist queue row BEFORE returning URL ──────────
+    // This ensures evidence exists even if webhook is delayed/lost.
+    const { error: queueInsertErr } = await serviceClient
+      .from('checkout_fulfillment_queue')
+      .insert({
+        stripe_session_id: session.id,
+        user_id: userId,
+        tier_id: tierId,
+        payment_intent: null, // not yet available; webhook will fill it
+        amount_cents: tier.entryFee * 100,
+        currency: 'usd',
+        status: 'session_created',
+        rules_acknowledged: true,
+        rules_acknowledged_at: new Date().toISOString(),
+        rules_version: RULES_VERSION,
+      })
+
+    if (queueInsertErr && !queueInsertErr.code?.includes('23505')) {
+      // Non-fatal: log but still return URL (webhook will create the row)
+      console.error(`Queue pre-insert failed (non-fatal): ${queueInsertErr.message}`, { sessionId: session.id })
+    }
+
     console.log(`Checkout session created: ${session.id} for user=${userId} tier=${tierId} origin=${APP_ORIGIN}`)
 
     return new Response(JSON.stringify({ url: session.url }), {
