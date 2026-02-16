@@ -50,8 +50,18 @@ export async function getAdapter(id: BrokerId): Promise<BrokerAdapter | null> {
   return loader();
 }
 
+export function getRegisteredBrokers(): BrokerId[] {
+  return Array.from(adapters.keys());
+}
+
 // Register Tradovate adapter (lazy import to keep cold starts fast)
 registerAdapter('tradovate', async () => {
   const { TradovateAdapter } = await import('../brokers/tradovate/adapter.ts');
   return TradovateAdapter;
 });
+
+// Register new broker adapters here as integrations are built:
+// registerAdapter('ninjatrader', async () => {
+//   const { NinjaTraderAdapter } = await import('../brokers/ninjatrader/adapter.ts');
+//   return NinjaTraderAdapter;
+// });

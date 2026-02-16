@@ -4,7 +4,7 @@ import type { BrokerWebhookContext, BrokerId } from '../_shared/brokers/types.ts
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-tv-signature, x-tv-timestamp, x-broker-id',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-tv-signature, x-tv-timestamp, x-broker-id, x-wl-signature, x-wl-timestamp',
 }
 
 interface RuleSnapshot {
@@ -139,8 +139,9 @@ async function checkPassEligibility(
 // Returns null for unknown brokers — caller must reject.
 function detectBroker(req: Request): BrokerId | null {
   const explicit = req.headers.get('x-broker-id')
-  if (explicit === 'tradovate') return 'tradovate'
-  // Tradovate canonical headers
+  // If an explicit broker ID is set, trust it (adapter registry will validate)
+  if (explicit) return explicit as BrokerId
+  // Tradovate canonical headers (auto-detect)
   if (req.headers.get('x-tv-signature') && req.headers.get('x-tv-timestamp')) return 'tradovate'
   // Unknown broker — do NOT default
   return null
