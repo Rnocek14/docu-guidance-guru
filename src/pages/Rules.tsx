@@ -87,6 +87,7 @@ export default function Rules() {
           <p className="text-muted-foreground text-lg">
             Complete transparency. These are the exact rules your account is evaluated against.
             Your purchased evaluation uses the rules shown at checkout. Changes to future evaluations, if any, are announced in advance.
+            Please review the rules before purchase.
           </p>
         </div>
 
