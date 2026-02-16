@@ -15,17 +15,17 @@
 export const TRUST_BADGES = [
   { label: 'Simulated Environment', emoji: '🎯' },
   { label: 'Approved Payouts Paid', emoji: '💰' },
-  { label: 'Human Review for Flags', emoji: '👤' },
-  { label: 'Rules Locked at Purchase', emoji: '🔒' },
+  { label: 'Staff-Reviewed Decisions', emoji: '👤' },
+  { label: 'Published Rules', emoji: '🔒' },
 ] as const;
 
 // ── Stats bar claims (StatsCounter) ─────────────────────────────────────
 
 export const STATS = [
   { value: 'Early Access', label: 'Platform Status' },
-  { value: 'Human-Reviewed', label: 'Payout Decisions' },
+  { value: 'Staff-Reviewed', label: 'Payout Decisions' },
   { value: '3–5 Days', label: 'Typical Review Time' },
-  { value: 'Frozen', label: 'Rules at Purchase' },
+  { value: 'Published', label: 'Rules at Purchase' },
 ] as const;
 
 // ── Comparison table claims (ComparisonTable) ───────────────────────────
@@ -40,18 +40,18 @@ export const COMPARISON_HEADER = {
 export const HERO_TAGLINE = 'Your Fixed Point in Trading.';
 
 export const HERO_BADGES = [
-  'Frozen Rules',
-  'Human-In-The-Loop',
-  'Full Audit Trail',
+  'Published Rules',
+  'Staff-Reviewed',
+  'Decisions Logged',
 ] as const;
 
 export const HERO_SUBTITLE =
-  'Prove your skill on a simulated account. Meet the rules. Earn performance-based rewards. No hidden catches — rules frozen at purchase, payouts human-reviewed.';
+  'Prove your skill on a simulated account. Meet the rules. Earn performance-based rewards. Published rules, disclosed caps, staff-reviewed decisions.';
 
 // ── Disclaimers ─────────────────────────────────────────────────────────
 
 export const PRICING_DISCLAIMER =
-  'All trading activity is simulated. Payouts are performance-based rewards, not profit withdrawals or investment returns. Rules are locked at the time of purchase and cannot be changed mid-evaluation.';
+  'All trading activity is simulated. Payouts are performance-based rewards, not profit withdrawals or investment returns. Rules are published at the time of purchase and versioned.';
 
 export const PAYOUT_DISCLAIMER =
   'Payout requests are reviewed by staff. Approved refunds are returned to the original payment method when possible.';

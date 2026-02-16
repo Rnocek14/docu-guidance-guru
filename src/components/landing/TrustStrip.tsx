@@ -3,33 +3,33 @@ import { Shield, Lock, Eye, RefreshCw, Scale, Server } from 'lucide-react';
 const trustPoints = [
   {
     icon: Lock,
-    title: 'Rules Frozen at Purchase',
-    detail: 'Your evaluation terms are contractually locked — no mid-challenge changes.',
+    title: 'Published & Versioned Rules',
+    detail: "Your evaluation rules are published at purchase and versioned. We don't change them mid-challenge.",
   },
   {
     icon: Eye,
-    title: 'Human-Reviewed Decisions',
-    detail: 'Breach flags and payout requests are reviewed by staff, not auto-denied.',
+    title: 'Staff-Reviewed Decisions',
+    detail: 'Breach flags and payout requests are reviewed by staff before any action is taken.',
   },
   {
     icon: Scale,
-    title: 'Caps Disclosed Upfront',
-    detail: 'Lifetime earnings caps and payout limits are shown before you pay.',
+    title: 'Caps Disclosed Before Purchase',
+    detail: 'Lifetime earnings caps and payout limits are shown on the pricing page before you buy.',
   },
   {
     icon: RefreshCw,
     title: '$99 Reset, Same Rules',
-    detail: 'If you breach, reset for a flat fee. No upsells, same tier and terms.',
+    detail: 'If you breach, reset for a flat fee. Same tier, same published rules.',
   },
   {
     icon: Server,
     title: 'Simulated Environment',
-    detail: 'All trading is simulated. Payouts are performance-based rewards.',
+    detail: 'All trading is simulated. Payouts are performance-based rewards, not investment returns.',
   },
   {
     icon: Shield,
-    title: 'Full Audit Trail',
-    detail: 'Every key decision is logged with timestamps and reasoning.',
+    title: 'Logged for Dispute Review',
+    detail: 'Key decisions are logged with timestamps so they can be reviewed if questions arise.',
   },
 ];
 
@@ -42,10 +42,10 @@ export function TrustStrip() {
             Why Traders Trust Meridian
           </p>
           <h2 className="text-2xl sm:text-3xl font-bold mb-3">
-            Built for Transparency, Not Hype
+            Built for Transparency
           </h2>
           <p className="text-muted-foreground max-w-lg mx-auto text-sm">
-            No surprise rule changes. No automated denials. No hidden caps.
+            Published rules. Disclosed caps. Staff-reviewed decisions.
           </p>
         </div>
 

@@ -8,19 +8,19 @@ import {
 const faqs = [
   {
     q: 'Is this real trading?',
-    a: 'No. All trading activity takes place in a simulated environment. There is no real capital at risk. Payouts are performance-based rewards for meeting evaluation criteria.',
+    a: 'No. All trading activity takes place in a simulated environment. There is no real capital at risk. Payouts are performance-based rewards funded from program revenue.',
   },
   {
     q: 'How do payouts work?',
-    a: 'Once you pass the evaluation and meet the payout eligibility requirements (minimum trading days, profit buffer, cooling period), you can request a payout. Payout requests are reviewed by a human — not auto-denied.',
+    a: 'Once you pass the evaluation and meet the payout eligibility requirements (minimum trading days, profit buffer, cooling period), you can request a payout. Requests are reviewed by staff before any action is taken.',
   },
   {
     q: 'What happens if I breach a rule?',
-    a: 'The system detects the breach and flags it for human review. Accounts are not auto-failed. A risk officer reviews the situation and makes the final call.',
+    a: 'The system detects the breach and flags it for staff review. A risk officer reviews the situation and makes the final call.',
   },
   {
     q: 'Can rules change during my challenge?',
-    a: 'No. Your rules are frozen at the moment you purchase your evaluation. They cannot be changed mid-challenge. This is a core commitment.',
+    a: "Your rules are published at the time of purchase and versioned. We don\u2019t change them mid-challenge.",
   },
   {
     q: 'What trading platforms can I use?',
@@ -28,15 +28,23 @@ const faqs = [
   },
   {
     q: 'What is the reset fee?',
-    a: 'If you breach your account and want to try again, you can reset for $99. This gives you a fresh account with the same rules and tier.',
+    a: 'If you breach your account and want to try again, you can reset for $99. This gives you a fresh account with the same published rules and tier.',
   },
   {
     q: 'What is the lifetime payout limit?',
-    a: 'Each tier has a maximum lifetime earnings amount, expressed as a multiple of your entry fee (e.g., up to 7× on the Starter tier). This is disclosed upfront before purchase and ensures the platform can reliably pay approved requests.',
+    a: 'Each tier has a maximum lifetime earnings amount, expressed as a multiple of your entry fee (e.g., up to 7\u00D7 on the Starter tier). This is disclosed on the pricing page before purchase.',
   },
   {
     q: 'How fast are payouts processed?',
-    a: 'Payout requests are typically reviewed within 3–5 business days. Once approved, payment is usually processed within 1–5 business days depending on your payout method.',
+    a: 'Payout requests are typically reviewed within 3\u20135 business days. Once approved, payment is usually processed within 1\u20135 business days depending on your payout method.',
+  },
+  {
+    q: 'When can I request rewards?',
+    a: 'After meeting the minimum trading days, profit buffer, and 30-day cooling period defined by your tier. Exact requirements are shown on the Rules page.',
+  },
+  {
+    q: 'Why are there caps?',
+    a: 'Lifetime caps ensure the platform can reliably pay approved requests. The cap amount is disclosed before purchase so there are no surprises.',
   },
 ];
 
