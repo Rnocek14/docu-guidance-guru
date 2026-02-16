@@ -109,13 +109,13 @@ export default function Index() {
           {/* Mini recap bullets */}
           <div className="flex flex-wrap justify-center gap-6 mb-10 text-sm text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <Lock className="h-4 w-4 text-primary" /> Rules frozen at purchase
+              <Lock className="h-4 w-4 text-primary" /> Published rules
             </span>
             <span className="flex items-center gap-1.5">
-              <Users className="h-4 w-4 text-primary" /> Human-reviewed decisions
+              <Users className="h-4 w-4 text-primary" /> Staff-reviewed decisions
             </span>
             <span className="flex items-center gap-1.5">
-              <FileText className="h-4 w-4 text-primary" /> Full audit trail
+              <FileText className="h-4 w-4 text-primary" /> Decisions logged
             </span>
           </div>
 

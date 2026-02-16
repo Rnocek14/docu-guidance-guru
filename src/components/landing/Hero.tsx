@@ -5,9 +5,9 @@ import { track } from '@/lib/track';
 import { HeroDashboardPreview } from './HeroDashboardPreview';
 
 const badges = [
-  { icon: Lock, label: 'Frozen Rules' },
-  { icon: Eye, label: 'Human-In-The-Loop' },
-  { icon: Scale, label: 'Full Audit Trail' },
+  { icon: Lock, label: 'Published Rules' },
+  { icon: Eye, label: 'Staff-Reviewed' },
+  { icon: Scale, label: 'Decisions Logged' },
 ];
 
 export function Hero() {
@@ -51,7 +51,7 @@ export function Hero() {
 
           <p className="text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto mb-10 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-delay:450ms]">
             Prove your skill on a simulated account. Meet the rules. Earn performance-based rewards.
-            No hidden catches — rules frozen at purchase, payouts human-reviewed.
+            Published rules, disclosed caps, staff-reviewed decisions.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-delay:600ms]">
@@ -61,9 +61,13 @@ export function Hero() {
               </a>
             </Button>
             <Button asChild size="lg" variant="outline" className="h-12 px-8 text-base">
-              <Link to="/login">Sign In</Link>
+              <Link to="/rules">View Rules</Link>
             </Button>
           </div>
+
+          <p className="text-xs text-muted-foreground mt-4 animate-in fade-in duration-700 [animation-delay:750ms]">
+            Simulated evaluation · transparent caps · staff-reviewed decisions
+          </p>
         </div>
 
         {/* Dashboard Preview */}

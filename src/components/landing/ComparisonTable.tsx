@@ -13,37 +13,37 @@ interface CompareRow {
 const rows: CompareRow[] = [
   {
     feature: 'Rule Changes Mid-Challenge',
-    others: 'Common at many firms',
+    others: 'Common at some firms',
     othersOk: false,
-    us: 'Frozen at purchase — locked contract',
+    us: 'Published at purchase, versioned',
     usOk: true,
   },
   {
     feature: 'Breach Decisions',
-    others: 'Often auto-denied by algorithm',
+    others: 'Often algorithm-driven',
     othersOk: false,
-    us: 'Human-reviewed by risk staff',
+    us: 'Reviewed by staff before action',
     usOk: true,
   },
   {
-    feature: 'Payout Denials',
-    others: 'Typically automated, opaque process',
+    feature: 'Payout Review',
+    others: 'Varies widely by firm',
     othersOk: false,
-    us: 'Human-reviewed, audit-logged',
+    us: 'Staff-reviewed, decisions logged',
     usOk: true,
   },
   {
     feature: 'Lifetime Payout Caps',
-    others: 'Often hidden or undisclosed',
+    others: 'Not disclosed by some firms', // lint-copy: allow
     othersOk: false,
-    us: 'Disclosed upfront before purchase',
+    us: 'Disclosed on pricing page',
     usOk: true,
   },
   {
-    feature: 'Decision Audit Trail',
-    others: 'Rarely available to traders',
+    feature: 'Decision Logging',
+    others: 'Varies by firm',
     othersOk: false,
-    us: 'Full trail for key decisions',
+    us: 'Key actions logged for review',
     usOk: true,
   },
   {
@@ -127,8 +127,8 @@ export function ComparisonTable() {
         </div>
 
         <p className="text-xs text-muted-foreground text-center mt-8 max-w-2xl mx-auto">
-          Comparisons based on publicly available information from major prop trading evaluation firms.
-          "Typical" reflects common industry practices, not universal claims about any specific firm.
+          Comparisons reflect common industry patterns based on publicly available information.
+          "Typical" is not a claim about any specific firm. Your experience may vary.
         </p>
       </div>
     </section>
