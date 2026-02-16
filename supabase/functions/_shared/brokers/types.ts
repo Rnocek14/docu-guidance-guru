@@ -1,6 +1,6 @@
 // Canonical types for the platform-agnostic broker adapter layer
 
-export type BrokerId = 'tradovate';
+export type BrokerId = 'tradovate' | (string & {});
 
 export type IngestDecision =
   | 'ACCEPTED'

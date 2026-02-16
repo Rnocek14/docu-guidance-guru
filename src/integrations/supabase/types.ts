@@ -170,6 +170,11 @@ export type Database = {
           daily_pnl: number
           daily_pnl_start_balance: number | null
           daily_reset_at: string | null
+          disabled_at: string | null
+          external_account_id: string | null
+          external_provider: string | null
+          external_status: string | null
+          external_user_id: string | null
           failed_at: string | null
           highest_balance: number
           id: string
@@ -179,6 +184,8 @@ export type Database = {
           payout_cycle_start_balance: number | null
           payout_cycle_started_at: string | null
           phase_index: number
+          provider_metadata: Json | null
+          provisioned_at: string | null
           root_account_id: string | null
           rule_snapshot: Json | null
           starting_balance: number
@@ -197,6 +204,11 @@ export type Database = {
           daily_pnl?: number
           daily_pnl_start_balance?: number | null
           daily_reset_at?: string | null
+          disabled_at?: string | null
+          external_account_id?: string | null
+          external_provider?: string | null
+          external_status?: string | null
+          external_user_id?: string | null
           failed_at?: string | null
           highest_balance?: number
           id?: string
@@ -206,6 +218,8 @@ export type Database = {
           payout_cycle_start_balance?: number | null
           payout_cycle_started_at?: string | null
           phase_index?: number
+          provider_metadata?: Json | null
+          provisioned_at?: string | null
           root_account_id?: string | null
           rule_snapshot?: Json | null
           starting_balance?: number
@@ -224,6 +238,11 @@ export type Database = {
           daily_pnl?: number
           daily_pnl_start_balance?: number | null
           daily_reset_at?: string | null
+          disabled_at?: string | null
+          external_account_id?: string | null
+          external_provider?: string | null
+          external_status?: string | null
+          external_user_id?: string | null
           failed_at?: string | null
           highest_balance?: number
           id?: string
@@ -233,6 +252,8 @@ export type Database = {
           payout_cycle_start_balance?: number | null
           payout_cycle_started_at?: string | null
           phase_index?: number
+          provider_metadata?: Json | null
+          provisioned_at?: string | null
           root_account_id?: string | null
           rule_snapshot?: Json | null
           starting_balance?: number
@@ -1741,6 +1762,107 @@ export type Database = {
           payouts_hold_reason?: string | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      provider_api_calls: {
+        Row: {
+          account_id: string | null
+          action: string
+          created_at: string
+          error: string | null
+          external_account_id: string | null
+          http_status: number | null
+          id: string
+          latency_ms: number | null
+          provider: string
+          request_payload: Json | null
+          response_payload: Json | null
+          success: boolean
+        }
+        Insert: {
+          account_id?: string | null
+          action: string
+          created_at?: string
+          error?: string | null
+          external_account_id?: string | null
+          http_status?: number | null
+          id?: string
+          latency_ms?: number | null
+          provider: string
+          request_payload?: Json | null
+          response_payload?: Json | null
+          success?: boolean
+        }
+        Update: {
+          account_id?: string | null
+          action?: string
+          created_at?: string
+          error?: string | null
+          external_account_id?: string | null
+          http_status?: number | null
+          id?: string
+          latency_ms?: number | null
+          provider?: string
+          request_payload?: Json | null
+          response_payload?: Json | null
+          success?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_api_calls_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      provider_webhook_events: {
+        Row: {
+          created_at: string
+          error: string | null
+          event_id: string | null
+          event_type: string
+          external_account_id: string | null
+          headers_subset: Json
+          id: string
+          processed_at: string | null
+          provider: string
+          raw_body: string
+          raw_hash: string
+          received_at: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          event_id?: string | null
+          event_type?: string
+          external_account_id?: string | null
+          headers_subset?: Json
+          id?: string
+          processed_at?: string | null
+          provider: string
+          raw_body: string
+          raw_hash: string
+          received_at?: string
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          event_id?: string | null
+          event_type?: string
+          external_account_id?: string | null
+          headers_subset?: Json
+          id?: string
+          processed_at?: string | null
+          provider?: string
+          raw_body?: string
+          raw_hash?: string
+          received_at?: string
+          status?: string
         }
         Relationships: []
       }
