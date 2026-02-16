@@ -543,5 +543,241 @@ The platform enforces strict language controls:
 
 ---
 
-*Document generated 2026-02-13. Meridian Prop Evaluation Platform v1.0.*  
+---
+
+## Appendix A — Vendor Call Execution Playbook
+
+### Call #1 — Gate Decision (15–20 min)
+
+Ask in this exact order. If any answer is a hard NO, stop and pivot.
+
+#### 1. Provisioning
+> "Can you programmatically provision sim accounts?"
+
+- If YES → "What identifier do you return as the sim account ID?"
+- Note the field name (e.g. `accountId`, `simId`, `externalId`)
+
+#### 2. Fill Delivery
+> "Can you deliver fills — push webhook or pull API?"
+
+- If **webhook** → "Do you sign payloads? Include event IDs?"
+  - Header names for signature + timestamp
+  - Unique fill/event ID field name
+- If **polling** → "Can I query fills by account + since timestamp?"
+  - Endpoint pattern, pagination, rate limits
+
+#### 3. Disable / Freeze
+> "Can you programmatically disable/freeze a sim account fast?"
+
+- "Does disable block order entry immediately?"
+- Target: < 5 seconds to take effect
+- Can we re-enable after review?
+
+#### Gate Decision
+
+| Capability | Required | Status |
+|---|---|---|
+| API provisioning | ✅ | ☐ YES / ☐ NO |
+| Fill delivery (webhook or poll) | ✅ | ☐ YES / ☐ NO |
+| Programmatic disable (< 5s) | ✅ | ☐ YES / ☐ NO |
+
+**If any NO → pivot to another provider.**
+
+---
+
+### Call #2 — Collect Integration Artifacts (30–45 min)
+
+Only proceed if Call #1 gate = all YES.
+
+#### Artifacts Checklist
+
+- [ ] API docs link (or PDF)
+- [ ] Sandbox credentials + rotation process
+- [ ] Sample fill payload (one real example is gold)
+- [ ] Sample balance/equity payload
+- [ ] Webhook signing details:
+  - HMAC algorithm (SHA-256?)
+  - Header names (`X-Signature`, `X-Timestamp`, etc.)
+  - Signing format (`timestamp.body`? `body` only?)
+  - Replay window (how long are timestamps valid?)
+- [ ] Disable endpoint details:
+  - Method + path
+  - What "disabled" means operationally
+  - Latency to take effect
+- [ ] Rate limits and retry semantics
+- [ ] Account provisioning details:
+  - Required fields (name, email, balance, etc.)
+  - Configurable properties (balance, commissions, instruments, position limits)
+  - IDs returned (`external_account_id`, `external_user_id`)
+
+---
+
+### Post-Call #1 Paste Template
+
+Copy/paste this after the gate call and send to engineering:
+
+```
+Provisioning: YES/NO + returned account ID field name: ___
+Fills: webhook / polling + unique fill ID field: ___ + signing: YES/NO
+Disable: YES/NO + time-to-effect: ___
+Docs link: ___
+Sample payload (redacted): ___
+```
+
+Once received, the `NinjaTraderAdapter` skeleton will be generated mapping to:
+- `ProviderAdapter.provisionAccount()` → their provisioning endpoint
+- `ProviderAdapter.disableAccount()` → their freeze endpoint
+- `BrokerAdapter.verify()` + `parse()` → their fill webhook/polling schema
+
+---
+
+### 30-Second Pitch (for the call)
+
+> "Meridian is the evaluation and risk engine. We don't need market access or real capital — we just need automated sim account provisioning, real-time fills, and a way to freeze accounts on breach. Everything else is handled on our side, with full audit logging and dispute-proof evidence packs."
+
+---
+
+### NinjaTrader Intake Form (Detailed)
+
+#### 1) Contact + Partnership Basics
+
+| Field | Answer |
+|---|---|
+| Company / Team | |
+| Contact name + role | |
+| Email / phone / Slack | |
+| Technical POC | |
+| Business POC | |
+| Support eval/partner programs today? | Y/N |
+| Time to sandbox credentials | same day / 1–3 days / 1+ week |
+
+#### 2) Environment & Access
+
+| Field | Answer |
+|---|---|
+| Sandbox / UAT environment? | Y/N |
+| How sandbox differs from prod | |
+| Auth method | API Key / OAuth / JWT / other |
+| IP allowlisting required? | Y/N |
+| Rate limits | req/min, burst |
+| Separate creds per environment? | Y/N |
+
+#### 3) Account Provisioning (Meridian → Provider)
+
+| Field | Answer |
+|---|---|
+| Create sim accounts via API? | Y/N |
+| Endpoint / method | |
+| Required fields | |
+| Typical latency | |
+| Max accounts per day/week | |
+| Manual approvals needed? | Y/N |
+| Starting balance configurable? | Y/N |
+| Commission model configurable? | Y/N |
+| Allowed instruments configurable? | Y/N |
+| Max contracts configurable? | Y/N |
+| Session template configurable? | Y/N |
+| Reset balance via API? | Y/N |
+| Returns `external_account_id`? | Y/N |
+| Returns `external_user_id`? | Y/N |
+| Other mapping keys | |
+
+#### 4) Trade Data Delivery (Provider → Meridian)
+
+**Webhooks:**
+
+| Field | Answer |
+|---|---|
+| Webhooks for fills? | Y/N |
+| Event types available | fills / cancels / positions / balance / daily |
+| Delivery latency | real-time / seconds / batched |
+| Retry behavior | |
+| Event ordering guarantees? | Y/N |
+| Signature support | HMAC / JWT / other |
+| Replay protection | timestamp / event id / nonce |
+| Headers sent | |
+| Unique event ID included? | Y/N |
+| Unique fill ID included? | Y/N |
+
+**Polling fallback:**
+
+| Field | Answer |
+|---|---|
+| API for recent fills by account? | Y/N |
+| Max lookback window | |
+| Pagination format | |
+| Rate limits | |
+| Query by "since timestamp"? | Y/N |
+
+#### 5) Required Fill Schema
+
+| Field | Available? |
+|---|---|
+| account_id | Y/N |
+| trade_id / fill_id | Y/N |
+| timestamp (UTC) | Y/N |
+| instrument symbol | Y/N |
+| side (buy/sell) | Y/N |
+| quantity | Y/N |
+| price | Y/N |
+| commission | Y/N |
+| fees | Y/N |
+| realized P&L per fill | Y/N |
+| net P&L (after fees) | Y/N |
+
+If no per-fill P&L: per-trade? daily?
+
+#### 6) Balance & Daily Reset
+
+| Field | Answer |
+|---|---|
+| Real-time unrealized P&L? | Y/N |
+| Real-time balance/equity? | Y/N |
+| Daily start-of-day equity? | Y/N |
+| "Trading day" definition | exchange close / configurable / timezone |
+| End-of-day snapshot event? | Y/N |
+
+#### 7) Account Controls / Enforcement
+
+| Field | Answer |
+|---|---|
+| Disable/freeze via API? | Y/N |
+| Latency to take effect | target < 5s |
+| Blocks order entry immediately? | Y/N |
+| Re-enable after review? | Y/N |
+| Set position limit to 0? | Y/N |
+| Read-only mode toggle? | Y/N |
+
+#### 8) Evidence & Dispute Defense
+
+| Field | Answer |
+|---|---|
+| Historical trade export via API? | Y/N |
+| Minimum retention | 90 days+ preferred |
+| Per-account export? | Y/N |
+| Includes commissions/fees? | Y/N |
+| Audit logs of disable actions? | Y/N |
+
+#### 9) Simulated Environment
+
+| Field | Answer |
+|---|---|
+| All accounts simulated? | Y/N |
+| Marketing restrictions? | |
+| Compliance review required? | Y/N |
+
+#### 10) Commercial Terms
+
+| Field | Answer |
+|---|---|
+| Per-account cost | |
+| Minimum commitments | |
+| Revenue share / partner fees | |
+| Support package | Y/N |
+| Integration fees | |
+| Time-to-production estimate | |
+
+---
+
+*Document generated 2026-02-13. Updated 2026-02-16 with vendor call playbook.*  
 *For questions: [contact information]*
