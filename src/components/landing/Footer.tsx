@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Shield } from 'lucide-react';
+import { track } from '@/lib/track';
 
 export function Footer() {
   return (
@@ -11,7 +12,7 @@ export function Footer() {
             <span className="font-bold">Meridian</span>
           </div>
           <nav className="flex flex-wrap items-center gap-6 text-sm text-muted-foreground">
-            <Link to="/rules" className="hover:text-foreground transition-colors">
+            <Link to="/rules" onClick={() => track('lp_click_rules', { location: 'footer' })} className="hover:text-foreground transition-colors">
               Rules
             </Link>
             <a href="#pricing" className="hover:text-foreground transition-colors">
