@@ -80,6 +80,9 @@ export async function handleCheckoutCompleted(
       amount_cents: session.amount_total || 0,
       currency: session.currency || 'usd',
       status: 'queued',
+      rules_acknowledged: metadata.rules_acknowledged === 'true',
+      rules_acknowledged_at: metadata.rules_acknowledged_at || null,
+      rules_version: metadata.rules_version || 'v1.0',
     })
 
   // 23505 = unique_violation → row already exists, which is fine (Stripe retry)
