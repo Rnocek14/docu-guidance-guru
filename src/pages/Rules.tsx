@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Shield, ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import { TIERS } from '@/lib/pricing-data';
 import { cn } from '@/lib/utils';
+import { track } from '@/lib/track';
 import { Footer } from '@/components/landing/Footer';
 
 const evaluationRules = [
@@ -51,10 +52,12 @@ function RuleList({ rules }: { rules: { label: string; description: string }[] }
 }
 
 export default function Rules() {
+  const tracked = useRef(false);
   useEffect(() => {
     const root = document.documentElement;
     const hadDark = root.classList.contains('dark');
     root.classList.add('dark');
+    if (!tracked.current) { tracked.current = true; track('rules_view'); }
     return () => { if (!hadDark) root.classList.remove('dark'); };
   }, []);
 
@@ -83,7 +86,7 @@ export default function Rules() {
           <h1 className="text-4xl font-bold mb-4">Evaluation Rules</h1>
           <p className="text-muted-foreground text-lg">
             Complete transparency. These are the exact rules your account is evaluated against.
-            Rules are published at purchase. Changes, if any, are announced in advance.
+            Your purchased evaluation uses the rules shown at checkout. Changes to future evaluations, if any, are announced in advance.
           </p>
         </div>
 

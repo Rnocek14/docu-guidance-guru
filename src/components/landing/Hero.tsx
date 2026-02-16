@@ -60,8 +60,8 @@ export function Hero() {
                 Start Your Evaluation <ArrowRight className="h-4 w-4" />
               </a>
             </Button>
-            <Button asChild size="lg" variant="outline" className="h-12 px-8 text-base" onClick={() => track('lp_click_rules')}>
-              <Link to="/rules">View Rules</Link>
+            <Button asChild size="lg" variant="outline" className="h-12 px-8 text-base">
+              <Link to="/rules" onClick={() => track('lp_click_rules', { location: 'hero' })}>View Rules</Link>
             </Button>
             <p className="text-xs text-muted-foreground -mt-1">Read in 2 minutes</p>
           </div>
