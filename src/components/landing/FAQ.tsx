@@ -40,11 +40,11 @@ const faqs = [
   },
   {
     q: 'When can I request rewards?',
-    a: 'After meeting the minimum trading days, profit buffer, and 30-day cooling period defined by your tier. Exact requirements are shown on the Rules page.',
+    a: 'After a 14-day eligibility period, meeting the minimum trading days and winning days requirements, maintaining the profit buffer, and completing the 30-day cooling period. Full details are on the Rules page.',
   },
   {
     q: 'Why are there caps?',
-    a: 'Lifetime caps ensure the platform can reliably pay approved requests. The cap amount is disclosed before purchase so there are no surprises.',
+    a: 'Lifetime caps help the platform maintain the reserves needed to pay approved requests reliably. Cap amounts are disclosed on the pricing page before you buy.',
   },
 ];
 

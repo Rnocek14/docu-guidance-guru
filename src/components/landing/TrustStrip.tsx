@@ -3,8 +3,8 @@ import { Shield, Lock, Eye, RefreshCw, Scale, Server } from 'lucide-react';
 const trustPoints = [
   {
     icon: Lock,
-    title: 'Published & Versioned Rules',
-    detail: "Your evaluation rules are published at purchase and versioned. We don't change them mid-challenge.",
+    title: 'Published Rules',
+    detail: 'Your evaluation rules are published at purchase. Changes, if any, are announced in advance.',
   },
   {
     icon: Eye,
@@ -28,8 +28,8 @@ const trustPoints = [
   },
   {
     icon: Shield,
-    title: 'Logged for Dispute Review',
-    detail: 'Key decisions are logged with timestamps so they can be reviewed if questions arise.',
+    title: 'Decisions Logged',
+    detail: 'Key actions are recorded with timestamps so they can be referenced if questions arise.',
   },
 ];
 
