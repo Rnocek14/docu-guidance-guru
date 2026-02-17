@@ -208,7 +208,7 @@ const METRIC_EXTRACTORS: Record<string, (r: SimResultForAssertions) => number | 
   WORST_MONTH_ABOVE: (r) => r.risk?.worstMonth,
   MONTHLY_PROFIT_POSITIVE: (r) => r.profit?.mean,
   MARGIN_ABOVE: (r) => r.diagnostics?.effectiveMargin,
-  MAX_PAYOUT_OUTFLOW_BELOW: (r) => r.risk?.maxPayoutOutflowMonth,
+  MAX_PAYOUT_OUTFLOW_BELOW: (r) => r.risk?.maxPayoutOutflowMonth?.p95,
 };
 
 // ============================================================================
@@ -218,7 +218,7 @@ const METRIC_EXTRACTORS: Record<string, (r: SimResultForAssertions) => number | 
 interface SimResultForAssertions {
   annual: { mean: number; lossProb: number };
   profit: { mean: number };
-  risk: { worstMonth: number; maxPayoutOutflowMonth?: number };
+  risk: { worstMonth: number; maxPayoutOutflowMonth?: { p95: number; p99: number; max: number } };
   reserve: { breachProbability: number };
   diagnostics: Record<string, any>;
 }
@@ -295,7 +295,7 @@ export function evaluateAssertions(
         break;
       case 'MAX_PAYOUT_OUTFLOW_BELOW':
         passed = value < (assertion.threshold ?? 20000);
-        detail = `Peak monthly payout outflow: $${Math.round(value).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? 20000).toLocaleString()})`;
+        detail = `P95 peak monthly payout outflow: $${Math.round(value).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? 20000).toLocaleString()})`;
         break;
     }
 
