@@ -96,6 +96,9 @@ export class StripeCheckoutAdapter implements CheckoutProviderAdapter {
       return null
     }
 
+    // event.id is the canonical Stripe event ID (evt_xxx) — critical for idempotency
+    const providerEventId = event.id
+
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session
@@ -103,6 +106,7 @@ export class StripeCheckoutAdapter implements CheckoutProviderAdapter {
         return {
           provider: this.providerId,
           eventType: 'checkout_completed',
+          providerEventId,
           sessionId: session.id,
           paymentIntent: session.payment_intent as string | null,
           amountCents: session.amount_total || 0,
@@ -115,7 +119,8 @@ export class StripeCheckoutAdapter implements CheckoutProviderAdapter {
         return {
           provider: this.providerId,
           eventType: 'charge_refunded',
-          sessionId: '', // Refunds don't have session ID directly
+          providerEventId,
+          sessionId: '', // Refunds keyed by payment_intent, not session
           paymentIntent: charge.payment_intent as string | null,
           amountCents: charge.amount_refunded || 0,
           currency: charge.currency || 'usd',
@@ -126,6 +131,7 @@ export class StripeCheckoutAdapter implements CheckoutProviderAdapter {
         return {
           provider: this.providerId,
           eventType: 'unknown',
+          providerEventId,
           sessionId: '',
           paymentIntent: null,
           amountCents: 0,
