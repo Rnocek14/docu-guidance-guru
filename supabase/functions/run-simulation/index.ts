@@ -921,6 +921,15 @@ function runSimulation(
   // Proper diagnostics: per passed account metrics
   const safePassedAccounts = totalPassedAccounts > 0 ? totalPassedAccounts : 1
 
+  // Pre-compute payout outflow percentiles (reused in risk output + guardrail)
+  const payoutOutflow = (() => {
+    const sorted = perIterMaxPayoutOutflow.slice().sort((a, b) => a - b)
+    const len = sorted.length
+    if (len === 0) return { p95: 0, p99: 0, max: 0 }
+    const pIndex = (p: number) => Math.min(Math.max(Math.ceil(p * len) - 1, 0), len - 1)
+    return { p95: sorted[pIndex(0.95)], p99: sorted[pIndex(0.99)], max: sorted[len - 1] }
+  })()
+
   return {
     partial,
     partialReason,
@@ -930,19 +939,8 @@ function runSimulation(
     profit: { mean, p5, p50, p95, stdDev },
     risk: {
       probabilityOfLoss, maxDrawdown, worstMonth, bestMonth, consecutiveLossMonths: maxConsecutiveLoss,
-      // Payout outflow percentiles (per-iteration max-month, then percentiled across iterations)
-      // Uses nearest-rank method: idx = ceil(p * n) - 1, clamped to [0, n-1]
-      maxPayoutOutflowMonth: (() => {
-        const sorted = perIterMaxPayoutOutflow.slice().sort((a, b) => a - b)
-        const len = sorted.length
-        if (len === 0) return { p95: 0, p99: 0, max: 0 }
-        const pIndex = (p: number) => Math.min(Math.max(Math.ceil(p * len) - 1, 0), len - 1)
-        return {
-          p95: sorted[pIndex(0.95)],
-          p99: sorted[pIndex(0.99)],
-          max: sorted[len - 1],
-        }
-      })(),
+      // Payout outflow percentiles (per-iteration max-month, nearest-rank method)
+      maxPayoutOutflowMonth: payoutOutflow,
     },
     reserve: { breachProbability: reserveBreachProbability, threshold: reserveThreshold },
     annual: { p5: annualP5, p50: annualP50, p95: annualP95, lossProb: annualLossProb, mean: annualMean },
@@ -950,26 +948,19 @@ function runSimulation(
     cohortBands,
     histogram,
     diagnostics: {
-      // Payout dollars per passed account (unit economics)
       avgPayoutDollarsPerPassedAccount: totalPayoutDollars / safePassedAccounts,
-      // Payout count per passed account
       avgPayoutCountPerPassedAccount: totalPayoutCount / safePassedAccounts,
-      // Total payout requests (before gates/caps)
       totalPayoutRequests,
-      // Split cap metrics
       capCompletions: totalCapCompletions,
       capClips: totalCapClips,
       capRejections: totalCapRejections,
-      // Per completed iteration rates
       capCompletionsPerPassedAccount: totalCapCompletions / safePassedAccounts,
       capClipsPerPassedAccount: totalCapClips / safePassedAccounts,
       capRejectionsPerPayoutRequest: totalPayoutRequests > 0 ? totalCapRejections / totalPayoutRequests : 0,
-      // Legacy compat (kept for UI backward compat)
       avgPayoutsPerAccount: totalPayoutCount / safePassedAccounts,
       lifetimeCapHitRate: totalCapCompletions / safePassedAccounts,
-      // Guardrail: detect silent regression in payout outflow collection
-      ...(completedIterations >= 500 && totalPayoutRequests > 0 && perIterMaxPayoutOutflow.length > 0 &&
-        perIterMaxPayoutOutflow.slice().sort((a, b) => a - b)[Math.min(Math.max(Math.ceil(0.95 * perIterMaxPayoutOutflow.length) - 1, 0), perIterMaxPayoutOutflow.length - 1)] === 0
+      // Guardrail: reuses pre-computed payoutOutflow.p95 — no duplicate sort
+      ...(completedIterations >= 500 && totalPayoutRequests > 0 && payoutOutflow.p95 === 0
         ? { payout_outflow_percentile_zero_with_payouts: true } : {}),
     },
     // Aggregate revenue/cost breakdown (averaged per iteration for auditability)
