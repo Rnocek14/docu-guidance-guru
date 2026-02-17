@@ -184,7 +184,10 @@ export type Database = {
           payout_cycle_start_balance: number | null
           payout_cycle_started_at: string | null
           phase_index: number
+          provider: string | null
           provider_metadata: Json | null
+          provider_payment_id: string | null
+          provider_session_id: string | null
           provisioned_at: string | null
           root_account_id: string | null
           rule_snapshot: Json | null
@@ -218,7 +221,10 @@ export type Database = {
           payout_cycle_start_balance?: number | null
           payout_cycle_started_at?: string | null
           phase_index?: number
+          provider?: string | null
           provider_metadata?: Json | null
+          provider_payment_id?: string | null
+          provider_session_id?: string | null
           provisioned_at?: string | null
           root_account_id?: string | null
           rule_snapshot?: Json | null
@@ -252,7 +258,10 @@ export type Database = {
           payout_cycle_start_balance?: number | null
           payout_cycle_started_at?: string | null
           phase_index?: number
+          provider?: string | null
           provider_metadata?: Json | null
+          provider_payment_id?: string | null
+          provider_session_id?: string | null
           provisioned_at?: string | null
           root_account_id?: string | null
           rule_snapshot?: Json | null

@@ -33,8 +33,8 @@ Deno.serve(async (req) => {
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const supabase = createClient(supabaseUrl, serviceRoleKey)
 
-  // Read raw body once for both signature verification and fallback hashing
-  const rawBody = await req.clone().text()
+  // Read raw body ONCE — adapters receive string + headers, not Request
+  const rawBody = await req.text()
 
   try {
     // ── 1. Detect provider by signature header ─────────────
@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    const event = await adapter.parseWebhook(req)
+    const event = await adapter.parseWebhook(rawBody, req.headers)
 
     if (!event) {
       console.warn(`payment-webhook: signature verification failed for ${detectedRailKey}`)
@@ -138,10 +138,10 @@ async function handleCheckoutCompleted(
     return
   }
 
-  // Only set legacy stripe_session_id for Stripe provider
+  // Only populate legacy Stripe columns for actual Stripe events
   const legacyFields = event.provider === 'stripe'
     ? { stripe_session_id: event.sessionId, payment_intent: event.paymentIntent }
-    : { stripe_session_id: event.sessionId } // provider_session_id stored here for legacy compat
+    : { stripe_session_id: null, payment_intent: null }
 
   // Upsert keyed on (provider, provider_session_id) — works for any provider
   const { error: upsertErr } = await supabase
