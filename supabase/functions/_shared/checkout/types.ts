@@ -58,8 +58,9 @@ export interface CheckoutProviderAdapter {
   createSession(req: CreateCheckoutRequest): Promise<CreateCheckoutResult>
 
   /**
-   * Verify and parse an incoming webhook request.
+   * Verify and parse an incoming webhook.
+   * Accepts pre-read body + headers to prevent stream double-consumption.
    * Returns null if signature is invalid.
    */
-  parseWebhook(req: Request): Promise<CheckoutWebhookEvent | null>
+  parseWebhook(rawBody: string, headers: Headers): Promise<CheckoutWebhookEvent | null>
 }

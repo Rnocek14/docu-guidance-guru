@@ -83,9 +83,8 @@ export class StripeCheckoutAdapter implements CheckoutProviderAdapter {
     }
   }
 
-  async parseWebhook(req: Request): Promise<CheckoutWebhookEvent | null> {
-    const rawBody = await req.text()
-    const signature = req.headers.get('stripe-signature')
+  async parseWebhook(rawBody: string, headers: Headers): Promise<CheckoutWebhookEvent | null> {
+    const signature = headers.get('stripe-signature')
 
     if (!signature) return null
 
