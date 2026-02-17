@@ -560,6 +560,11 @@ export type Database = {
           last_error: string | null
           payment_intent: string | null
           processing_started_at: string | null
+          provider: string | null
+          provider_event_id: string | null
+          provider_payment_id: string | null
+          provider_session_id: string | null
+          rail_key: string | null
           rules_acknowledged: boolean
           rules_acknowledged_at: string | null
           rules_version: string
@@ -579,6 +584,11 @@ export type Database = {
           last_error?: string | null
           payment_intent?: string | null
           processing_started_at?: string | null
+          provider?: string | null
+          provider_event_id?: string | null
+          provider_payment_id?: string | null
+          provider_session_id?: string | null
+          rail_key?: string | null
           rules_acknowledged?: boolean
           rules_acknowledged_at?: string | null
           rules_version?: string
@@ -598,6 +608,11 @@ export type Database = {
           last_error?: string | null
           payment_intent?: string | null
           processing_started_at?: string | null
+          provider?: string | null
+          provider_event_id?: string | null
+          provider_payment_id?: string | null
+          provider_session_id?: string | null
+          rail_key?: string | null
           rules_acknowledged?: boolean
           rules_acknowledged_at?: string | null
           rules_version?: string
@@ -1548,6 +1563,7 @@ export type Database = {
         Row: {
           account_id: string
           amount: number
+          approved_at: string | null
           approved_by: string | null
           calculated_eligible_amount: number | null
           destination_name_match: boolean | null
@@ -1573,6 +1589,7 @@ export type Database = {
         Insert: {
           account_id: string
           amount: number
+          approved_at?: string | null
           approved_by?: string | null
           calculated_eligible_amount?: number | null
           destination_name_match?: boolean | null
@@ -1598,6 +1615,7 @@ export type Database = {
         Update: {
           account_id?: string
           amount?: number
+          approved_at?: string | null
           approved_by?: string | null
           calculated_eligible_amount?: number | null
           destination_name_match?: boolean | null

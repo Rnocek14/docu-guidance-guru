@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
     const { error: queueInsertErr } = await serviceClient
       .from('checkout_fulfillment_queue')
       .insert({
-        stripe_session_id: result.sessionId, // Generic session ID (column name is legacy)
+        stripe_session_id: result.sessionId, // Legacy column — kept for backward compat
         user_id: userId,
         tier_id: tierId,
         payment_intent: result.paymentIntent || null,
@@ -155,6 +155,11 @@ Deno.serve(async (req) => {
         rules_acknowledged: true,
         rules_acknowledged_at: new Date().toISOString(),
         rules_version: RULES_VERSION,
+        // Canonical provider-agnostic fields
+        provider: result.provider,
+        provider_session_id: result.sessionId,
+        provider_payment_id: result.paymentIntent || null,
+        rail_key: railKey,
       })
 
     if (queueInsertErr && !queueInsertErr.code?.includes('23505')) {

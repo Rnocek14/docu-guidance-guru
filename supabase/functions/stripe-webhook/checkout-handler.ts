@@ -68,6 +68,10 @@ export async function handleCheckoutCompleted(
       currency: session.currency || 'usd',
       status: 'queued',
       updated_at: new Date().toISOString(),
+      // Canonical provider fields
+      provider: 'stripe',
+      provider_session_id: session.id,
+      provider_payment_id: session.payment_intent as string,
     })
     .eq('stripe_session_id', session.id)
     .in('status', ['session_created'])
@@ -93,6 +97,11 @@ export async function handleCheckoutCompleted(
         rules_acknowledged: metadata.rules_acknowledged === 'true',
         rules_acknowledged_at: metadata.rules_acknowledged_at || null,
         rules_version: metadata.rules_version || 'v1.0',
+        // Canonical provider fields
+        provider: 'stripe',
+        provider_session_id: session.id,
+        provider_payment_id: session.payment_intent as string,
+        rail_key: 'stripe_card',
       }, { onConflict: 'stripe_session_id', ignoreDuplicates: true })
 
     if (upsertErr) {
