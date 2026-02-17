@@ -173,9 +173,9 @@ export function validateBreakerConfig(
     const thresholds = snapshot.breakerThresholds;
     if (estimatedPassRate >= thresholds.elevated) {
       validations.push({
-        check: `Breaker catches ${estimatedPassRate.toFixed(0)}% pass rate`,
+        check: `Estimated pass rate vs breaker threshold (heuristic)`,
         passed: true,
-        detail: `Estimated sim pass rate ${estimatedPassRate.toFixed(1)}% >= elevated threshold ${thresholds.elevated}% — breaker would fire`,
+        detail: `Heuristic estimate: ${estimatedPassRate.toFixed(1)}% pass rate (from attackIntensity=${presetInputs.attackIntensity}) >= elevated threshold ${thresholds.elevated}% — breaker would fire. Note: this is an estimation, not a measured value from the sim engine.`,
         severity: 'info',
       });
     }

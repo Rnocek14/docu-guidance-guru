@@ -754,6 +754,7 @@ export type Database = {
           id: string
           inputs_json: Json
           overall_pass: boolean
+          overall_verdict: string
           preset_id: string | null
           results_json: Json
           scenario_version: string
@@ -766,6 +767,7 @@ export type Database = {
           id?: string
           inputs_json?: Json
           overall_pass?: boolean
+          overall_verdict?: string
           preset_id?: string | null
           results_json?: Json
           scenario_version?: string
@@ -778,6 +780,7 @@ export type Database = {
           id?: string
           inputs_json?: Json
           overall_pass?: boolean
+          overall_verdict?: string
           preset_id?: string | null
           results_json?: Json
           scenario_version?: string
