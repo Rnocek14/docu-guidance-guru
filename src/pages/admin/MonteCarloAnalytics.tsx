@@ -209,6 +209,7 @@ export default function MonteCarloAnalytics() {
               risk: simResult.results.risk,
               reserve: simResult.results.reserve,
               completedIterations: simResult.results.completedIterations,
+              diagnostics: simResult.results.diagnostics ?? null,
             },
             assertions_json: assertions,
             overall_pass: computeOverallVerdict(assertions, validation) === 'pass',

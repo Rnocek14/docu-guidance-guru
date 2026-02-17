@@ -26,7 +26,8 @@ export type BreakerAssertionType =
   | 'BREAKER_SHOULD_TRIP'     // breaker should trip at this pass rate (informational)
   | 'MARGIN_ABOVE'            // effective margin > threshold
   | 'MAX_PAYOUT_OUTFLOW_BELOW'    // p95 peak monthly payout outflow < threshold
-  | 'MAX_PAYOUT_OUTFLOW_P99_BELOW'; // p99 peak monthly payout outflow < threshold (advisory)
+  | 'MAX_PAYOUT_OUTFLOW_P99_BELOW' // p99 peak monthly payout outflow < threshold (advisory)
+  | 'PAYOUT_REQUESTS_ABOVE';       // total payout requests > threshold (validates flow is exercised)
 
 export interface BreakerAssertion {
   type: BreakerAssertionType;
@@ -156,21 +157,22 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
   {
     presetId: 'hostile-black-swan',
     name: 'Hostile: Black Swan (50% Pass)',
-    description: 'Unprecedented market move — 50% of accounts pass in one period. Tests single catastrophic event.',
-    scenarioVersion: 'v1.1',
+    description: 'Unprecedented market move — 50% of accounts pass in one period. Tests single catastrophic event + payout clustering.',
+    scenarioVersion: 'v1.2',
     severity: 'existential',
     inputs: {
       accountsPerMonth: 100,
       fixedMonthlyCosts: 6000,
       entryFee: 149,
       resetFee: 99,
-      horizon: 1,
+      horizon: 4,
       attackIntensity: 1.0,
       iterations: 2000,
       reserveThreshold: 15000,
     },
     expectedAssertions: [
       { type: 'WORST_MONTH_ABOVE', threshold: -30000, description: 'Single month loss < $30k (payable from reserve + revenue)' },
+      { type: 'PAYOUT_REQUESTS_ABOVE', threshold: 1, description: 'Scenario must generate payout requests (validates payout flow is exercised)' },
       { type: 'MAX_PAYOUT_OUTFLOW_BELOW', threshold: 20000, description: 'P95 peak monthly payout outflow < $20k (reserve + revenue buffer)' },
       { type: 'MAX_PAYOUT_OUTFLOW_P99_BELOW', threshold: 35000, description: 'P99 peak monthly payout outflow < $35k (cohort shock buffer)', isInformational: true },
       { type: 'BREAKER_SHOULD_TRIP', threshold: 0.50, description: 'Breaker fires to emergency at 50% pass rate', isInformational: true },
@@ -212,6 +214,7 @@ const METRIC_EXTRACTORS: Record<string, (r: SimResultForAssertions) => number | 
   MARGIN_ABOVE: (r) => r.diagnostics?.effectiveMargin,
   MAX_PAYOUT_OUTFLOW_BELOW: (r) => r.risk?.maxPayoutOutflowMonth?.p95,
   MAX_PAYOUT_OUTFLOW_P99_BELOW: (r) => r.risk?.maxPayoutOutflowMonth?.p99,
+  PAYOUT_REQUESTS_ABOVE: (r) => r.diagnostics?.totalPayoutRequests,
 };
 
 // ============================================================================
@@ -223,7 +226,7 @@ interface SimResultForAssertions {
   profit: { mean: number };
   risk: { worstMonth: number; maxPayoutOutflowMonth?: { p95: number; p99: number; max: number } };
   reserve: { breachProbability: number };
-  diagnostics: Record<string, any>;
+  diagnostics: Record<string, any> | null;
 }
 
 export function evaluateAssertions(
@@ -303,6 +306,10 @@ export function evaluateAssertions(
       case 'MAX_PAYOUT_OUTFLOW_P99_BELOW':
         passed = value < (assertion.threshold ?? 35000);
         detail = `P99 of per-iteration peak monthly payout outflow (nearest-rank): $${Math.round(value).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? 35000).toLocaleString()})`;
+        break;
+      case 'PAYOUT_REQUESTS_ABOVE':
+        passed = value > (assertion.threshold ?? 1);
+        detail = `Total payout requests: ${Math.round(value).toLocaleString()} (minimum required: ${Math.round(assertion.threshold ?? 1).toLocaleString()})`;
         break;
     }
 
