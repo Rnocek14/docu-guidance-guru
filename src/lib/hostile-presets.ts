@@ -1,0 +1,294 @@
+/**
+ * Hostile Simulation Presets
+ * 
+ * Source of truth for adversarial economic scenarios.
+ * Maps directly to docs/COLLAPSE_SIMULATION_SCENARIOS.md
+ * 
+ * Each preset includes:
+ * - Simulation input overrides
+ * - Expected breaker assertions (what MUST happen)
+ * - Scenario metadata for audit trail
+ */
+
+import type { SimOverrides } from '@/components/admin/SimulationControls';
+
+// ============================================================================
+// ASSERTION TYPES
+// ============================================================================
+
+export type BreakerAssertionType =
+  | 'PASS_RATE_BELOW'         // pass rate stays below threshold
+  | 'ANNUAL_PROFIT_POSITIVE'  // annual mean profit > 0
+  | 'ANNUAL_LOSS_PROB_BELOW'  // annual loss probability < threshold
+  | 'RESERVE_BREACH_BELOW'    // reserve breach probability < threshold
+  | 'WORST_MONTH_ABOVE'       // worst month > threshold
+  | 'MONTHLY_PROFIT_POSITIVE' // monthly mean profit > 0
+  | 'BREAKER_SHOULD_TRIP'     // breaker should trip at this pass rate (informational)
+  | 'MARGIN_ABOVE';           // effective margin > threshold
+
+export interface BreakerAssertion {
+  type: BreakerAssertionType;
+  threshold?: number;
+  description: string;
+}
+
+export interface AssertionResult {
+  assertion: BreakerAssertion;
+  passed: boolean;
+  observedValue: number | null;
+  detail: string;
+}
+
+// ============================================================================
+// PRESET TYPE
+// ============================================================================
+
+export interface HostilePreset {
+  presetId: string;
+  name: string;
+  description: string;
+  scenarioVersion: string;
+  severity: 'warning' | 'critical' | 'existential';
+  inputs: SimOverrides;
+  expectedAssertions: BreakerAssertion[];
+}
+
+// ============================================================================
+// PRESETS (from docs/COLLAPSE_SIMULATION_SCENARIOS.md)
+// ============================================================================
+
+export const HOSTILE_PRESETS: HostilePreset[] = [
+  {
+    presetId: 'hostile-elevated-pass',
+    name: 'Hostile: Elevated Pass Rate',
+    description: 'Pass rate stabilizes at 18% instead of modeled 10-12%. Tests sustained high pass rate over 12 months.',
+    scenarioVersion: 'v1.0',
+    severity: 'warning',
+    inputs: {
+      accountsPerMonth: 100,
+      fixedMonthlyCosts: 6000,
+      entryFee: 149,
+      resetFee: 99,
+      horizon: 12,
+      attackIntensity: 0.35, // pushes pass rate toward 18%
+      iterations: 2000,
+      reserveThreshold: 15000,
+    },
+    expectedAssertions: [
+      { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Platform remains profitable at 18% pass rate' },
+      { type: 'RESERVE_BREACH_BELOW', threshold: 0.15, description: 'Reserve breach probability < 15%' },
+      { type: 'WORST_MONTH_ABOVE', threshold: -10000, description: 'No single month worse than -$10k' },
+      { type: 'BREAKER_SHOULD_TRIP', threshold: 0.18, description: 'Breaker should fire at elevated level around 18% pass rate' },
+    ],
+  },
+  {
+    presetId: 'hostile-mass-correlation',
+    name: 'Hostile: Mass Correlation Event',
+    description: 'Market spike causes 30% of active accounts to pass in same period. Tests spike event over 3 months.',
+    scenarioVersion: 'v1.0',
+    severity: 'critical',
+    inputs: {
+      accountsPerMonth: 100,
+      fixedMonthlyCosts: 6000,
+      entryFee: 149,
+      resetFee: 99,
+      horizon: 3,
+      attackIntensity: 0.7, // pushes pass rate toward 30%
+      iterations: 2000,
+      reserveThreshold: 15000,
+    },
+    expectedAssertions: [
+      { type: 'RESERVE_BREACH_BELOW', threshold: 0.30, description: 'Reserve breach < 30% (survivable with $15k reserve)' },
+      { type: 'WORST_MONTH_ABOVE', threshold: -15000, description: 'Worst month > -$15k (payable from reserve)' },
+      { type: 'BREAKER_SHOULD_TRIP', threshold: 0.30, description: 'Breaker fires to critical at 30% pass rate' },
+    ],
+  },
+  {
+    presetId: 'hostile-revenue-drought',
+    name: 'Hostile: Revenue Drought',
+    description: 'Marketing stops working, evaluations drop 80%. Existing passers still request payouts.',
+    scenarioVersion: 'v1.0',
+    severity: 'warning',
+    inputs: {
+      accountsPerMonth: 25, // 80% drop from 100
+      fixedMonthlyCosts: 6000,
+      entryFee: 149,
+      resetFee: 99,
+      horizon: 6,
+      attackIntensity: 0,
+      iterations: 2000,
+      reserveThreshold: 15000,
+    },
+    expectedAssertions: [
+      { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Still net-positive (or slow bleed, not sudden death)' },
+      { type: 'RESERVE_BREACH_BELOW', threshold: 0.25, description: 'Reserve survives 6 months of drought' },
+      { type: 'MARGIN_ABOVE', threshold: -0.1, description: 'Margin stays above -10% (manageable bleed)' },
+    ],
+  },
+  {
+    presetId: 'hostile-scale-stress',
+    name: 'Hostile: Solo-Operator Ceiling',
+    description: 'Tests at 500 evals/month — solo-operator ceiling. Validates economics at scale.',
+    scenarioVersion: 'v1.0',
+    severity: 'warning',
+    inputs: {
+      accountsPerMonth: 500,
+      fixedMonthlyCosts: 18000,
+      entryFee: 149,
+      resetFee: 99,
+      horizon: 12,
+      attackIntensity: 0,
+      iterations: 2000,
+      reserveThreshold: 15000,
+    },
+    expectedAssertions: [
+      { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Profitable at 500 evals/month' },
+      { type: 'ANNUAL_LOSS_PROB_BELOW', threshold: 0.05, description: 'Annual loss probability < 5%' },
+      { type: 'RESERVE_BREACH_BELOW', threshold: 0.05, description: 'Reserve breach < 5%' },
+      { type: 'WORST_MONTH_ABOVE', threshold: -50000, description: 'No month worse than -$50k' },
+    ],
+  },
+  {
+    presetId: 'hostile-black-swan',
+    name: 'Hostile: Black Swan (50% Pass)',
+    description: 'Unprecedented market move — 50% of accounts pass in one period. Tests single catastrophic event.',
+    scenarioVersion: 'v1.0',
+    severity: 'existential',
+    inputs: {
+      accountsPerMonth: 100,
+      fixedMonthlyCosts: 6000,
+      entryFee: 149,
+      resetFee: 99,
+      horizon: 1, // single month
+      attackIntensity: 1.0, // maximum
+      iterations: 2000,
+      reserveThreshold: 15000,
+    },
+    expectedAssertions: [
+      { type: 'WORST_MONTH_ABOVE', threshold: -30000, description: 'Single month loss < $30k (payable from reserve + revenue)' },
+      { type: 'BREAKER_SHOULD_TRIP', threshold: 0.50, description: 'Breaker fires to emergency at 50% pass rate' },
+    ],
+  },
+  {
+    presetId: 'hostile-dispute-wave',
+    name: 'Hostile: Dispute Rate Wave',
+    description: 'Chargeback attack: 5% dispute rate spike with coordinated payout extraction.',
+    scenarioVersion: 'v1.0',
+    severity: 'critical',
+    inputs: {
+      accountsPerMonth: 100,
+      fixedMonthlyCosts: 6000,
+      entryFee: 149,
+      resetFee: 99,
+      horizon: 3,
+      attackIntensity: 0.8, // high fraud + chargebacks
+      iterations: 2000,
+      reserveThreshold: 15000,
+    },
+    expectedAssertions: [
+      { type: 'RESERVE_BREACH_BELOW', threshold: 0.40, description: 'Reserve survives dispute wave' },
+      { type: 'WORST_MONTH_ABOVE', threshold: -15000, description: 'Worst month payable from reserve' },
+    ],
+  },
+];
+
+// ============================================================================
+// ASSERTION EVALUATOR
+// ============================================================================
+
+interface SimResultForAssertions {
+  annual: { mean: number; lossProb: number };
+  profit: { mean: number };
+  risk: { worstMonth: number };
+  reserve: { breachProbability: number };
+  diagnostics: Record<string, any>;
+}
+
+export function evaluateAssertions(
+  preset: HostilePreset,
+  results: SimResultForAssertions,
+): AssertionResult[] {
+  return preset.expectedAssertions.map((assertion) => {
+    switch (assertion.type) {
+      case 'ANNUAL_PROFIT_POSITIVE': {
+        const v = results.annual.mean;
+        return {
+          assertion,
+          passed: v > 0,
+          observedValue: v,
+          detail: `Annual mean profit: $${Math.round(v).toLocaleString()}`,
+        };
+      }
+      case 'ANNUAL_LOSS_PROB_BELOW': {
+        const v = results.annual.lossProb;
+        return {
+          assertion,
+          passed: v < (assertion.threshold ?? 0.1),
+          observedValue: v,
+          detail: `Annual loss prob: ${(v * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.1) * 100).toFixed(1)}%)`,
+        };
+      }
+      case 'RESERVE_BREACH_BELOW': {
+        const v = results.reserve.breachProbability;
+        return {
+          assertion,
+          passed: v < (assertion.threshold ?? 0.1),
+          observedValue: v,
+          detail: `Reserve breach: ${(v * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.1) * 100).toFixed(1)}%)`,
+        };
+      }
+      case 'WORST_MONTH_ABOVE': {
+        const v = results.risk.worstMonth;
+        return {
+          assertion,
+          passed: v > (assertion.threshold ?? -50000),
+          observedValue: v,
+          detail: `Worst month: $${Math.round(v).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? -50000).toLocaleString()})`,
+        };
+      }
+      case 'MONTHLY_PROFIT_POSITIVE': {
+        const v = results.profit.mean;
+        return {
+          assertion,
+          passed: v > 0,
+          observedValue: v,
+          detail: `Monthly mean profit: $${Math.round(v).toLocaleString()}`,
+        };
+      }
+      case 'MARGIN_ABOVE': {
+        const v = (results as any).diagnostics?.effectiveMargin ?? 0;
+        return {
+          assertion,
+          passed: v > (assertion.threshold ?? 0),
+          observedValue: v,
+          detail: `Effective margin: ${(v * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0) * 100).toFixed(1)}%)`,
+        };
+      }
+      case 'BREAKER_SHOULD_TRIP': {
+        // Informational — always "passes" since this is advisory
+        return {
+          assertion,
+          passed: true,
+          observedValue: assertion.threshold ?? null,
+          detail: `Advisory: breaker expected to trip at ${((assertion.threshold ?? 0) * 100).toFixed(0)}% pass rate`,
+        };
+      }
+      case 'PASS_RATE_BELOW': {
+        // Can't directly measure from sim results — informational
+        return {
+          assertion,
+          passed: true,
+          observedValue: null,
+          detail: `Advisory: pass rate threshold ${((assertion.threshold ?? 0) * 100).toFixed(0)}%`,
+        };
+      }
+      default:
+        return {
+          assertion,
+          passed: false,
+          observedValue: null,
+          detail: 'Unknown assertion type',
+        };
+    }
+  });
+}
