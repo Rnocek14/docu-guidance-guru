@@ -761,7 +761,7 @@ function runSimulation(
   let completedIterations = 0
   let partial = false
   let partialReason: string | null = null
-  let maxPayoutOutflowMonth = 0 // Track peak single-month payout outflow across all iterations
+  const perIterMaxPayoutOutflow: number[] = [] // Per-iteration max-month payout outflow for percentile calculation
   // Aggregate revenue/cost breakdown across all iterations
   let aggEntryRevenue = 0, aggResetRevenue = 0, aggTotalRevenue = 0
   let aggPayoutCost = 0, aggFraudCost = 0, aggChargebackCost = 0, aggVariableCost = 0, aggFixedCost = 0, aggTotalCost = 0
@@ -781,6 +781,7 @@ function runSimulation(
     }
     let cumProfit = 0
     let cumCapCompletions = 0
+    let iterMaxPayoutOutflow = 0
 
     for (let month = 0; month < months; month++) {
       // Inner budget check for heavy iterations
@@ -800,9 +801,9 @@ function runSimulation(
       totalCapCompletions += result.capCompletions
       totalCapClips += result.capClips
       totalCapRejections += result.capRejections
-      // Track peak single-month payout outflow
-      if (result.payoutDollars > maxPayoutOutflowMonth) {
-        maxPayoutOutflowMonth = result.payoutDollars
+      // Track per-iteration max-month payout outflow
+      if (result.payoutDollars > iterMaxPayoutOutflow) {
+        iterMaxPayoutOutflow = result.payoutDollars
       }
       cumCapCompletions += result.capCompletions
       // Accumulate revenue/cost breakdown
@@ -826,6 +827,7 @@ function runSimulation(
 
     totalPassedAccounts += ctx.totalPassedAccounts
     allIterProfits.push(cumProfit)
+    perIterMaxPayoutOutflow.push(iterMaxPayoutOutflow)
     completedIterations++
   }
 
@@ -926,7 +928,20 @@ function runSimulation(
     requestedIterations: iterations,
     budget_ms: RUNTIME_BUDGET_MS,
     profit: { mean, p5, p50, p95, stdDev },
-    risk: { probabilityOfLoss, maxDrawdown, worstMonth, bestMonth, consecutiveLossMonths: maxConsecutiveLoss, maxPayoutOutflowMonth },
+    risk: {
+      probabilityOfLoss, maxDrawdown, worstMonth, bestMonth, consecutiveLossMonths: maxConsecutiveLoss,
+      // Payout outflow percentiles (per-iteration max-month, then percentiled across iterations)
+      maxPayoutOutflowMonth: (() => {
+        const sorted = perIterMaxPayoutOutflow.slice().sort((a, b) => a - b)
+        const len = sorted.length
+        if (len === 0) return { p95: 0, p99: 0, max: 0 }
+        return {
+          p95: sorted[Math.floor(len * 0.95)],
+          p99: sorted[Math.floor(len * 0.99)],
+          max: sorted[len - 1],
+        }
+      })(),
+    },
     reserve: { breachProbability: reserveBreachProbability, threshold: reserveThreshold },
     annual: { p5: annualP5, p50: annualP50, p95: annualP95, lossProb: annualLossProb, mean: annualMean },
     monthlyBands,
