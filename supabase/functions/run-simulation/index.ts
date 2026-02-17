@@ -959,8 +959,8 @@ function runSimulation(
       capRejectionsPerPayoutRequest: totalPayoutRequests > 0 ? totalCapRejections / totalPayoutRequests : 0,
       avgPayoutsPerAccount: totalPayoutCount / safePassedAccounts,
       lifetimeCapHitRate: totalCapCompletions / safePassedAccounts,
-      // Guardrail: reuses pre-computed payoutOutflow.p95 — no duplicate sort
-      ...(completedIterations >= 500 && totalPayoutRequests > 0 && payoutOutflow.p95 === 0
+      // Guardrail: structurally tied to the data series it validates (not completedIterations)
+      ...(perIterMaxPayoutOutflow.length >= 500 && totalPayoutRequests > 0 && payoutOutflow.p95 === 0
         ? { payout_outflow_percentile_zero_with_payouts: true } : {}),
     },
     // Aggregate revenue/cost breakdown (averaged per iteration for auditability)
