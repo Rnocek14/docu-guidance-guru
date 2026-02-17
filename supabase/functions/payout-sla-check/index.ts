@@ -9,14 +9,15 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 // Idempotent: uses deterministic idempotency_key per payout + tier
 // ============================================================
 
-// IMPORTANT: Tiers MUST be ordered descending by severity (highest threshold first).
+// Tiers are CODE-ENFORCED descending by severity at init.
 // The loop breaks on first match, so highest-severity wins per payout.
-const SLA_TIERS = [
+const SLA_TIERS_UNSORTED = [
   {
     hoursThreshold: 72,
     statuses: ['approved'],
     notificationType: 'payout_initiation_delayed',
-    useApprovedAt: true, // Measure from approved_at, not requested_at
+    useApprovedAt: true,
+    severity: 3, // highest
     title: (id: string, acct: string) => `⚠️ Payout ${id} approved >72h but not initiated`,
     body: (id: string, acct: string, hrs: number) =>
       `Payout ${id} for account ${acct} was approved ${hrs.toFixed(0)}h ago but payment has not been initiated. Act now.`,
@@ -26,6 +27,7 @@ const SLA_TIERS = [
     statuses: ['pending', 'under_review'],
     notificationType: 'payout_sla_breach',
     useApprovedAt: false,
+    severity: 2,
     title: (id: string, acct: string) => `🚨 Payout ${id} exceeds 72h SLA`,
     body: (id: string, acct: string, hrs: number) =>
       `Payout ${id} for account ${acct} has been in review for ${hrs.toFixed(0)} hours. Exceeds 72h SLA. Proactive trader communication recommended.`,
@@ -35,11 +37,18 @@ const SLA_TIERS = [
     statuses: ['pending', 'under_review'],
     notificationType: 'payout_sla_warning',
     useApprovedAt: false,
+    severity: 1,
     title: (id: string, acct: string) => `⏰ Payout ${id} pending >48h`,
     body: (id: string, acct: string, hrs: number) =>
       `Payout ${id} for account ${acct} has been pending for ${hrs.toFixed(0)} hours. Review immediately.`,
   },
 ]
+
+// Sort descending: highest severity first (hoursThreshold desc, severity desc)
+const SLA_TIERS = [...SLA_TIERS_UNSORTED].sort((a, b) => {
+  if (b.hoursThreshold !== a.hoursThreshold) return b.hoursThreshold - a.hoursThreshold
+  return b.severity - a.severity
+})
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') {
@@ -49,7 +58,7 @@ Deno.serve(async (req) => {
     })
   }
 
-  // Auth: cron secret only (do not accept service role over HTTP)
+  // Auth: cron secret only
   const authHeader = req.headers.get('Authorization')
   const cronSecret = Deno.env.get('CRON_SECRET')
   if (!cronSecret) {
@@ -72,7 +81,6 @@ Deno.serve(async (req) => {
   )
 
   try {
-    // Fetch all non-terminal payouts older than 48h
     const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
     const { data: overdue, error } = await supabase
       .from('payouts')
@@ -99,7 +107,6 @@ Deno.serve(async (req) => {
     const now = Date.now()
 
     for (const payout of overdue) {
-      // Find the highest applicable SLA tier (list is pre-sorted descending by severity)
       for (const tier of SLA_TIERS) {
         if (!tier.statuses.includes(payout.status)) continue
 
@@ -133,7 +140,7 @@ Deno.serve(async (req) => {
 
           if (insertErr) {
             if (insertErr.code === '23505') {
-              // Already notified for this tier — skip
+              // Already notified — skip
             } else {
               console.error(`SLA notification failed for payout ${payout.id}:`, insertErr.message)
             }
@@ -142,8 +149,7 @@ Deno.serve(async (req) => {
             console.log(`SLA escalation: ${tier.notificationType} for payout ${payout.id} (${ageHours.toFixed(0)}h)`)
           }
 
-          // Only fire the highest applicable tier per payout
-          break
+          break // Only fire the highest applicable tier per payout
         }
       }
     }

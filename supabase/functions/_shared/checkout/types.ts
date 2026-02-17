@@ -38,6 +38,8 @@ export interface CreateCheckoutResult {
 export interface CheckoutWebhookEvent {
   provider: string
   eventType: 'checkout_completed' | 'charge_refunded' | 'unknown'
+  /** Provider-native event ID (e.g. Stripe evt_xxx). MUST be populated for idempotency. */
+  providerEventId: string
   sessionId: string
   paymentIntent: string | null
   amountCents: number
