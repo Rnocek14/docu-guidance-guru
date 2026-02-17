@@ -171,11 +171,14 @@ export function validateBreakerConfig(
     //    Compare estimated pass rate against SNAPSHOT thresholds (not hardcoded)
     const estimatedPassRate = estimatePassRateFromIntensity(presetInputs.attackIntensity);
     const thresholds = snapshot.breakerThresholds;
-    if (estimatedPassRate >= thresholds.elevated) {
+    {
+      const wouldFire = estimatedPassRate >= thresholds.elevated;
       validations.push({
         check: `Estimated pass rate vs breaker threshold (heuristic)`,
-        passed: true,
-        detail: `Heuristic estimate: ${estimatedPassRate.toFixed(1)}% pass rate (from attackIntensity=${presetInputs.attackIntensity}) >= elevated threshold ${thresholds.elevated}% — breaker would fire. Note: this is an estimation, not a measured value from the sim engine.`,
+        passed: wouldFire,
+        detail: wouldFire
+          ? `Heuristic estimate: ${estimatedPassRate.toFixed(1)}% pass rate (from attackIntensity=${presetInputs.attackIntensity}) >= elevated threshold ${thresholds.elevated}% — breaker would fire. Note: this is an estimation, not a measured value from the sim engine.`
+          : `Heuristic estimate: ${estimatedPassRate.toFixed(1)}% pass rate (from attackIntensity=${presetInputs.attackIntensity}) < elevated threshold ${thresholds.elevated}% — breaker would NOT fire. Note: this is an estimation, not a measured value from the sim engine.`,
         severity: 'info',
       });
     }
