@@ -967,6 +967,10 @@ function runSimulation(
       // Legacy compat (kept for UI backward compat)
       avgPayoutsPerAccount: totalPayoutCount / safePassedAccounts,
       lifetimeCapHitRate: totalCapCompletions / safePassedAccounts,
+      // Guardrail: detect silent regression in payout outflow collection
+      ...(completedIterations >= 500 && totalPayoutRequests > 0 && perIterMaxPayoutOutflow.length > 0 &&
+        perIterMaxPayoutOutflow.slice().sort((a, b) => a - b)[Math.min(Math.max(Math.ceil(0.95 * perIterMaxPayoutOutflow.length) - 1, 0), perIterMaxPayoutOutflow.length - 1)] === 0
+        ? { payout_outflow_percentile_zero_with_payouts: true } : {}),
     },
     // Aggregate revenue/cost breakdown (averaged per iteration for auditability)
     revenueBreakdown: {

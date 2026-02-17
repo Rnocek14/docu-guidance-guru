@@ -25,7 +25,8 @@ export type BreakerAssertionType =
   | 'MONTHLY_PROFIT_POSITIVE' // monthly mean profit > 0
   | 'BREAKER_SHOULD_TRIP'     // breaker should trip at this pass rate (informational)
   | 'MARGIN_ABOVE'            // effective margin > threshold
-  | 'MAX_PAYOUT_OUTFLOW_BELOW'; // peak monthly payout outflow < threshold
+  | 'MAX_PAYOUT_OUTFLOW_BELOW'    // p95 peak monthly payout outflow < threshold
+  | 'MAX_PAYOUT_OUTFLOW_P99_BELOW'; // p99 peak monthly payout outflow < threshold (advisory)
 
 export interface BreakerAssertion {
   type: BreakerAssertionType;
@@ -170,7 +171,8 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
     },
     expectedAssertions: [
       { type: 'WORST_MONTH_ABOVE', threshold: -30000, description: 'Single month loss < $30k (payable from reserve + revenue)' },
-      { type: 'MAX_PAYOUT_OUTFLOW_BELOW', threshold: 20000, description: 'Peak monthly payout outflow < $20k (reserve + revenue buffer)' },
+      { type: 'MAX_PAYOUT_OUTFLOW_BELOW', threshold: 20000, description: 'P95 peak monthly payout outflow < $20k (reserve + revenue buffer)' },
+      { type: 'MAX_PAYOUT_OUTFLOW_P99_BELOW', threshold: 35000, description: 'P99 peak monthly payout outflow < $35k (cohort shock buffer)', isInformational: true },
       { type: 'BREAKER_SHOULD_TRIP', threshold: 0.50, description: 'Breaker fires to emergency at 50% pass rate', isInformational: true },
     ],
   },
@@ -209,6 +211,7 @@ const METRIC_EXTRACTORS: Record<string, (r: SimResultForAssertions) => number | 
   MONTHLY_PROFIT_POSITIVE: (r) => r.profit?.mean,
   MARGIN_ABOVE: (r) => r.diagnostics?.effectiveMargin,
   MAX_PAYOUT_OUTFLOW_BELOW: (r) => r.risk?.maxPayoutOutflowMonth?.p95,
+  MAX_PAYOUT_OUTFLOW_P99_BELOW: (r) => r.risk?.maxPayoutOutflowMonth?.p99,
 };
 
 // ============================================================================
@@ -296,6 +299,10 @@ export function evaluateAssertions(
       case 'MAX_PAYOUT_OUTFLOW_BELOW':
         passed = value < (assertion.threshold ?? 20000);
         detail = `P95 of per-iteration peak monthly payout outflow (nearest-rank): $${Math.round(value).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? 20000).toLocaleString()})`;
+        break;
+      case 'MAX_PAYOUT_OUTFLOW_P99_BELOW':
+        passed = value < (assertion.threshold ?? 35000);
+        detail = `P99 of per-iteration peak monthly payout outflow (nearest-rank): $${Math.round(value).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? 35000).toLocaleString()})`;
         break;
     }
 
