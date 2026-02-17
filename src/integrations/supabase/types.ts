@@ -569,7 +569,7 @@ export type Database = {
           last_error: string | null
           payment_intent: string | null
           processing_started_at: string | null
-          provider: string | null
+          provider: string
           provider_event_id: string | null
           provider_payment_id: string | null
           provider_session_id: string
@@ -593,7 +593,7 @@ export type Database = {
           last_error?: string | null
           payment_intent?: string | null
           processing_started_at?: string | null
-          provider?: string | null
+          provider?: string
           provider_event_id?: string | null
           provider_payment_id?: string | null
           provider_session_id: string
@@ -617,7 +617,7 @@ export type Database = {
           last_error?: string | null
           payment_intent?: string | null
           processing_started_at?: string | null
-          provider?: string | null
+          provider?: string
           provider_event_id?: string | null
           provider_payment_id?: string | null
           provider_session_id?: string
