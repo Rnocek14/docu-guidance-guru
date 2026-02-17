@@ -17,7 +17,7 @@ import { SimulationControls, type SimOverrides } from '@/components/admin/Simula
 import { RiskReportTab } from '@/components/admin/RiskReportTab';
 import { CustomerGrowthTab } from '@/components/admin/CustomerGrowthTab';
 import { BreakerValidationPanel } from '@/components/admin/BreakerValidationPanel';
-import { HOSTILE_PRESETS, evaluateAssertions, type HostilePreset, type AssertionResult } from '@/lib/hostile-presets';
+import { HOSTILE_PRESETS, evaluateAssertions, computeOverallVerdict, type HostilePreset, type AssertionResult } from '@/lib/hostile-presets';
 import { captureDbConfigSnapshot, validateBreakerConfig, type BreakerValidationResult } from '@/lib/breaker-evaluator';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ export default function MonteCarloAnalytics() {
               completedIterations: simResult.results.completedIterations,
             },
             assertions_json: assertions,
-            overall_pass: assertions.every((a: any) => a.passed) && validation.overallPass,
+            overall_pass: computeOverallVerdict(assertions, validation) === 'pass',
           });
           if (saveErr) console.error('Failed to save sim run:', saveErr);
         } catch (e) {

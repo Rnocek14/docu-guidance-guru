@@ -44,6 +44,7 @@ export interface CohortSnapshot {
   min_trading_days_between_payouts: number;
   min_winning_days_between_payouts: number | null;
   min_profit_buffer: number | null;
+  intake_active: boolean;
 }
 
 export interface DbConfigSnapshot {
@@ -52,6 +53,8 @@ export interface DbConfigSnapshot {
   paymentSystem: PaymentSystemConfig | null;
   cohorts: CohortSnapshot[];
   warnings: string[];
+  /** Breaker thresholds used for validation (for auditability) */
+  breakerThresholds: typeof BREAKER_THRESHOLDS;
 }
 
 export interface BreakerValidationResult {
@@ -89,7 +92,7 @@ export async function captureDbConfigSnapshot(): Promise<DbConfigSnapshot> {
   const [breakerRes, paymentRes, cohortsRes] = await Promise.all([
     supabase.rpc('get_econ_breaker_state'),
     supabase.from('payment_system_state').select('*').limit(1).single(),
-    supabase.from('cohorts').select('id,name,cohort_phase,entry_fee,first_payout_cap_amount,lifetime_cap_multiple,payout_split_percent,payout_cooldown_days,payout_eligibility_delay_days,min_trading_days_between_payouts,min_winning_days_between_payouts,min_profit_buffer').eq('is_active', true),
+    supabase.from('cohorts').select('id,name,cohort_phase,entry_fee,first_payout_cap_amount,lifetime_cap_multiple,payout_split_percent,payout_cooldown_days,payout_eligibility_delay_days,min_trading_days_between_payouts,min_winning_days_between_payouts,min_profit_buffer,intake_active').eq('is_active', true),
   ]);
 
   let breaker: BreakerConfig | null = null;
@@ -125,6 +128,7 @@ export async function captureDbConfigSnapshot(): Promise<DbConfigSnapshot> {
     paymentSystem,
     cohorts,
     warnings,
+    breakerThresholds: { ...BREAKER_THRESHOLDS },
   };
 }
 
@@ -133,7 +137,7 @@ export async function captureDbConfigSnapshot(): Promise<DbConfigSnapshot> {
 // ============================================================================
 
 interface SimSummaryForValidation {
-  passRateUsed?: number; // estimated from attack intensity
+  passRateUsed?: number;
   worstMonthNetProfit: number;
   reserveBreachProb: number;
   annualMeanProfit: number;
@@ -164,17 +168,19 @@ export function validateBreakerConfig(
     });
 
     // 2. Breaker thresholds would catch simulated scenario
+    //    Compare estimated pass rate against SNAPSHOT thresholds (not hardcoded)
     const estimatedPassRate = estimatePassRateFromIntensity(presetInputs.attackIntensity);
-    if (estimatedPassRate >= BREAKER_THRESHOLDS.elevated) {
+    const thresholds = snapshot.breakerThresholds;
+    if (estimatedPassRate >= thresholds.elevated) {
       validations.push({
         check: `Breaker catches ${estimatedPassRate.toFixed(0)}% pass rate`,
         passed: true,
-        detail: `Estimated sim pass rate ${estimatedPassRate.toFixed(1)}% >= elevated threshold ${BREAKER_THRESHOLDS.elevated}% — breaker would fire`,
+        detail: `Estimated sim pass rate ${estimatedPassRate.toFixed(1)}% >= elevated threshold ${thresholds.elevated}% — breaker would fire`,
         severity: 'info',
       });
     }
 
-    // 3. Current breaker not already tripped (if it is, sim context differs)
+    // 3. Current breaker not already tripped
     if (snapshot.breaker.breaker_level !== 'normal') {
       configDriftWarnings.push(
         `Breaker is currently at "${snapshot.breaker.breaker_level}" — simulation assumes normal starting state`
@@ -187,7 +193,23 @@ export function validateBreakerConfig(
     configDriftWarnings.push('Inbound payments are currently paused — simulation assumes active intake');
   }
 
-  // 5. Cohort config matches simulation assumptions
+  // 5. Binding check: if breaker is elevated/emergency, intake MUST be gated
+  if (snapshot.breaker && snapshot.breaker.breaker_level !== 'normal') {
+    const inboundPaused = snapshot.paymentSystem?.is_paused_inbound === true;
+    const allIntakeClosed = snapshot.cohorts.length > 0 && snapshot.cohorts.every(c => !c.intake_active);
+    const intakeGated = inboundPaused || allIntakeClosed;
+
+    validations.push({
+      check: 'Intake gated when breaker active',
+      passed: intakeGated,
+      detail: intakeGated
+        ? `Intake correctly gated (inbound paused: ${inboundPaused}, cohorts intake closed: ${allIntakeClosed})`
+        : `BREACH: Breaker at "${snapshot.breaker.breaker_level}" but intake is still open — inbound not paused AND cohorts still accepting`,
+      severity: intakeGated ? 'info' : 'error',
+    });
+  }
+
+  // 6. Cohort config matches simulation assumptions
   const perfCohort = snapshot.cohorts.find(c => c.cohort_phase === 'performance');
   if (perfCohort) {
     if (perfCohort.entry_fee !== null && perfCohort.entry_fee !== presetInputs.entryFee) {
@@ -238,7 +260,7 @@ export function validateBreakerConfig(
     });
   }
 
-  // 6. Reserve threshold sanity
+  // 7. Reserve threshold sanity
   validations.push({
     check: 'Reserve threshold adequate',
     passed: presetInputs.reserveThreshold >= 10000,
@@ -246,7 +268,7 @@ export function validateBreakerConfig(
     severity: presetInputs.reserveThreshold < 10000 ? 'warning' : 'info',
   });
 
-  // 7. Simulation-specific: would reserve survive?
+  // 8. Simulation-specific: would reserve survive?
   validations.push({
     check: 'Reserve survives scenario',
     passed: simSummary.reserveBreachProb < 0.25,

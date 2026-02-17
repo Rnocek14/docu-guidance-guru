@@ -30,6 +30,8 @@ export interface BreakerAssertion {
   type: BreakerAssertionType;
   threshold?: number;
   description: string;
+  /** If true, excluded from overall pass/fail — purely advisory */
+  isInformational?: boolean;
 }
 
 export interface AssertionResult {
@@ -37,6 +39,8 @@ export interface AssertionResult {
   passed: boolean;
   observedValue: number | null;
   detail: string;
+  /** Mirrors assertion.isInformational for easy filtering */
+  isInformational: boolean;
 }
 
 // ============================================================================
@@ -70,7 +74,7 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       entryFee: 149,
       resetFee: 99,
       horizon: 12,
-      attackIntensity: 0.35, // pushes pass rate toward 18%
+      attackIntensity: 0.35,
       iterations: 2000,
       reserveThreshold: 15000,
     },
@@ -78,7 +82,7 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Platform remains profitable at 18% pass rate' },
       { type: 'RESERVE_BREACH_BELOW', threshold: 0.15, description: 'Reserve breach probability < 15%' },
       { type: 'WORST_MONTH_ABOVE', threshold: -10000, description: 'No single month worse than -$10k' },
-      { type: 'BREAKER_SHOULD_TRIP', threshold: 0.18, description: 'Breaker should fire at elevated level around 18% pass rate' },
+      { type: 'BREAKER_SHOULD_TRIP', threshold: 0.18, description: 'Breaker should fire at elevated level around 18% pass rate', isInformational: true },
     ],
   },
   {
@@ -93,14 +97,14 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       entryFee: 149,
       resetFee: 99,
       horizon: 3,
-      attackIntensity: 0.7, // pushes pass rate toward 30%
+      attackIntensity: 0.7,
       iterations: 2000,
       reserveThreshold: 15000,
     },
     expectedAssertions: [
       { type: 'RESERVE_BREACH_BELOW', threshold: 0.30, description: 'Reserve breach < 30% (survivable with $15k reserve)' },
       { type: 'WORST_MONTH_ABOVE', threshold: -15000, description: 'Worst month > -$15k (payable from reserve)' },
-      { type: 'BREAKER_SHOULD_TRIP', threshold: 0.30, description: 'Breaker fires to critical at 30% pass rate' },
+      { type: 'BREAKER_SHOULD_TRIP', threshold: 0.30, description: 'Breaker fires to critical at 30% pass rate', isInformational: true },
     ],
   },
   {
@@ -110,7 +114,7 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
     scenarioVersion: 'v1.0',
     severity: 'warning',
     inputs: {
-      accountsPerMonth: 25, // 80% drop from 100
+      accountsPerMonth: 25,
       fixedMonthlyCosts: 6000,
       entryFee: 149,
       resetFee: 99,
@@ -159,14 +163,14 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       fixedMonthlyCosts: 6000,
       entryFee: 149,
       resetFee: 99,
-      horizon: 1, // single month
-      attackIntensity: 1.0, // maximum
+      horizon: 1,
+      attackIntensity: 1.0,
       iterations: 2000,
       reserveThreshold: 15000,
     },
     expectedAssertions: [
       { type: 'WORST_MONTH_ABOVE', threshold: -30000, description: 'Single month loss < $30k (payable from reserve + revenue)' },
-      { type: 'BREAKER_SHOULD_TRIP', threshold: 0.50, description: 'Breaker fires to emergency at 50% pass rate' },
+      { type: 'BREAKER_SHOULD_TRIP', threshold: 0.50, description: 'Breaker fires to emergency at 50% pass rate', isInformational: true },
     ],
   },
   {
@@ -181,7 +185,7 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       entryFee: 149,
       resetFee: 99,
       horizon: 3,
-      attackIntensity: 0.8, // high fraud + chargebacks
+      attackIntensity: 0.8,
       iterations: 2000,
       reserveThreshold: 15000,
     },
@@ -191,6 +195,19 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
     ],
   },
 ];
+
+// ============================================================================
+// REQUIRED METRIC PATHS — assertion won't silently pass on missing data
+// ============================================================================
+
+const METRIC_EXTRACTORS: Record<string, (r: SimResultForAssertions) => number | undefined> = {
+  ANNUAL_PROFIT_POSITIVE: (r) => r.annual?.mean,
+  ANNUAL_LOSS_PROB_BELOW: (r) => r.annual?.lossProb,
+  RESERVE_BREACH_BELOW: (r) => r.reserve?.breachProbability,
+  WORST_MONTH_ABOVE: (r) => r.risk?.worstMonth,
+  MONTHLY_PROFIT_POSITIVE: (r) => r.profit?.mean,
+  MARGIN_ABOVE: (r) => r.diagnostics?.effectiveMargin,
+};
 
 // ============================================================================
 // ASSERTION EVALUATOR
@@ -209,86 +226,96 @@ export function evaluateAssertions(
   results: SimResultForAssertions,
 ): AssertionResult[] {
   return preset.expectedAssertions.map((assertion) => {
-    switch (assertion.type) {
-      case 'ANNUAL_PROFIT_POSITIVE': {
-        const v = results.annual.mean;
-        return {
-          assertion,
-          passed: v > 0,
-          observedValue: v,
-          detail: `Annual mean profit: $${Math.round(v).toLocaleString()}`,
-        };
-      }
-      case 'ANNUAL_LOSS_PROB_BELOW': {
-        const v = results.annual.lossProb;
-        return {
-          assertion,
-          passed: v < (assertion.threshold ?? 0.1),
-          observedValue: v,
-          detail: `Annual loss prob: ${(v * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.1) * 100).toFixed(1)}%)`,
-        };
-      }
-      case 'RESERVE_BREACH_BELOW': {
-        const v = results.reserve.breachProbability;
-        return {
-          assertion,
-          passed: v < (assertion.threshold ?? 0.1),
-          observedValue: v,
-          detail: `Reserve breach: ${(v * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.1) * 100).toFixed(1)}%)`,
-        };
-      }
-      case 'WORST_MONTH_ABOVE': {
-        const v = results.risk.worstMonth;
-        return {
-          assertion,
-          passed: v > (assertion.threshold ?? -50000),
-          observedValue: v,
-          detail: `Worst month: $${Math.round(v).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? -50000).toLocaleString()})`,
-        };
-      }
-      case 'MONTHLY_PROFIT_POSITIVE': {
-        const v = results.profit.mean;
-        return {
-          assertion,
-          passed: v > 0,
-          observedValue: v,
-          detail: `Monthly mean profit: $${Math.round(v).toLocaleString()}`,
-        };
-      }
-      case 'MARGIN_ABOVE': {
-        const v = (results as any).diagnostics?.effectiveMargin ?? 0;
-        return {
-          assertion,
-          passed: v > (assertion.threshold ?? 0),
-          observedValue: v,
-          detail: `Effective margin: ${(v * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0) * 100).toFixed(1)}%)`,
-        };
-      }
-      case 'BREAKER_SHOULD_TRIP': {
-        // Informational — always "passes" since this is advisory
-        return {
-          assertion,
-          passed: true,
-          observedValue: assertion.threshold ?? null,
-          detail: `Advisory: breaker expected to trip at ${((assertion.threshold ?? 0) * 100).toFixed(0)}% pass rate`,
-        };
-      }
-      case 'PASS_RATE_BELOW': {
-        // Can't directly measure from sim results — informational
-        return {
-          assertion,
-          passed: true,
-          observedValue: null,
-          detail: `Advisory: pass rate threshold ${((assertion.threshold ?? 0) * 100).toFixed(0)}%`,
-        };
-      }
-      default:
-        return {
-          assertion,
-          passed: false,
-          observedValue: null,
-          detail: 'Unknown assertion type',
-        };
+    const informational = assertion.isInformational === true;
+
+    // Informational assertions (BREAKER_SHOULD_TRIP, PASS_RATE_BELOW) — always advisory
+    if (assertion.type === 'BREAKER_SHOULD_TRIP' || assertion.type === 'PASS_RATE_BELOW') {
+      return {
+        assertion,
+        passed: true, // doesn't count toward overall
+        observedValue: assertion.threshold ?? null,
+        detail: `Advisory: ${assertion.description}`,
+        isInformational: true,
+      };
     }
+
+    // Guard: verify metric exists in results — missing = FAIL
+    const extractor = METRIC_EXTRACTORS[assertion.type];
+    if (!extractor) {
+      return {
+        assertion,
+        passed: false,
+        observedValue: null,
+        detail: `Unknown assertion type: ${assertion.type}`,
+        isInformational: informational,
+      };
+    }
+
+    const value = extractor(results);
+    if (value === undefined || value === null || Number.isNaN(value)) {
+      return {
+        assertion,
+        passed: false,
+        observedValue: null,
+        detail: `MISSING METRIC in sim output — cannot evaluate "${assertion.type}"`,
+        isInformational: informational,
+      };
+    }
+
+    // Evaluate the actual assertion
+    let passed = false;
+    let detail = '';
+
+    switch (assertion.type) {
+      case 'ANNUAL_PROFIT_POSITIVE':
+        passed = value > 0;
+        detail = `Annual mean profit: $${Math.round(value).toLocaleString()}`;
+        break;
+      case 'ANNUAL_LOSS_PROB_BELOW':
+        passed = value < (assertion.threshold ?? 0.1);
+        detail = `Annual loss prob: ${(value * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.1) * 100).toFixed(1)}%)`;
+        break;
+      case 'RESERVE_BREACH_BELOW':
+        passed = value < (assertion.threshold ?? 0.1);
+        detail = `Reserve breach: ${(value * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.1) * 100).toFixed(1)}%)`;
+        break;
+      case 'WORST_MONTH_ABOVE':
+        passed = value > (assertion.threshold ?? -50000);
+        detail = `Worst month: $${Math.round(value).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? -50000).toLocaleString()})`;
+        break;
+      case 'MONTHLY_PROFIT_POSITIVE':
+        passed = value > 0;
+        detail = `Monthly mean profit: $${Math.round(value).toLocaleString()}`;
+        break;
+      case 'MARGIN_ABOVE':
+        passed = value > (assertion.threshold ?? 0);
+        detail = `Effective margin: ${(value * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0) * 100).toFixed(1)}%)`;
+        break;
+    }
+
+    return { assertion, passed, observedValue: value, detail, isInformational: informational };
   });
+}
+
+/**
+ * Compute overall pass/fail excluding informational assertions.
+ * Returns 'incomplete' if no binding assertions exist.
+ */
+export type OverallVerdict = 'pass' | 'fail' | 'incomplete';
+
+export function computeOverallVerdict(
+  assertionResults: AssertionResult[] | null,
+  breakerValidation: { overallPass: boolean } | null,
+): OverallVerdict {
+  const bindingAssertions = assertionResults?.filter(r => !r.isInformational) ?? [];
+
+  // If we have a preset active but no binding assertions or no breaker validation → incomplete
+  if (bindingAssertions.length === 0 && !breakerValidation) return 'incomplete';
+  if (assertionResults && assertionResults.length > 0 && !breakerValidation) return 'incomplete';
+  if (breakerValidation && (!assertionResults || assertionResults.length === 0)) return 'incomplete';
+
+  const assertionsPassed = bindingAssertions.every(r => r.passed);
+  const breakerPassed = breakerValidation?.overallPass ?? true;
+
+  return (assertionsPassed && breakerPassed) ? 'pass' : 'fail';
 }
