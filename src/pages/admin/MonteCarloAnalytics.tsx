@@ -212,6 +212,7 @@ export default function MonteCarloAnalytics() {
             },
             assertions_json: assertions,
             overall_pass: computeOverallVerdict(assertions, validation) === 'pass',
+            overall_verdict: computeOverallVerdict(assertions, validation),
           });
           if (saveErr) console.error('Failed to save sim run:', saveErr);
         } catch (e) {
