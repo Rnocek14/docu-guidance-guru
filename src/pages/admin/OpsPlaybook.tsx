@@ -26,6 +26,29 @@ const severityConfig = {
 
 const runbooks: Runbook[] = [
   {
+    id: 'stripe-survival',
+    title: 'Stripe Termination Survival Protocol',
+    severity: 'emergency',
+    icon: <Globe className="h-5 w-5" />,
+    trigger: 'Stripe flags, restricts, or terminates your account — EXISTENTIAL RISK. See docs/STRIPE_SURVIVAL_STRATEGY.md for full protocol.',
+    steps: [
+      'HOUR 0-4: Pause ALL payment flows immediately (inbound + outbound)',
+      'Snapshot outstanding obligations (pending payouts, unfulfilled checkouts, active evals)',
+      'Transfer available Stripe balance to bank account NOW',
+      'Log incident in staff_notifications',
+      'HOUR 4-24: Respond to Stripe with business model explanation + evidence package',
+      'Prepare dispute prevention documentation and auto-pause evidence',
+      'HOUR 24-72: If terminated — activate secondary processor cutover plan',
+      'Handle outstanding obligations via alternative payment methods',
+      'Send customer communication (template in STRIPE_SURVIVAL_STRATEGY.md)',
+      'DO NOT continue processing payments while under review',
+    ],
+    links: [
+      { label: 'System Overview', href: '/admin/system' },
+    ],
+    sqlSnippet: `-- Snapshot outstanding obligations\nSELECT 'pending_payouts' as category, COUNT(*), SUM(amount)\nFROM payouts WHERE status IN ('pending','under_review','approved','payment_initiated')\nUNION ALL\nSELECT 'unfulfilled_checkouts', COUNT(*), SUM(amount_cents::numeric/100)\nFROM checkout_fulfillment_queue WHERE status IN ('queued','processing');`,
+  },
+  {
     id: 'daily-checks',
     title: 'Daily Morning Checks',
     severity: 'info',
@@ -209,10 +232,11 @@ const runbooks: Runbook[] = [
 ];
 
 // ── Playbook version & audit trail ──
-const PLAYBOOK_VERSION = 'v1.0';
-const PLAYBOOK_LAST_REVIEWED = '2026-02-09';
+const PLAYBOOK_VERSION = 'v1.1';
+const PLAYBOOK_LAST_REVIEWED = '2026-02-17';
 const PLAYBOOK_REVIEWED_BY = 'Launch team';
 const PLAYBOOK_CHANGELOG = [
+  { version: 'v1.1', date: '2026-02-17', note: 'Added Stripe Survival Protocol runbook, linked STRIPE_SURVIVAL_STRATEGY.md, LAUNCH_PLAYBOOK_30DAY.md, COLLAPSE_SIMULATION_SCENARIOS.md' },
   { version: 'v1.0', date: '2026-02-09', note: 'Initial locked version — 10 runbooks, kill switch reference, crisis priority order' },
 ];
 
