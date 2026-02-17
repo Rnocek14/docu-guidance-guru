@@ -2,7 +2,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
-import { Play, RefreshCw, Server } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Play, RefreshCw, Server, ShieldAlert, AlertTriangle, Zap } from 'lucide-react';
+import { HOSTILE_PRESETS, type HostilePreset } from '@/lib/hostile-presets';
 
 export interface SimOverrides {
   accountsPerMonth: number;
@@ -15,10 +18,16 @@ export interface SimOverrides {
   reserveThreshold: number;
 }
 
-const PRESETS: Record<string, Partial<SimOverrides>> = {
+const BUSINESS_PRESETS: Record<string, Partial<SimOverrides>> = {
   Bootstrap: { accountsPerMonth: 50, fixedMonthlyCosts: 5000, entryFee: 149, resetFee: 99 },
   Growth: { accountsPerMonth: 200, fixedMonthlyCosts: 12000, entryFee: 149, resetFee: 99 },
   Scale: { accountsPerMonth: 500, fixedMonthlyCosts: 18000, entryFee: 149, resetFee: 99 },
+};
+
+const SEVERITY_CONFIG = {
+  warning: { icon: ShieldAlert, color: 'text-warning', borderColor: 'border-warning/40' },
+  critical: { icon: AlertTriangle, color: 'text-destructive', borderColor: 'border-destructive/40' },
+  existential: { icon: Zap, color: 'text-destructive', borderColor: 'border-destructive/60' },
 };
 
 interface Props {
@@ -29,10 +38,30 @@ interface Props {
   isRunning: boolean;
   hasResult: boolean;
   error: string | null;
+  activePreset: HostilePreset | null;
+  onSelectPreset: (preset: HostilePreset | null) => void;
 }
 
-export function SimulationControls({ overrides, onChange, onRun, onCompare, isRunning, hasResult, error }: Props) {
+export function SimulationControls({
+  overrides, onChange, onRun, onCompare, isRunning, hasResult, error,
+  activePreset, onSelectPreset,
+}: Props) {
   const set = (patch: Partial<SimOverrides>) => onChange({ ...overrides, ...patch });
+
+  const handlePresetSelect = (preset: HostilePreset) => {
+    if (activePreset?.presetId === preset.presetId) {
+      // Deselect
+      onSelectPreset(null);
+    } else {
+      onSelectPreset(preset);
+      onChange(preset.inputs);
+    }
+  };
+
+  const handleBusinessPreset = (preset: Partial<SimOverrides>) => {
+    onSelectPreset(null); // Clear hostile preset
+    set(preset);
+  };
 
   return (
     <Card>
@@ -46,23 +75,91 @@ export function SimulationControls({ overrides, onChange, onRun, onCompare, isRu
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Presets */}
-        <div className="flex flex-wrap gap-2">
-          {Object.entries(PRESETS).map(([name, preset]) => (
-            <Button
-              key={name}
-              variant={
-                overrides.accountsPerMonth === preset.accountsPerMonth &&
-                overrides.fixedMonthlyCosts === preset.fixedMonthlyCosts
-                  ? 'default' : 'outline'
-              }
-              size="sm"
-              onClick={() => set(preset)}
-            >
-              {name}
-            </Button>
-          ))}
+        {/* Business Presets */}
+        <div>
+          <Label className="text-xs text-muted-foreground uppercase tracking-wide mb-2 block">Business Scenarios</Label>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(BUSINESS_PRESETS).map(([name, preset]) => (
+              <Button
+                key={name}
+                variant={
+                  !activePreset &&
+                  overrides.accountsPerMonth === preset.accountsPerMonth &&
+                  overrides.fixedMonthlyCosts === preset.fixedMonthlyCosts
+                    ? 'default' : 'outline'
+                }
+                size="sm"
+                onClick={() => handleBusinessPreset(preset)}
+              >
+                {name}
+              </Button>
+            ))}
+          </div>
         </div>
+
+        {/* Hostile Presets */}
+        <div>
+          <Label className="text-xs text-muted-foreground uppercase tracking-wide mb-2 block">
+            Hostile Collapse Scenarios
+          </Label>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {HOSTILE_PRESETS.map((preset) => {
+              const isActive = activePreset?.presetId === preset.presetId;
+              const cfg = SEVERITY_CONFIG[preset.severity];
+              const Icon = cfg.icon;
+
+              return (
+                <button
+                  key={preset.presetId}
+                  onClick={() => handlePresetSelect(preset)}
+                  className={`
+                    text-left rounded-lg border p-3 transition-colors
+                    ${isActive
+                      ? `${cfg.borderColor} bg-muted/50 ring-1 ring-offset-1 ring-muted-foreground/20`
+                      : 'border-muted hover:border-muted-foreground/30 hover:bg-muted/30'
+                    }
+                  `}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className={`h-3.5 w-3.5 ${cfg.color}`} />
+                    <span className="text-sm font-medium truncate">{preset.name.replace('Hostile: ', '')}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{preset.description}</p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Badge variant="outline" className="text-[10px]">
+                      {preset.severity}
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px]">
+                      {preset.expectedAssertions.length} assertions
+                    </Badge>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Active preset detail */}
+        {activePreset && (
+          <div className="rounded-lg border border-muted bg-muted/20 p-3 text-sm space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium">{activePreset.name}</span>
+              <Badge variant="secondary" className="text-[10px]">{activePreset.scenarioVersion}</Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">{activePreset.description}</p>
+            <div className="text-xs space-y-1">
+              <span className="font-medium text-muted-foreground">Expected assertions:</span>
+              {activePreset.expectedAssertions.map((a, i) => (
+                <div key={i} className="flex items-center gap-1.5 text-muted-foreground">
+                  <span className="text-muted-foreground/50">•</span>
+                  {a.description}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <Separator />
 
         {/* Sliders grid */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -98,7 +195,7 @@ export function SimulationControls({ overrides, onChange, onRun, onCompare, isRu
             label="Horizon (months)"
             value={overrides.horizon}
             onChange={(v) => set({ horizon: v })}
-            min={6} max={36} step={1}
+            min={1} max={36} step={1}
             format={(v) => `${v} mo`}
           />
           <SliderControl
@@ -131,6 +228,8 @@ export function SimulationControls({ overrides, onChange, onRun, onCompare, isRu
           <Button onClick={onRun} disabled={isRunning} size="lg">
             {isRunning ? (
               <><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Running ({overrides.iterations.toLocaleString()})...</>
+            ) : activePreset ? (
+              <><Play className="mr-2 h-4 w-4" />Run Hostile Scenario</>
             ) : (
               <><Play className="mr-2 h-4 w-4" />Run Simulation</>
             )}

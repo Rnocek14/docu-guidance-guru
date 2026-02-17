@@ -745,6 +745,45 @@ export type Database = {
           },
         ]
       }
+      collapse_sim_runs: {
+        Row: {
+          assertions_json: Json
+          created_at: string
+          created_by: string | null
+          db_snapshot_json: Json
+          id: string
+          inputs_json: Json
+          overall_pass: boolean
+          preset_id: string | null
+          results_json: Json
+          scenario_version: string
+        }
+        Insert: {
+          assertions_json?: Json
+          created_at?: string
+          created_by?: string | null
+          db_snapshot_json?: Json
+          id?: string
+          inputs_json?: Json
+          overall_pass?: boolean
+          preset_id?: string | null
+          results_json?: Json
+          scenario_version?: string
+        }
+        Update: {
+          assertions_json?: Json
+          created_at?: string
+          created_by?: string | null
+          db_snapshot_json?: Json
+          id?: string
+          inputs_json?: Json
+          overall_pass?: boolean
+          preset_id?: string | null
+          results_json?: Json
+          scenario_version?: string
+        }
+        Relationships: []
+      }
       cron_health_config: {
         Row: {
           created_at: string

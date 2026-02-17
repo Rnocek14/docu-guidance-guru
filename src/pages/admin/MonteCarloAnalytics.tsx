@@ -16,6 +16,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { SimulationControls, type SimOverrides } from '@/components/admin/SimulationControls';
 import { RiskReportTab } from '@/components/admin/RiskReportTab';
 import { CustomerGrowthTab } from '@/components/admin/CustomerGrowthTab';
+import { BreakerValidationPanel } from '@/components/admin/BreakerValidationPanel';
+import { HOSTILE_PRESETS, evaluateAssertions, type HostilePreset, type AssertionResult } from '@/lib/hostile-presets';
+import { captureDbConfigSnapshot, validateBreakerConfig, type BreakerValidationResult } from '@/lib/breaker-evaluator';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -127,10 +130,15 @@ export default function MonteCarloAnalytics() {
   const [error, setError] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<SimOverrides>(DEFAULT_OVERRIDES);
   const [comparison, setComparison] = useState<SavedComparison | null>(null);
+  const [activePreset, setActivePreset] = useState<HostilePreset | null>(null);
+  const [assertionResults, setAssertionResults] = useState<AssertionResult[] | null>(null);
+  const [breakerValidation, setBreakerValidation] = useState<BreakerValidationResult | null>(null);
 
   const runServerSimulation = useCallback(async () => {
     setIsRunning(true);
     setError(null);
+    setAssertionResults(null);
+    setBreakerValidation(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
@@ -163,13 +171,59 @@ export default function MonteCarloAnalytics() {
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Simulation failed');
-      setResult(data as ServerSimResult);
+      const simResult = data as ServerSimResult;
+      setResult(simResult);
+
+      // Run assertions if hostile preset is active
+      if (activePreset) {
+        const assertions = evaluateAssertions(activePreset, simResult.results);
+        setAssertionResults(assertions);
+
+        // Run breaker validation against live DB
+        try {
+          const snapshot = await captureDbConfigSnapshot();
+          const validation = validateBreakerConfig(
+            snapshot,
+            {
+              worstMonthNetProfit: simResult.results.risk.worstMonth,
+              reserveBreachProb: simResult.results.reserve.breachProbability,
+              annualMeanProfit: simResult.results.annual.mean,
+            },
+            {
+              attackIntensity: overrides.attackIntensity,
+              reserveThreshold: overrides.reserveThreshold,
+              entryFee: overrides.entryFee,
+            },
+          );
+          setBreakerValidation(validation);
+
+          // Persist run for audit trail
+          const { error: saveErr } = await supabase.from('collapse_sim_runs' as any).insert({
+            preset_id: activePreset.presetId,
+            scenario_version: activePreset.scenarioVersion,
+            inputs_json: overrides,
+            db_snapshot_json: snapshot,
+            results_json: {
+              annual: simResult.results.annual,
+              profit: simResult.results.profit,
+              risk: simResult.results.risk,
+              reserve: simResult.results.reserve,
+              completedIterations: simResult.results.completedIterations,
+            },
+            assertions_json: assertions,
+            overall_pass: assertions.every((a: any) => a.passed) && validation.overallPass,
+          });
+          if (saveErr) console.error('Failed to save sim run:', saveErr);
+        } catch (e) {
+          console.error('Breaker validation failed:', e);
+        }
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setIsRunning(false);
     }
-  }, [overrides]);
+  }, [overrides, activePreset]);
 
   const handleSaveComparison = useCallback(() => {
     if (!result) return;
@@ -234,6 +288,8 @@ export default function MonteCarloAnalytics() {
           isRunning={isRunning}
           hasResult={!!result}
           error={error}
+          activePreset={activePreset}
+          onSelectPreset={setActivePreset}
         />
 
         {/* Comparison indicator */}
@@ -319,6 +375,14 @@ export default function MonteCarloAnalytics() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Breaker Validation (hostile presets only) */}
+            {activePreset && (assertionResults || breakerValidation) && (
+              <BreakerValidationPanel
+                assertionResults={assertionResults}
+                breakerValidation={breakerValidation}
+              />
+            )}
 
             {/* Key Metrics Grid */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
