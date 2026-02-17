@@ -563,7 +563,7 @@ export type Database = {
           provider: string | null
           provider_event_id: string | null
           provider_payment_id: string | null
-          provider_session_id: string | null
+          provider_session_id: string
           rail_key: string | null
           rules_acknowledged: boolean
           rules_acknowledged_at: string | null
@@ -587,7 +587,7 @@ export type Database = {
           provider?: string | null
           provider_event_id?: string | null
           provider_payment_id?: string | null
-          provider_session_id?: string | null
+          provider_session_id: string
           rail_key?: string | null
           rules_acknowledged?: boolean
           rules_acknowledged_at?: string | null
@@ -611,7 +611,7 @@ export type Database = {
           provider?: string | null
           provider_event_id?: string | null
           provider_payment_id?: string | null
-          provider_session_id?: string | null
+          provider_session_id?: string
           rail_key?: string | null
           rules_acknowledged?: boolean
           rules_acknowledged_at?: string | null
@@ -2850,6 +2850,16 @@ export type Database = {
           user_id: string
         }[]
       }
+      claim_checkout_fulfillment_v2: {
+        Args: { p_provider: string; p_provider_session_id: string }
+        Returns: {
+          fulfilled_account_id: string
+          id: string
+          status: string
+          tier_id: string
+          user_id: string
+        }[]
+      }
       cleanup_broker_payload_samples: { Args: never; Returns: undefined }
       cleanup_old_payload_samples: { Args: never; Returns: undefined }
       confirm_payout_payment: {
@@ -2968,6 +2978,24 @@ export type Database = {
             }
             Returns: string
           }
+      fulfill_checkout_session_v2: {
+        Args: {
+          p_account_number: string
+          p_account_size: number
+          p_amount_cents: number
+          p_cohort_name: string
+          p_currency: string
+          p_disclaimer_version?: string
+          p_product_description?: string
+          p_provider: string
+          p_provider_payment_id: string
+          p_provider_session_id: string
+          p_queue_id: string
+          p_tier_id: string
+          p_user_id: string
+        }
+        Returns: string
+      }
       get_ai_daily_token_sum: {
         Args: { p_date?: string; p_function_name: string }
         Returns: number

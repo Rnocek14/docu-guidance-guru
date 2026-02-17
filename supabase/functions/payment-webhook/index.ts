@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { getCheckoutProvider } from '../_shared/checkout/registry.ts'
+import { TIER_COHORT_MAP } from '../_shared/checkout/config.ts'
 import type { CheckoutWebhookEvent } from '../_shared/checkout/types.ts'
 
 // ============================================================
@@ -18,7 +19,6 @@ const PROVIDER_DETECTION: Array<{
 }> = [
   { headerKey: 'stripe-signature', railKey: 'stripe_card' },
   // { headerKey: 'paddle-signature', railKey: 'paddle_card' },
-  // { headerKey: 'x-lemon-squeezy-signature', railKey: 'lemonsqueezy_card' },
 ]
 
 Deno.serve(async (req) => {
@@ -32,6 +32,9 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const supabase = createClient(supabaseUrl, serviceRoleKey)
+
+  // Read raw body once for both signature verification and fallback hashing
+  const rawBody = await req.clone().text()
 
   try {
     // ── 1. Detect provider by signature header ─────────────
@@ -58,7 +61,7 @@ Deno.serve(async (req) => {
     } catch (adapterErr) {
       const msg = (adapterErr as Error).message
       console.error(`payment-webhook: adapter init failed for ${detectedRailKey}: ${msg}`)
-      await emitErrorNotification(supabase, detectedRailKey, null, `Adapter init failed: ${msg}`)
+      await emitErrorNotification(supabase, detectedRailKey, null, rawBody, `Adapter init failed: ${msg}`)
       return new Response(JSON.stringify({ received: true, error: 'provider_config_error' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -78,7 +81,7 @@ Deno.serve(async (req) => {
     // Guard: providerEventId MUST be populated for idempotency
     if (!event.providerEventId) {
       console.error(`payment-webhook: adapter returned empty providerEventId for ${detectedRailKey}`)
-      await emitErrorNotification(supabase, detectedRailKey, null, 'Adapter returned empty providerEventId — idempotency broken')
+      await emitErrorNotification(supabase, detectedRailKey, null, rawBody, 'Adapter returned empty providerEventId — idempotency broken')
       return new Response(JSON.stringify({ received: true, error: 'missing_event_id' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -111,8 +114,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     const error = err as Error
     console.error('payment-webhook error:', error)
-    // Return 200 to prevent provider retry storms, but emit staff notification
-    await emitErrorNotification(supabase, 'unknown', null, `Unhandled error: ${error.message}`)
+    await emitErrorNotification(supabase, 'unknown', null, rawBody, `Unhandled error: ${error.message}`)
     return new Response(JSON.stringify({ received: true, error: error.message }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -121,8 +123,7 @@ Deno.serve(async (req) => {
 })
 
 /**
- * Handle checkout_completed: upsert queue row with canonical provider fields,
- * then trigger fulfillment claim.
+ * Handle checkout_completed using v2 provider-agnostic RPCs.
  */
 async function handleCheckoutCompleted(
   supabase: ReturnType<typeof createClient>,
@@ -133,13 +134,16 @@ async function handleCheckoutCompleted(
 
   if (!userId || !tierId) {
     console.error(`payment-webhook: missing user_id or tier_id in metadata, eventId=${event.providerEventId}`)
-    await emitErrorNotification(supabase, event.provider, event.providerEventId, `Missing user_id/tier_id in checkout metadata`)
+    await emitErrorNotification(supabase, event.provider, event.providerEventId, '', `Missing user_id/tier_id in checkout metadata`)
     return
   }
 
+  // Only set legacy stripe_session_id for Stripe provider
+  const legacyFields = event.provider === 'stripe'
+    ? { stripe_session_id: event.sessionId, payment_intent: event.paymentIntent }
+    : { stripe_session_id: event.sessionId } // provider_session_id stored here for legacy compat
+
   // Upsert keyed on (provider, provider_session_id) — works for any provider
-  // If row was pre-created by create-checkout-session, this updates it to 'queued'.
-  // If row doesn't exist (edge case / race), this creates it.
   const { error: upsertErr } = await supabase
     .from('checkout_fulfillment_queue')
     .upsert({
@@ -148,9 +152,8 @@ async function handleCheckoutCompleted(
       provider_session_id: event.sessionId,
       provider_event_id: event.providerEventId,
       provider_payment_id: event.paymentIntent,
-      // Legacy Stripe fields (backward compat)
-      stripe_session_id: event.sessionId,
-      payment_intent: event.paymentIntent,
+      // Legacy fields (conditional)
+      ...legacyFields,
       // Core fields
       user_id: userId,
       tier_id: tierId,
@@ -163,16 +166,16 @@ async function handleCheckoutCompleted(
       updated_at: new Date().toISOString(),
     }, {
       onConflict: 'provider,provider_session_id',
-      ignoreDuplicates: false, // Update if exists
+      ignoreDuplicates: false,
     })
 
   if (upsertErr) {
     console.error(`payment-webhook: queue upsert failed: ${upsertErr.message}`, { eventId: event.providerEventId })
-    await emitErrorNotification(supabase, event.provider, event.providerEventId, `Queue upsert failed: ${upsertErr.message}`)
+    await emitErrorNotification(supabase, event.provider, event.providerEventId, '', `Queue upsert failed: ${upsertErr.message}`)
     return
   }
 
-  // Now read the current state
+  // Check if already fulfilled
   const { data: queueRow, error: selectErr } = await supabase
     .from('checkout_fulfillment_queue')
     .select('id, status, fulfilled_account_id')
@@ -185,15 +188,17 @@ async function handleCheckoutCompleted(
     return
   }
 
-  // Already fulfilled — exit early
   if (queueRow.status === 'fulfilled' && queueRow.fulfilled_account_id) {
     console.log(`payment-webhook: already fulfilled session=${event.sessionId} account=${queueRow.fulfilled_account_id}`)
     return
   }
 
-  // Claim + fulfill via existing RPC (shared with stripe-webhook)
+  // ── Claim via v2 RPC (provider-agnostic) ──
   const { data: claimed, error: claimError } = await supabase
-    .rpc('claim_checkout_fulfillment', { p_session_id: event.sessionId })
+    .rpc('claim_checkout_fulfillment_v2', {
+      p_provider: event.provider,
+      p_provider_session_id: event.sessionId,
+    })
 
   if (claimError) {
     console.error(`payment-webhook: claim RPC failed: ${claimError.message}`, { eventId: event.providerEventId })
@@ -206,27 +211,25 @@ async function handleCheckoutCompleted(
     return
   }
 
-  // Import config for cohort mapping
-  const { TIER_COHORT_MAP } = await import('../_shared/checkout/config.ts')
   const tierConfig = TIER_COHORT_MAP[tierId]
   if (!tierConfig) {
     console.error(`payment-webhook: unknown tier_id=${tierId}`, { eventId: event.providerEventId })
     return
   }
 
-  const accountNumber = generateAccountNumber()
-
+  // ── Fulfill via v2 RPC (provider-agnostic) ──
   const { data: accountId, error: fulfillError } = await supabase
-    .rpc('fulfill_checkout_session', {
+    .rpc('fulfill_checkout_session_v2', {
       p_queue_id: claimRow.id,
       p_user_id: userId,
-      p_stripe_session_id: event.sessionId,
-      p_payment_intent: event.paymentIntent || '',
+      p_provider: event.provider,
+      p_provider_session_id: event.sessionId,
+      p_provider_payment_id: event.paymentIntent || '',
       p_amount_cents: event.amountCents,
       p_currency: event.currency,
       p_tier_id: tierId,
       p_cohort_name: tierConfig.cohortName,
-      p_account_number: accountNumber,
+      p_account_number: generateAccountNumber(),
       p_account_size: tierConfig.accountSize,
       p_disclaimer_version: event.metadata?.disclaimer_version || 'v1',
       p_product_description: event.metadata?.product_description || 'Simulated trading evaluation access',
@@ -236,7 +239,6 @@ async function handleCheckoutCompleted(
     const errorMsg = fulfillError.message || 'Unknown fulfillment error'
     console.error(`payment-webhook: fulfillment failed: ${errorMsg}`, { eventId: event.providerEventId })
 
-    // Revert to queued for retryable, failed for terminal
     const retryable = isRetryable(errorMsg)
     await supabase
       .from('checkout_fulfillment_queue')
@@ -248,7 +250,7 @@ async function handleCheckoutCompleted(
       .eq('id', claimRow.id)
 
     await emitErrorNotification(
-      supabase, event.provider, event.providerEventId,
+      supabase, event.provider, event.providerEventId, '',
       `Fulfillment ${retryable ? 'blocked' : 'failed'}: ${errorMsg}. User=${userId} Tier=${tierId}`
     )
     return
@@ -276,15 +278,25 @@ function isRetryable(err: string): boolean {
 
 /**
  * Emit a staff notification on any internal error path.
- * Idempotent per provider + eventId to prevent notification storms.
+ * Uses providerEventId when available, falls back to body hash for distinct incidents.
  */
 async function emitErrorNotification(
   supabase: ReturnType<typeof createClient>,
   provider: string,
   providerEventId: string | null,
+  rawBody: string,
   errorDetail: string
 ) {
-  const idempotencyKey = `payment_webhook_error:${provider}:${providerEventId || 'no_event_id'}`
+  let key = providerEventId
+  if (!key) {
+    // Stable hash fallback so distinct errors get distinct notifications
+    const encoder = new TextEncoder()
+    const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(rawBody || errorDetail))
+    const hashArray = Array.from(new Uint8Array(hashBuffer))
+    key = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16)
+  }
+
+  const idempotencyKey = `payment_webhook_error:${provider}:${key}`
   try {
     await supabase.from('staff_notifications').insert({
       notification_type: 'payment_webhook_error',
@@ -294,6 +306,6 @@ async function emitErrorNotification(
       idempotency_key: idempotencyKey,
     })
   } catch {
-    // Best-effort — don't let notification failure break the webhook
+    // Best-effort
   }
 }
