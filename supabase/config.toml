@@ -77,3 +77,6 @@ verify_jwt = false
 
 [functions.payout-sla-check]
 verify_jwt = false
+
+[functions.payment-webhook]
+verify_jwt = false

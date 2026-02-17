@@ -9,11 +9,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 // Idempotent: uses deterministic idempotency_key per payout + tier
 // ============================================================
 
+// IMPORTANT: Tiers MUST be ordered descending by severity (highest threshold first).
+// The loop breaks on first match, so highest-severity wins per payout.
 const SLA_TIERS = [
   {
     hoursThreshold: 72,
     statuses: ['approved'],
     notificationType: 'payout_initiation_delayed',
+    useApprovedAt: true, // Measure from approved_at, not requested_at
     title: (id: string, acct: string) => `⚠️ Payout ${id} approved >72h but not initiated`,
     body: (id: string, acct: string, hrs: number) =>
       `Payout ${id} for account ${acct} was approved ${hrs.toFixed(0)}h ago but payment has not been initiated. Act now.`,
@@ -22,6 +25,7 @@ const SLA_TIERS = [
     hoursThreshold: 72,
     statuses: ['pending', 'under_review'],
     notificationType: 'payout_sla_breach',
+    useApprovedAt: false,
     title: (id: string, acct: string) => `🚨 Payout ${id} exceeds 72h SLA`,
     body: (id: string, acct: string, hrs: number) =>
       `Payout ${id} for account ${acct} has been in review for ${hrs.toFixed(0)} hours. Exceeds 72h SLA. Proactive trader communication recommended.`,
@@ -30,6 +34,7 @@ const SLA_TIERS = [
     hoursThreshold: 48,
     statuses: ['pending', 'under_review'],
     notificationType: 'payout_sla_warning',
+    useApprovedAt: false,
     title: (id: string, acct: string) => `⏰ Payout ${id} pending >48h`,
     body: (id: string, acct: string, hrs: number) =>
       `Payout ${id} for account ${acct} has been pending for ${hrs.toFixed(0)} hours. Review immediately.`,
@@ -44,10 +49,17 @@ Deno.serve(async (req) => {
     })
   }
 
-  // Auth: cron secret or service role
+  // Auth: cron secret only (do not accept service role over HTTP)
   const authHeader = req.headers.get('Authorization')
   const cronSecret = Deno.env.get('CRON_SECRET')
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    console.error('CRON_SECRET not configured')
+    return new Response(JSON.stringify({ error: 'Server misconfiguration' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
@@ -64,7 +76,7 @@ Deno.serve(async (req) => {
     const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
     const { data: overdue, error } = await supabase
       .from('payouts')
-      .select('id, status, requested_at, account_id, amount')
+      .select('id, status, requested_at, approved_at, account_id, amount')
       .in('status', ['pending', 'under_review', 'approved'])
       .lt('requested_at', cutoff48h)
 
@@ -87,11 +99,18 @@ Deno.serve(async (req) => {
     const now = Date.now()
 
     for (const payout of overdue) {
-      const ageHours = (now - new Date(payout.requested_at).getTime()) / (1000 * 60 * 60)
-
-      // Find the highest applicable SLA tier
+      // Find the highest applicable SLA tier (list is pre-sorted descending by severity)
       for (const tier of SLA_TIERS) {
-        if (ageHours >= tier.hoursThreshold && tier.statuses.includes(payout.status)) {
+        if (!tier.statuses.includes(payout.status)) continue
+
+        // Use approved_at for initiation-delayed, requested_at for others
+        const referenceTime = tier.useApprovedAt && payout.approved_at
+          ? new Date(payout.approved_at).getTime()
+          : new Date(payout.requested_at).getTime()
+
+        const ageHours = (now - referenceTime) / (1000 * 60 * 60)
+
+        if (ageHours >= tier.hoursThreshold) {
           const idempotencyKey = `${tier.notificationType}:${payout.id}`
           const { error: insertErr } = await supabase
             .from('staff_notifications')
@@ -106,6 +125,8 @@ Deno.serve(async (req) => {
                 amount: payout.amount,
                 age_hours: Math.round(ageHours),
                 requested_at: payout.requested_at,
+                approved_at: payout.approved_at,
+                reference_time: tier.useApprovedAt ? 'approved_at' : 'requested_at',
               },
               idempotency_key: idempotencyKey,
             })

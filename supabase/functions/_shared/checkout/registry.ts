@@ -13,21 +13,18 @@ import { StripeCheckoutAdapter } from './stripe-adapter.ts'
  */
 export function getCheckoutProvider(railKey: string): CheckoutProviderAdapter {
   switch (railKey) {
-    case 'stripe_card':
-      return new StripeCheckoutAdapter(
-        Deno.env.get('STRIPE_SECRET_KEY')!,
-        Deno.env.get('STRIPE_WEBHOOK_SECRET')!
-      )
+    case 'stripe_card': {
+      const secretKey = Deno.env.get('STRIPE_SECRET_KEY')
+      const webhookSecret = Deno.env.get('STRIPE_WEBHOOK_SECRET')
+      if (!secretKey || !webhookSecret) {
+        throw new Error(`Stripe secrets not configured for rail: ${railKey}`)
+      }
+      return new StripeCheckoutAdapter(secretKey, webhookSecret)
+    }
 
     // ── Future providers ──────────────────────────────
     // case 'paddle_card':
-    //   return new PaddleCheckoutAdapter(
-    //     Deno.env.get('PADDLE_API_KEY')!,
-    //     Deno.env.get('PADDLE_WEBHOOK_SECRET')!
-    //   )
-    //
-    // case 'lemonsqueezy_card':
-    //   return new LemonSqueezyCheckoutAdapter(...)
+    //   return new PaddleCheckoutAdapter(...)
 
     default:
       throw new Error(`Unknown checkout rail: ${railKey}`)
@@ -37,11 +34,25 @@ export function getCheckoutProvider(railKey: string): CheckoutProviderAdapter {
 /**
  * Resolve the active inbound payment rail from the database.
  * Uses priority ordering: lowest priority number = preferred.
- * Falls back to 'stripe_card' if no rails configured.
+ *
+ * FAIL-CLOSED: if no rails are enabled, throws an error.
+ * This prevents silent fallback to a provider during an incident.
  */
 export async function resolveActiveInboundRail(
   supabase: { from: (table: string) => any }
 ): Promise<string> {
+  // First check: is inbound paused globally?
+  const { data: systemState } = await supabase
+    .from('payment_system_state')
+    .select('is_paused_inbound')
+    .limit(1)
+    .maybeSingle()
+
+  if (systemState?.is_paused_inbound) {
+    throw new Error('INBOUND_PAUSED: All inbound payments are currently paused')
+  }
+
+  // Resolve highest-priority enabled inbound rail
   const { data: rails } = await supabase
     .from('payment_rails')
     .select('rail_key')
@@ -54,7 +65,6 @@ export async function resolveActiveInboundRail(
     return rails[0].rail_key
   }
 
-  // Fail-closed: if no rails configured, default to stripe
-  console.warn('No active inbound payment rail found, defaulting to stripe_card')
-  return 'stripe_card'
+  // FAIL-CLOSED: no enabled rail = hard error, not silent fallback
+  throw new Error('NO_INBOUND_RAIL: No enabled inbound payment rail configured')
 }
