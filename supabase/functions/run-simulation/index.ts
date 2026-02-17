@@ -761,6 +761,7 @@ function runSimulation(
   let completedIterations = 0
   let partial = false
   let partialReason: string | null = null
+  let maxPayoutOutflowMonth = 0 // Track peak single-month payout outflow across all iterations
   // Aggregate revenue/cost breakdown across all iterations
   let aggEntryRevenue = 0, aggResetRevenue = 0, aggTotalRevenue = 0
   let aggPayoutCost = 0, aggFraudCost = 0, aggChargebackCost = 0, aggVariableCost = 0, aggFixedCost = 0, aggTotalCost = 0
@@ -799,6 +800,10 @@ function runSimulation(
       totalCapCompletions += result.capCompletions
       totalCapClips += result.capClips
       totalCapRejections += result.capRejections
+      // Track peak single-month payout outflow
+      if (result.payoutDollars > maxPayoutOutflowMonth) {
+        maxPayoutOutflowMonth = result.payoutDollars
+      }
       cumCapCompletions += result.capCompletions
       // Accumulate revenue/cost breakdown
       aggEntryRevenue += result.revenueBreakdown.entry
@@ -921,7 +926,7 @@ function runSimulation(
     requestedIterations: iterations,
     budget_ms: RUNTIME_BUDGET_MS,
     profit: { mean, p5, p50, p95, stdDev },
-    risk: { probabilityOfLoss, maxDrawdown, worstMonth, bestMonth, consecutiveLossMonths: maxConsecutiveLoss },
+    risk: { probabilityOfLoss, maxDrawdown, worstMonth, bestMonth, consecutiveLossMonths: maxConsecutiveLoss, maxPayoutOutflowMonth },
     reserve: { breachProbability: reserveBreachProbability, threshold: reserveThreshold },
     annual: { p5: annualP5, p50: annualP50, p95: annualP95, lossProb: annualLossProb, mean: annualMean },
     monthlyBands,

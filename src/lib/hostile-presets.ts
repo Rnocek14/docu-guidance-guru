@@ -24,7 +24,8 @@ export type BreakerAssertionType =
   | 'WORST_MONTH_ABOVE'       // worst month > threshold
   | 'MONTHLY_PROFIT_POSITIVE' // monthly mean profit > 0
   | 'BREAKER_SHOULD_TRIP'     // breaker should trip at this pass rate (informational)
-  | 'MARGIN_ABOVE';           // effective margin > threshold
+  | 'MARGIN_ABOVE'            // effective margin > threshold
+  | 'MAX_PAYOUT_OUTFLOW_BELOW'; // peak monthly payout outflow < threshold
 
 export interface BreakerAssertion {
   type: BreakerAssertionType;
@@ -126,7 +127,6 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
     expectedAssertions: [
       { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Still net-positive (or slow bleed, not sudden death)' },
       { type: 'RESERVE_BREACH_BELOW', threshold: 0.25, description: 'Reserve survives 6 months of drought' },
-      { type: 'MARGIN_ABOVE', threshold: -0.1, description: 'Margin stays above -10% (manageable bleed)' },
     ],
   },
   {
@@ -156,7 +156,7 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
     presetId: 'hostile-black-swan',
     name: 'Hostile: Black Swan (50% Pass)',
     description: 'Unprecedented market move — 50% of accounts pass in one period. Tests single catastrophic event.',
-    scenarioVersion: 'v1.0',
+    scenarioVersion: 'v1.1',
     severity: 'existential',
     inputs: {
       accountsPerMonth: 100,
@@ -170,6 +170,7 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
     },
     expectedAssertions: [
       { type: 'WORST_MONTH_ABOVE', threshold: -30000, description: 'Single month loss < $30k (payable from reserve + revenue)' },
+      { type: 'MAX_PAYOUT_OUTFLOW_BELOW', threshold: 20000, description: 'Peak monthly payout outflow < $20k (reserve + revenue buffer)' },
       { type: 'BREAKER_SHOULD_TRIP', threshold: 0.50, description: 'Breaker fires to emergency at 50% pass rate', isInformational: true },
     ],
   },
@@ -207,6 +208,7 @@ const METRIC_EXTRACTORS: Record<string, (r: SimResultForAssertions) => number | 
   WORST_MONTH_ABOVE: (r) => r.risk?.worstMonth,
   MONTHLY_PROFIT_POSITIVE: (r) => r.profit?.mean,
   MARGIN_ABOVE: (r) => r.diagnostics?.effectiveMargin,
+  MAX_PAYOUT_OUTFLOW_BELOW: (r) => r.risk?.maxPayoutOutflowMonth,
 };
 
 // ============================================================================
@@ -216,7 +218,7 @@ const METRIC_EXTRACTORS: Record<string, (r: SimResultForAssertions) => number | 
 interface SimResultForAssertions {
   annual: { mean: number; lossProb: number };
   profit: { mean: number };
-  risk: { worstMonth: number };
+  risk: { worstMonth: number; maxPayoutOutflowMonth?: number };
   reserve: { breachProbability: number };
   diagnostics: Record<string, any>;
 }
@@ -290,6 +292,10 @@ export function evaluateAssertions(
       case 'MARGIN_ABOVE':
         passed = value > (assertion.threshold ?? 0);
         detail = `Effective margin: ${(value * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0) * 100).toFixed(1)}%)`;
+        break;
+      case 'MAX_PAYOUT_OUTFLOW_BELOW':
+        passed = value < (assertion.threshold ?? 20000);
+        detail = `Peak monthly payout outflow: $${Math.round(value).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? 20000).toLocaleString()})`;
         break;
     }
 

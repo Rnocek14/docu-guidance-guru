@@ -52,7 +52,7 @@ interface ServerSimResult {
     requestedIterations: number;
     partial: boolean;
     profit: { mean: number; p5: number; p50: number; p95: number; stdDev: number };
-    risk: { probabilityOfLoss: number; maxDrawdown: number; worstMonth: number; bestMonth: number; consecutiveLossMonths: number };
+    risk: { probabilityOfLoss: number; maxDrawdown: number; worstMonth: number; bestMonth: number; consecutiveLossMonths: number; maxPayoutOutflowMonth?: number };
     reserve: { breachProbability: number; threshold: number };
     annual: { p5: number; p50: number; p95: number; lossProb: number; mean: number };
     monthlyBands: { p5: number; p50: number; p95: number; mean: number }[];
