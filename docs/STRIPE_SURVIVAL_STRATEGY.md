@@ -53,7 +53,7 @@ Before launch, prepare and have ready:
 ### 1.3 Stripe Risk Category Awareness
 
 **High-risk indicators Stripe watches:**
-- Dispute rate approaching card network thresholds (Visa VAMP: 0.65%, Mastercard: 1.0%)
+- Dispute/fraud metrics exceeding card network monitoring program thresholds (Visa VAMP combines fraud + disputes; exact thresholds vary by region and program — we maintain far stricter internal ceilings to stay well below program entry)
 - High refund rate (> 10%)
 - Sudden volume spikes (> 3x normal in 7 days)
 - Customer complaints to Stripe support
@@ -159,7 +159,7 @@ WHERE status = 'active';
   - Available balance (can withdraw immediately)
   - Pending balance (in transit)
   - Reserve requirement (if any)
-- Transfer available balance to bank account NOW (if not yet frozen)
+- **Attempt** immediate payout/transfer of available funds if permitted; otherwise proceed assuming a 60–120 day hold on all Stripe-held funds
 
 **Step 4: Communicate internally**
 - Log incident in `staff_notifications`:
@@ -275,10 +275,11 @@ payment_rails table:
 | **Crypto (USDC)** | N/A | 1 week | N/A | No disputes | Emergency only |
 
 **Recommended primary backup: Paddle or Lemon Squeezy**
-- Both operate as Merchant of Record (MoR)
-- They handle disputes, not you
-- Significantly reduces dispute rate exposure
+- Both operate as Merchant of Record (MoR) — disputes are against them, not you
+- Significantly reduces dispute rate exposure on your processor record
 - Slightly higher fees (5-8%) but existential risk reduction
+- **CAVEAT:** MoR approval is not guaranteed — Paddle has tightened screening in certain verticals and has faced regulatory scrutiny. Pre-approval is required before launch, not during an emergency.
+- **Do not swap one single-point-of-failure for another.** Maintain at least one MoR candidate AND one traditional gateway backup (e.g., Authorize.net) to ensure true redundancy.
 
 ### 4.4 Cutover Implementation Plan
 

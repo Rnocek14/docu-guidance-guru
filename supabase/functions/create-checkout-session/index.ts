@@ -1,50 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import Stripe from 'https://esm.sh/stripe@18.5.0'
+import { TIERS, RULES_VERSION } from '../_shared/checkout/config.ts'
+import { getCheckoutProvider, resolveActiveInboundRail } from '../_shared/checkout/registry.ts'
+import type { CheckoutMetadata } from '../_shared/checkout/types.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
-}
-
-// Server-authoritative rules version — never trust client value
-const RULES_VERSION = 'v1.0'
-
-// ============================================================
-// Tier → Stripe price mapping (created in Stripe dashboard)
-// Product descriptions: "Simulated trading evaluation access"
-// ============================================================
-const TIER_CONFIG: Record<string, {
-  priceId: string
-  productId: string
-  name: string
-  accountSize: number
-  entryFee: number
-  isLive: boolean
-}> = {
-  starter: {
-    priceId: 'price_1SxvRoLH4HmFKO8KSW3FUPzA',
-    productId: 'prod_Tvn1elGTRKWmdC',
-    name: 'Starter Evaluation',
-    accountSize: 50_000,
-    entryFee: 149,
-    isLive: true,
-  },
-  pro: {
-    priceId: 'price_1SxvRpLH4HmFKO8KfvQtaGTV',
-    productId: 'prod_Tvn1sJVvjM0QoF',
-    name: 'Pro Evaluation',
-    accountSize: 100_000,
-    entryFee: 199,
-    isLive: false,
-  },
-  elite: {
-    priceId: 'price_1SxvRqLH4HmFKO8KwCfeCx1C',
-    productId: 'prod_Tvn1vcoJGH3uwR',
-    name: 'Elite Evaluation',
-    accountSize: 200_000,
-    entryFee: 349,
-    isLive: false,
-  },
 }
 
 Deno.serve(async (req) => {
@@ -87,16 +48,15 @@ Deno.serve(async (req) => {
       rulesAcknowledged?: boolean
     }
 
-    if (!tierId || !TIER_CONFIG[tierId]) {
+    if (!tierId || !TIERS[tierId]) {
       return new Response(JSON.stringify({ error: 'Invalid tier' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    const tier = TIER_CONFIG[tierId]
+    const tier = TIERS[tierId]
 
-    // Server-side gate: reject non-live tiers
     if (!tier.isLive) {
       return new Response(
         JSON.stringify({ error: 'This tier is not yet available for purchase' }),
@@ -104,7 +64,6 @@ Deno.serve(async (req) => {
       )
     }
 
-    // P0 RELEASE BLOCKER: disclaimer must be accepted
     if (!disclaimerAccepted) {
       return new Response(
         JSON.stringify({ error: 'Disclaimer must be accepted before purchase' }),
@@ -112,7 +71,6 @@ Deno.serve(async (req) => {
       )
     }
 
-    // P0: Rules acknowledgement must be accepted (chargeback defense)
     if (!rulesAcknowledged) {
       return new Response(
         JSON.stringify({ error: 'Rules acknowledgement required before purchase' }),
@@ -140,25 +98,14 @@ Deno.serve(async (req) => {
       )
     }
 
-    // ── 3. Stripe customer lookup / reuse ────────────────────
-    const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
-      apiVersion: '2025-08-27.basil',
-    })
+    // ── 3. Resolve active payment rail ──────────────────────
+    const railKey = await resolveActiveInboundRail(serviceClient)
+    const provider = getCheckoutProvider(railKey)
 
-    const customers = userEmail
-      ? await stripe.customers.list({ email: userEmail, limit: 1 })
-      : { data: [] }
-
-    let customerId: string | undefined
-    if (customers.data.length > 0) {
-      customerId = customers.data[0].id
-    }
+    console.log(`Using checkout provider: ${provider.providerId} (rail: ${railKey})`)
 
     // ── 4. Resolve redirect origin (fail-closed) ──────────
-    // APP_ORIGIN is REQUIRED. All Stripe redirect URLs point here.
-    // Never trust browser Origin header for money-touching flows.
     const APP_ORIGIN = Deno.env.get('APP_ORIGIN')
-
     if (!APP_ORIGIN) {
       console.error('FATAL: APP_ORIGIN not configured. Cannot create checkout session.')
       return new Response(
@@ -167,59 +114,41 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Log & warn if request origin doesn't match (informational only)
+    // Log origin mismatch (informational only — redirects always use APP_ORIGIN)
     const originHeader = req.headers.get('origin')
     const forwardedHost = req.headers.get('x-forwarded-host')
     const forwardedProto = req.headers.get('x-forwarded-proto')
-
-    let requestOrigin: string | null = null
-    if (originHeader) {
-      requestOrigin = originHeader
-    } else if (forwardedHost && forwardedProto) {
-      requestOrigin = `${forwardedProto}://${forwardedHost}`
-    }
-
+    let requestOrigin: string | null = originHeader || (forwardedHost && forwardedProto ? `${forwardedProto}://${forwardedHost}` : null)
     if (requestOrigin && requestOrigin !== APP_ORIGIN) {
       console.warn(`Origin mismatch: request=${requestOrigin}, APP_ORIGIN=${APP_ORIGIN}. Using APP_ORIGIN for redirects.`)
     }
 
-    // Stripe redirect URLs ALWAYS use APP_ORIGIN — never request origin
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      customer_email: customerId ? undefined : (userEmail || undefined),
-      line_items: [{ price: tier.priceId, quantity: 1 }],
-      mode: 'payment',
-      metadata: {
-        user_id: userId,
-        tier_id: tierId,
-        account_size: String(tier.accountSize),
-        entry_fee: String(tier.entryFee),
-        disclaimer_accepted: 'true',
-        disclaimer_version: 'v1',
-        rules_acknowledged: 'true',
-        rules_acknowledged_at: new Date().toISOString(),
-        rules_version: RULES_VERSION,
-        product_description: 'Simulated trading evaluation access',
-      },
-      payment_intent_data: {
-        metadata: {
-          user_id: userId,
-          tier_id: tierId,
-        },
-      },
-      success_url: `${APP_ORIGIN}/trader?session_id={CHECKOUT_SESSION_ID}&payment=success`,
-      cancel_url: `${APP_ORIGIN}/checkout?payment=cancelled`,
+    // ── 5. Create checkout session via provider adapter ────
+    const metadata: CheckoutMetadata = {
+      disclaimerAccepted: true,
+      disclaimerVersion: 'v1',
+      rulesAcknowledged: true,
+      rulesAcknowledgedAt: new Date().toISOString(),
+      rulesVersion: RULES_VERSION,
+      productDescription: 'Simulated trading evaluation access',
+    }
+
+    const result = await provider.createSession({
+      tier,
+      userId,
+      userEmail,
+      metadata,
+      appOrigin: APP_ORIGIN,
     })
 
-    // ── 5. Persist queue row BEFORE returning URL ──────────
-    // This ensures evidence exists even if webhook is delayed/lost.
+    // ── 6. Persist queue row BEFORE returning URL ──────────
     const { error: queueInsertErr } = await serviceClient
       .from('checkout_fulfillment_queue')
       .insert({
-        stripe_session_id: session.id,
+        stripe_session_id: result.sessionId, // Generic session ID (column name is legacy)
         user_id: userId,
         tier_id: tierId,
-        payment_intent: null, // not yet available; webhook will fill it
+        payment_intent: result.paymentIntent || null,
         amount_cents: tier.entryFee * 100,
         currency: 'usd',
         status: 'session_created',
@@ -229,23 +158,25 @@ Deno.serve(async (req) => {
       })
 
     if (queueInsertErr && !queueInsertErr.code?.includes('23505')) {
-      // Non-fatal but log durably so we know how often early evidence is lost
       console.error(`QUEUE_PRECREATE_FAILED: ${queueInsertErr.message}`, {
-        sessionId: session.id, userId, tierId,
+        sessionId: result.sessionId, userId, tierId,
       })
-      // Durable error record for reconciliation
       await serviceClient.from('staff_notifications').insert({
         notification_type: 'queue_precreate_failed',
         title: '⚠️ Checkout queue pre-insert failed',
-        body: `Pre-insert failed for session=${session.id} user=${userId} tier=${tierId}. Error: ${queueInsertErr.message}. Webhook fallback will attempt insert.`,
-        data: { stripe_session_id: session.id, user_id: userId, tier_id: tierId, error: queueInsertErr.message },
-        idempotency_key: `queue_precreate_failed:${session.id}`,
+        body: `Pre-insert failed for session=${result.sessionId} user=${userId} tier=${tierId}. Error: ${queueInsertErr.message}. Webhook fallback will attempt insert.`,
+        data: { stripe_session_id: result.sessionId, user_id: userId, tier_id: tierId, error: queueInsertErr.message },
+        idempotency_key: `queue_precreate_failed:${result.sessionId}`,
       }).catch(() => { /* best-effort */ })
     }
 
-    console.log(`Checkout session created: ${session.id} for user=${userId} tier=${tierId} origin=${APP_ORIGIN}`)
+    console.log(`Checkout session created: ${result.sessionId} provider=${result.provider} user=${userId} tier=${tierId} origin=${APP_ORIGIN}`)
 
-    return new Response(JSON.stringify({ url: session.url }), {
+    return new Response(JSON.stringify({
+      url: result.checkoutUrl,
+      provider: result.provider,
+      sessionId: result.sessionId,
+    }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
