@@ -931,13 +931,15 @@ function runSimulation(
     risk: {
       probabilityOfLoss, maxDrawdown, worstMonth, bestMonth, consecutiveLossMonths: maxConsecutiveLoss,
       // Payout outflow percentiles (per-iteration max-month, then percentiled across iterations)
+      // Uses nearest-rank method: idx = ceil(p * n) - 1, clamped to [0, n-1]
       maxPayoutOutflowMonth: (() => {
         const sorted = perIterMaxPayoutOutflow.slice().sort((a, b) => a - b)
         const len = sorted.length
         if (len === 0) return { p95: 0, p99: 0, max: 0 }
+        const pIndex = (p: number) => Math.min(Math.max(Math.ceil(p * len) - 1, 0), len - 1)
         return {
-          p95: sorted[Math.floor(len * 0.95)],
-          p99: sorted[Math.floor(len * 0.99)],
+          p95: sorted[pIndex(0.95)],
+          p99: sorted[pIndex(0.99)],
           max: sorted[len - 1],
         }
       })(),

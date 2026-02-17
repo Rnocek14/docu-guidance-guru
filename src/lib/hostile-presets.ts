@@ -295,7 +295,7 @@ export function evaluateAssertions(
         break;
       case 'MAX_PAYOUT_OUTFLOW_BELOW':
         passed = value < (assertion.threshold ?? 20000);
-        detail = `P95 peak monthly payout outflow: $${Math.round(value).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? 20000).toLocaleString()})`;
+        detail = `P95 of per-iteration peak monthly payout outflow (nearest-rank): $${Math.round(value).toLocaleString()} (threshold: $${Math.round(assertion.threshold ?? 20000).toLocaleString()})`;
         break;
     }
 
