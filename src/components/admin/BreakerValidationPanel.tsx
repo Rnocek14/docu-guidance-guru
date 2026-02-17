@@ -68,18 +68,16 @@ export function BreakerValidationPanel({ assertionResults, breakerValidation }: 
                   <div className="text-sm font-medium">{r.assertion.description}</div>
                   <div className="text-xs text-muted-foreground">{r.detail}</div>
                 </div>
-                {!r.passed && r.detail.startsWith('MISSING METRIC') ? (
-                  <Badge variant="destructive" className="ml-auto shrink-0 opacity-90">
-                    DATA GAP
-                  </Badge>
-                ) : (
+                <div className="flex items-center gap-2 ml-auto shrink-0">
                   <Badge
                     variant={r.passed ? 'outline' : 'destructive'}
-                    className="ml-auto shrink-0"
-                >
+                  >
                     {r.passed ? 'PASS' : 'FAIL'}
                   </Badge>
-                )}
+                  {!r.passed && r.detail?.startsWith('MISSING METRIC') && (
+                    <Badge variant="secondary">DATA GAP</Badge>
+                  )}
+                </div>
               </div>
             ))}
           </CardContent>
