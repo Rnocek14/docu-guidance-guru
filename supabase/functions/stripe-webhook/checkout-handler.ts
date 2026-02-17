@@ -1,18 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@18.5.0'
-
-// ============================================================
-// Tier → Cohort mapping (only primitives needed now;
-// cohort resolution + snapshot happen in the DB RPC)
-// ============================================================
-const TIER_COHORT_MAP: Record<string, {
-  accountSize: number
-  cohortName: string
-}> = {
-  starter: { accountSize: 50_000, cohortName: 'Starter' },
-  pro: { accountSize: 100_000, cohortName: 'Pro' },
-  elite: { accountSize: 200_000, cohortName: 'Elite' },
-}
+import { TIER_COHORT_MAP } from '../_shared/checkout/config.ts'
 
 function generateAccountNumber(): string {
   const date = new Date()

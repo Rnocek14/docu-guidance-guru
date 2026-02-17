@@ -356,6 +356,24 @@ To run these scenarios through the existing engine at `/admin/monte-carlo`:
 
 These presets should use the existing `SimulationConfig` interface and can be added to the Monte Carlo analytics page.
 
+### Live Data Override (Post-Launch)
+
+Once 30+ days of live data is available, simulation parameters MUST be overridden with observed values:
+
+| Parameter | Default (Pre-Launch) | Live Override Source |
+|-----------|---------------------|---------------------|
+| Pass rate distribution | Triangular(5%, 10%, 18%) | `accounts` table: `COUNT(passed_at IS NOT NULL) / COUNT(*)` rolling 30d |
+| First payout average | $300 (cap) | `payouts` table: `AVG(amount) WHERE status IN ('paid', 'paid_confirmed')` |
+| Dispute rate | 0% | `chargeback_events`: rolling 30d count / `payment_transactions` count |
+| Time to breach | 5 days | `accounts`: `AVG(failed_at - created_at) WHERE failed_at IS NOT NULL` |
+| Time to pass | 15 days | `accounts`: `AVG(passed_at - created_at) WHERE passed_at IS NOT NULL` |
+| Reset rate | 10% | Future: track reset purchases per user |
+| Payout survival rate | 30% | `payouts`: % of passers who request subsequent payouts |
+
+**Implementation:** The `/admin/monte-carlo` page should include a "Use Live Data" toggle that queries these values and injects them as distribution overrides, replacing the static triangular assumptions. Until n ≥ 50 completed evaluations, display a warning: "Sample size insufficient — simulation uses modeled defaults."
+
+This is what turns Monte Carlo from "storytelling" into a "control system."
+
 ---
 
 *Run all scenarios quarterly, or whenever cohort rules change. Update parameters to match actual observed pass rates once live data is available.*

@@ -318,6 +318,46 @@ Rationale: ___
 
 ---
 
+## Payout SLA Auto-Escalation
+
+The most likely early reputational risk is traders perceiving "they don't pay." Prevent this with automated escalation — not auto-pay, but auto-alert + proactive communication.
+
+### Escalation Tiers
+
+| Payout Age | Auto-Action | Template |
+|-----------|-------------|----------|
+| > 24h in `pending` | No action | — |
+| > 48h in `pending` or `under_review` | Staff notification: `payout_sla_warning` | "Payout #X for account #Y has been pending for 48+ hours. Review immediately." |
+| > 72h in `pending` or `under_review` | Staff notification: `payout_sla_breach` + proactive email template ready | "Your payout is being processed. We aim to complete all reviews within 72 hours..." |
+| > 72h in `approved` (not initiated) | Staff notification: `payout_initiation_delayed` | "Payout #X was approved but payment has not been initiated. Act now." |
+
+### Proactive Trader Communication Template (> 72h)
+
+```
+Subject: Update on Your Performance Reward
+
+Hi [Name],
+
+We're processing your performance reward request. Our review
+process typically completes within 72 hours. We're finalizing
+your payout and you can expect an update within [X] hours.
+
+If you have questions, contact support@[domain].
+
+— [Platform Name]
+```
+
+### Implementation
+
+- Cron job checks `payouts` table for rows where:
+  - `status IN ('pending', 'under_review', 'approved')`
+  - `requested_at < now() - interval '48 hours'`
+- Inserts idempotent `staff_notifications` with escalation tier
+- Does NOT auto-approve or auto-pay — human must act
+- Logged to `audit_logs` for compliance trail
+
+---
+
 ## Integration Points
 
 | This Playbook | Links To |

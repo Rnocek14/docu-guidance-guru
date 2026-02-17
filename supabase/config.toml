@@ -74,3 +74,6 @@ verify_jwt = false
 
 [functions.send-support-reply]
 verify_jwt = false
+
+[functions.payout-sla-check]
+verify_jwt = false
