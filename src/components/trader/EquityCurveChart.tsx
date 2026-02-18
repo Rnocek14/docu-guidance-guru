@@ -161,7 +161,26 @@ export function EquityCurveChart({ accountId, startingBalance, maxDrawdownPct = 
     return points;
   }, [trades, startingBalance, maxDrawdownPct, profitTargetPct, minTradingDays]);
 
-  if (!chartData.length) return null;
+  if (!chartData.length) {
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <TrendingUp className="h-5 w-5 text-primary" />
+            Equity Curve
+          </CardTitle>
+          <CardDescription>Cumulative balance — each point is a closed trade.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <TrendingUp className="h-10 w-10 text-muted-foreground/30 mb-3" />
+            <p className="text-sm text-muted-foreground">No trades yet</p>
+            <p className="text-xs text-muted-foreground/60 mt-1">Your equity curve will appear after your first closed trade.</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const currentBalance = chartData[chartData.length - 1]?.balance ?? startingBalance;
   const totalReturn = ((currentBalance - startingBalance) / startingBalance) * 100;
