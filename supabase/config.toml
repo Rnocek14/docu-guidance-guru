@@ -83,3 +83,6 @@ verify_jwt = false
 
 [functions.system-governor]
 verify_jwt = false
+
+[functions.compute-cpc]
+verify_jwt = false

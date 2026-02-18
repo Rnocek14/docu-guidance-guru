@@ -9,7 +9,7 @@ import {
   ShieldCheck, ShieldX, AlertTriangle, CheckCircle2, XCircle,
   RefreshCw, Loader2, Activity, Cpu, TrendingUp, Zap, Lock,
   Unlock, Clock, Power, PowerOff, DollarSign, CreditCard,
-  Shield, ChevronRight, ExternalLink,
+  Shield, ChevronRight, ExternalLink, Gauge,
 } from 'lucide-react';
 import { formatDistanceToNow, differenceInHours, differenceInMinutes } from 'date-fns';
 import { toast } from 'sonner';
@@ -218,6 +218,49 @@ function useMoneySnapshot() {
   });
 }
 
+// ── CPC hook ──
+
+interface CpcResult {
+  score: number;
+  band: 'high' | 'medium' | 'low';
+  realizedMargin: number;
+  realizedMarginScore: number;
+  bufferCoverageRatio: number;
+  bufferCoverageScore: number;
+  passRate: number | null;
+  passRateScore: number;
+  monteCarloRuinPct: number;
+  monteCarloScore: number;
+  breakerLevel: string;
+  breakerPenalty: boolean;
+  revenue30d: number;
+  payouts30d: number;
+  pendingLiability: number;
+  netBuffer: number | null;
+  source: string;
+  computedAt: string;
+}
+
+function useCpc() {
+  return useQuery({
+    queryKey: ['mc-cpc'],
+    queryFn: async (): Promise<CpcResult | null> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return null;
+      const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/compute-cpc`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.warn('CPC fetch failed:', body);
+        return null;
+      }
+      return res.json();
+    },
+    refetchInterval: 5 * 60_000, // every 5 min
+  });
+}
+
 // ── Components ──
 
 function SwitchDot({ paused, unknown, label }: { paused: boolean; unknown?: boolean; label: string }) {
@@ -241,16 +284,19 @@ export default function MissionControl() {
   const governor = useGovernor();
   const actionItems = useActionItems();
   const money = useMoneySnapshot();
+  const cpc = useCpc();
 
   const gov = governor.data;
   const ls = gov?.lockState;
   const cfg = gov?.effectiveConfig;
   const isLoading = governor.isLoading;
+  const cpcData = cpc.data;
 
   const refetchAll = () => {
     governor.refetch();
     actionItems.refetch();
     money.refetch();
+    cpc.refetch();
   };
 
   if (isLoading) {
@@ -506,7 +552,72 @@ export default function MissionControl() {
           </div>
         )}
 
-        {/* ── Auto-Pilot Status ── */}
+        {/* ── Cohort Profitability Confidence ── */}
+        <Card className={`border ${
+          cpcData?.band === 'high' ? 'border-success/30' : cpcData?.band === 'medium' ? 'border-warning/30' : cpcData?.band === 'low' ? 'border-destructive/30' : 'border-border'
+        }`}>
+          <CardContent className="pt-4 pb-3 px-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Gauge className="h-4 w-4 text-muted-foreground" />
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cohort Profitability Confidence</p>
+              </div>
+              {cpcData ? (
+                <Badge variant={cpcData.band === 'high' ? 'outline' : cpcData.band === 'medium' ? 'secondary' : 'destructive'}
+                  className={cpcData.band === 'high' ? 'border-success/50 text-success' : cpcData.band === 'medium' ? 'border-warning/50 text-warning' : ''}>
+                  {cpcData.band.toUpperCase()} ({cpcData.score})
+                </Badge>
+              ) : cpc.isLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+              ) : (
+                <Badge variant="outline" className="text-[10px] border-warning/50 text-warning">No data</Badge>
+              )}
+            </div>
+            {cpcData ? (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <CpcSubScore
+                  label="Realized Margin"
+                  value={`$${cpcData.realizedMargin.toLocaleString()}`}
+                  score={cpcData.realizedMarginScore}
+                  sub={`Rev $${cpcData.revenue30d.toLocaleString()} · Pay $${cpcData.payouts30d.toLocaleString()}`}
+                />
+                <CpcSubScore
+                  label="Buffer Coverage"
+                  value={`${cpcData.bufferCoverageRatio}×`}
+                  score={cpcData.bufferCoverageScore}
+                  sub={`Buffer: $${cpcData.netBuffer?.toLocaleString() ?? '—'}`}
+                />
+                <CpcSubScore
+                  label="Stress Ruin Risk"
+                  value={`${cpcData.monteCarloRuinPct}%`}
+                  score={cpcData.monteCarloScore}
+                  sub="Phase 2"
+                />
+                <CpcSubScore
+                  label="Pass Rate"
+                  value={cpcData.passRate !== null ? `${cpcData.passRate}%` : '—'}
+                  score={cpcData.passRateScore}
+                  sub={cpcData.breakerPenalty ? `Breaker: ${cpcData.breakerLevel} (penalty)` : `Breaker: ${cpcData.breakerLevel}`}
+                />
+              </div>
+            ) : !cpc.isLoading && (
+              <p className="text-xs text-muted-foreground">CPC not yet computed. Run manually or wait for cron.</p>
+            )}
+            {cpcData && cpcData.band === 'low' && (
+              <div className="mt-3 pt-2 border-t border-destructive/20 text-xs text-destructive flex items-center gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span>Economics at risk — consider tightening pass gates, increasing buffer, or pausing intake.</span>
+              </div>
+            )}
+            {cpcData && (
+              <div className="mt-2 pt-2 border-t border-border text-[11px] text-muted-foreground">
+                Computed {formatDistanceToNow(new Date(cpcData.computedAt), { addSuffix: true })} · Source: {cpcData.source}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+
         {gov && (
           <Card className="border-border">
             <CardContent className="pt-4 pb-3 px-4">
@@ -595,6 +706,27 @@ function AutoPilotRow({ ok, label, warn }: { ok: boolean; label: string; warn?: 
         <XCircle className="h-3 w-3 text-destructive shrink-0" />
       )}
       <span className="text-muted-foreground">{label}</span>
+    </div>
+  );
+}
+
+function CpcSubScore({ label, value, score, sub }: { label: string; value: string; score: number; sub?: string }) {
+  const signal: Signal = score >= 0.7 ? 'green' : score >= 0.4 ? 'yellow' : 'red';
+  return (
+    <div className="space-y-0.5">
+      <p className="text-[11px] text-muted-foreground font-medium">{label}</p>
+      <p className={`text-sm font-bold tabular-nums ${
+        signal === 'red' ? 'text-destructive' : signal === 'yellow' ? 'text-warning' : ''
+      }`}>{value}</p>
+      <div className="flex items-center gap-1.5">
+        <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${
+            signal === 'green' ? 'bg-success' : signal === 'yellow' ? 'bg-warning' : 'bg-destructive'
+          }`} style={{ width: `${Math.round(score * 100)}%` }} />
+        </div>
+        <span className="text-[10px] text-muted-foreground tabular-nums">{score}</span>
+      </div>
+      {sub && <p className="text-[10px] text-muted-foreground truncate">{sub}</p>}
     </div>
   );
 }
