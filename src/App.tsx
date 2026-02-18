@@ -36,6 +36,7 @@ import OpsPlaybook from "./pages/admin/OpsPlaybook";
 import OpsMetrics from "./pages/admin/OpsMetrics";
 import TierReadiness from "./pages/admin/TierReadiness";
 import AdminReadiness from "./pages/admin/AdminReadiness";
+import GovernorDashboard from "./pages/admin/GovernorDashboard";
 import QaScanRunner from "./pages/admin/QaScanRunner";
 import SupportEmails from "./pages/admin/SupportEmails";
 import SupportDashboard from "./pages/support/SupportDashboard";
@@ -232,6 +233,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <AdminReadiness />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/governor"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <GovernorDashboard />
                 </ProtectedRoute>
               }
             />
