@@ -1,4 +1,5 @@
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -147,7 +148,7 @@ export default function UsersManagement() {
   const availableRoles: AppRole[] = ['trader', 'risk_officer', 'support', 'admin'];
 
   return (
-    <DashboardLayout title="User Management" navItems={adminNavItems}>
+    <DashboardLayout title="User Management" navItems={missionControlNavItems}>
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Users & Roles</h2>

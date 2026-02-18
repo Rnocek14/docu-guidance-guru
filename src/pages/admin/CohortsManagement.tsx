@@ -1,4 +1,5 @@
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -266,7 +267,7 @@ export default function CohortsManagement() {
   };
 
   return (
-    <DashboardLayout title="Cohort Management" navItems={adminNavItems}>
+    <DashboardLayout title="Cohort Management" navItems={missionControlNavItems}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>

@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import {
   Shield,
@@ -28,12 +29,15 @@ import {
   CreditCard,
   Activity,
   Cpu,
+  Wrench,
+  ChevronDown,
 } from 'lucide-react';
 
 interface NavItem {
   label: string;
   href: string;
   icon: ReactNode;
+  section?: 'daily' | 'tools';
 }
 
 interface DashboardLayoutProps {
@@ -47,6 +51,12 @@ export function DashboardLayout({ children, title, navItems }: DashboardLayoutPr
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+
+  // Split nav into daily vs tools sections
+  const hasTools = navItems.some(i => i.section === 'tools');
+  const dailyItems = hasTools ? navItems.filter(i => !i.section || i.section === 'daily') : navItems;
+  const toolsItems = hasTools ? navItems.filter(i => i.section === 'tools') : [];
 
   const handleSignOut = async () => {
     await signOut();
@@ -106,7 +116,7 @@ export function DashboardLayout({ children, title, navItems }: DashboardLayoutPr
 
           {/* Navigation */}
           <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-            {navItems.map((item) => {
+            {dailyItems.map((item) => {
               const isActive = location.pathname === item.href;
               return (
                 <Link
@@ -125,6 +135,38 @@ export function DashboardLayout({ children, title, navItems }: DashboardLayoutPr
                 </Link>
               );
             })}
+
+            {/* Tools section (collapsible) */}
+            {toolsItems.length > 0 && (
+              <Collapsible open={toolsOpen || toolsItems.some(i => location.pathname === i.href)} onOpenChange={setToolsOpen}>
+                <CollapsibleTrigger className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground w-full transition-colors mt-2">
+                  <Wrench className="h-5 w-5" />
+                  <span className="flex-1 text-left">Tools</span>
+                  <ChevronDown className={cn("h-4 w-4 transition-transform", (toolsOpen || toolsItems.some(i => location.pathname === i.href)) && "rotate-180")} />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-0.5 mt-1 ml-2 border-l border-sidebar-border pl-2">
+                  {toolsItems.map((item) => {
+                    const isActive = location.pathname === item.href;
+                    return (
+                      <Link
+                        key={item.href}
+                        to={item.href}
+                        onClick={() => setSidebarOpen(false)}
+                        className={cn(
+                          'flex items-center gap-3 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                          isActive
+                            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                        )}
+                      >
+                        {item.icon}
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </nav>
 
           {/* User section */}

@@ -1,4 +1,5 @@
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { getSafeToSell, type SafeToSellInputs, type ReserveGateInfo } from '@/lib/safe-to-sell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -469,7 +470,7 @@ export default function OpsMetrics() {
 
   if (isLoading) {
     return (
-      <DashboardLayout title="Morning Checks" navItems={adminNavItems}>
+      <DashboardLayout title="Morning Checks" navItems={missionControlNavItems}>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
@@ -498,7 +499,7 @@ export default function OpsMetrics() {
   });
 
   return (
-    <DashboardLayout title="Morning Checks" navItems={adminNavItems}>
+    <DashboardLayout title="Morning Checks" navItems={missionControlNavItems}>
       <div className="space-y-6 max-w-5xl">
         {/* Header */}
         <div className="flex items-center justify-between">

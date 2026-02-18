@@ -1,4 +1,5 @@
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -104,7 +105,7 @@ export default function AuditLogs() {
   });
 
   return (
-    <DashboardLayout title="Audit Logs" navItems={adminNavItems}>
+    <DashboardLayout title="Audit Logs" navItems={missionControlNavItems}>
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Audit Trail</h2>

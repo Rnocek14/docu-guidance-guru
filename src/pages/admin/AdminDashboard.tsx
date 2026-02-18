@@ -1,4 +1,5 @@
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -101,7 +102,7 @@ export default function AdminDashboard() {
   const isIntakeActive = intakeSetting?.value === true || intakeSetting?.value === 'true';
 
   return (
-    <DashboardLayout title="Admin Panel" navItems={adminNavItems}>
+    <DashboardLayout title="Admin Panel" navItems={missionControlNavItems}>
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">System Overview</h2>

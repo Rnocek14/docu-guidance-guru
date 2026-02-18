@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -266,7 +267,7 @@ export default function LiabilityDashboard() {
 
   if (error) {
     return (
-      <DashboardLayout title="Payout Liability" navItems={adminNavItems}>
+      <DashboardLayout title="Payout Liability" navItems={missionControlNavItems}>
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
@@ -279,7 +280,7 @@ export default function LiabilityDashboard() {
 
   if (data?.error) {
     return (
-      <DashboardLayout title="Payout Liability" navItems={adminNavItems}>
+      <DashboardLayout title="Payout Liability" navItems={missionControlNavItems}>
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
@@ -294,7 +295,7 @@ export default function LiabilityDashboard() {
   const totalPendingAmount = data?.total_pending_amount || 0;
 
   return (
-    <DashboardLayout title="Payout Liability" navItems={adminNavItems}>
+    <DashboardLayout title="Payout Liability" navItems={missionControlNavItems}>
       <div className="space-y-6">
         {/* Header with actions */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
