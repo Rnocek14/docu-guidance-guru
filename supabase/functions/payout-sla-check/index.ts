@@ -60,7 +60,24 @@ Deno.serve(async (req) => {
 
   // Auth: cron secret only
   const authHeader = req.headers.get('Authorization')
-  const cronSecret = Deno.env.get('CRON_SECRET')
+
+  // Resolve CRON_SECRET: prefer env var, fallback to internal_secrets table
+  let cronSecret = Deno.env.get('CRON_SECRET') ?? ''
+  if (!cronSecret) {
+    try {
+      const sbLookup = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      )
+      const { data } = await sbLookup
+        .from('internal_secrets')
+        .select('value')
+        .eq('key', 'CRON_SECRET')
+        .single()
+      cronSecret = data?.value ?? ''
+    } catch { /* best effort */ }
+  }
+
   if (!cronSecret) {
     console.error('CRON_SECRET not configured')
     return new Response(JSON.stringify({ error: 'Server misconfiguration' }), {
