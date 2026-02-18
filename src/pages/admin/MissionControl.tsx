@@ -67,6 +67,7 @@ function useGovernor() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['system-governor'] });
       queryClient.invalidateQueries({ queryKey: ['mc-action-items'] });
+      queryClient.invalidateQueries({ queryKey: ['mc-money-snapshot'] });
       toast.success(`Governor: ${result.verdict.toUpperCase()} — ${result.autoActionDetail}`);
     },
     onError: (err) => toast.error(`Governor error: ${(err as Error).message}`),
@@ -125,7 +126,7 @@ function useActionItems() {
           severity: pendingPayouts.length >= 5 ? 'red' : 'yellow',
           title: `${pendingPayouts.length} payout${pendingPayouts.length > 1 ? 's' : ''} pending review`,
           detail: `$${total.toLocaleString(undefined, { maximumFractionDigits: 0 })} total`,
-          link: '/risk/queue',
+          link: '/risk/queue?status=pending',
         });
       }
 
@@ -138,7 +139,7 @@ function useActionItems() {
           severity: 'red',
           title: `${failedPayouts.length} payout payment${failedPayouts.length > 1 ? 's' : ''} failed`,
           detail: 'Requires manual investigation',
-          link: '/risk/queue',
+          link: '/risk/queue?status=payment_failed',
         });
       }
 
@@ -152,7 +153,7 @@ function useActionItems() {
           severity: highSev.length > 0 ? 'red' : 'yellow',
           title: `${flags.length} open flag${flags.length > 1 ? 's' : ''} pending review`,
           detail: highSev.length > 0 ? `${highSev.length} high/critical severity` : 'Medium or lower severity',
-          link: '/risk/queue',
+          link: '/risk/queue?tab=flags',
         });
       }
 
@@ -177,7 +178,7 @@ function useActionItems() {
             detail: lastRun?.ran_at
               ? `Last run: ${formatDistanceToNow(new Date(lastRun.ran_at), { addSuffix: true })}`
               : 'Never run',
-            link: '/admin/ops-metrics',
+            link: `/admin/ops-metrics?job=${cfg.jobname}`,
           });
         }
       }
@@ -200,7 +201,7 @@ function useMoneySnapshot() {
       const [snapRes, disputeRes, breakerRes, payoutsInFlightRes] = await Promise.all([
         supabase.from('risk_snapshots')
           .select('net_buffer, pending_payouts_amount, pending_payouts_count, created_at')
-          .order('created_at', { ascending: false }).limit(1).single(),
+          .order('created_at', { ascending: false }).limit(1).maybeSingle(),
         supabase.rpc('get_dispute_rate_snapshot', { window_days: 30 }) as any,
         supabase.from('econ_breaker_state').select('rolling_pass_rate, breaker_level').single(),
         supabase.from('payouts').select('amount')
@@ -273,6 +274,9 @@ export default function MissionControl() {
 
   const items = actionItems.data || [];
   const m = money.data;
+
+  const isAllClear = gov?.verdict === 'safe' && items.length === 0 &&
+    (['capital', 'processor', 'cohort', 'riskEngine'] as const).every(d => gov[d]?.signal !== 'red');
 
   return (
     <DashboardLayout title="Mission Control" navItems={missionControlNavItems}>
@@ -364,6 +368,14 @@ export default function MissionControl() {
                   </Button>
                 </div>
               </div>
+
+              {/* All Clear banner */}
+              {isAllClear && (
+                <div className="mt-3 flex items-center gap-2 text-sm text-success border-t border-success/20 pt-3">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span className="font-medium">All clear — no action items, all domains healthy.</span>
+                </div>
+              )}
             </CardContent>
           </Card>
         ) : governor.error ? (

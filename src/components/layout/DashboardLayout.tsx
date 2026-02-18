@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -31,7 +31,9 @@ import {
   Cpu,
   Wrench,
   ChevronDown,
+  Search,
 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 
 interface NavItem {
   label: string;
@@ -52,11 +54,18 @@ export function DashboardLayout({ children, title, navItems }: DashboardLayoutPr
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsSearch, setToolsSearch] = useState('');
 
   // Split nav into daily vs tools sections
   const hasTools = navItems.some(i => i.section === 'tools');
   const dailyItems = hasTools ? navItems.filter(i => !i.section || i.section === 'daily') : navItems;
   const toolsItems = hasTools ? navItems.filter(i => i.section === 'tools') : [];
+
+  const filteredToolsItems = useMemo(() => {
+    if (!toolsSearch.trim()) return toolsItems;
+    const q = toolsSearch.toLowerCase();
+    return toolsItems.filter(i => i.label.toLowerCase().includes(q));
+  }, [toolsItems, toolsSearch]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -145,7 +154,18 @@ export function DashboardLayout({ children, title, navItems }: DashboardLayoutPr
                   <ChevronDown className={cn("h-4 w-4 transition-transform", (toolsOpen || toolsItems.some(i => location.pathname === i.href)) && "rotate-180")} />
                 </CollapsibleTrigger>
                 <CollapsibleContent className="space-y-0.5 mt-1 ml-2 border-l border-sidebar-border pl-2">
-                  {toolsItems.map((item) => {
+                  {toolsItems.length > 6 && (
+                    <div className="relative px-1 py-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                      <Input
+                        placeholder="Filter tools…"
+                        value={toolsSearch}
+                        onChange={e => setToolsSearch(e.target.value)}
+                        className="h-7 pl-7 text-xs bg-sidebar-background border-sidebar-border"
+                      />
+                    </div>
+                  )}
+                  {filteredToolsItems.map((item) => {
                     const isActive = location.pathname === item.href;
                     return (
                       <Link
