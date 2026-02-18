@@ -15,56 +15,8 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 
-interface DomainCheck { name: string; ok: boolean; severity: 'blocker' | 'warning'; detail: string }
-interface DomainResult { safe: boolean; signal: string; checks: DomainCheck[]; blockerCount: number; warningCount: number }
-interface LockState {
-  inbound_paused: boolean;
-  outbound_paused: boolean;
-  intake_paused: boolean;
-  intake_unknown: boolean;
-  lock_owner: 'governor' | 'operator' | 'none';
-  pause_reason: string | null;
-  paused_at: string | null;
-}
-interface GovernorConfig {
-  enabled?: boolean;
-  auto_lock?: boolean;
-  auto_unlock?: boolean;
-  min_net_buffer?: number;
-  unlock_after_consecutive_safe?: number;
-  strict_launch_mode?: boolean;
-}
-interface GovernorResult {
-  verdict: 'safe' | 'not_safe' | 'error';
-  capital: DomainResult;
-  processor: DomainResult;
-  cohort: DomainResult;
-  riskEngine: DomainResult;
-  blockers: { domain: string; detail: string; severity: string }[];
-  warnings: { domain: string; detail: string }[];
-  autoAction: string;
-  autoActionDetail: string;
-  certifiedAt: string;
-  safeStreak: number;
-  strictMode: boolean;
-  unlockThreshold: number;
-  lockState: LockState;
-  effectiveConfig?: GovernorConfig;
-  source?: string;
-}
-
-interface CertHistory {
-  id: string;
-  certified_at: string;
-  verdict: string;
-  capital_safe: boolean;
-  processor_safe: boolean;
-  cohort_safe: boolean;
-  risk_engine_safe: boolean;
-  auto_action: string;
-  auto_action_detail: string;
-  safe_streak: number;
-}
+import type { DomainCheck, DomainResult, LockState, GovernorConfig, GovernorResult, CertHistory } from '@/lib/governor/types';
+import { GovernorResultSchema } from '@/lib/governor/types';
 
 const DOMAIN_META: Record<string, { icon: typeof ShieldCheck; label: string; color: string }> = {
   capital: { icon: TrendingUp, label: 'Capital Safety', color: 'text-chart-1' },

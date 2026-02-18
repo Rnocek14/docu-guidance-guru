@@ -14,34 +14,8 @@ import {
 import { formatDistanceToNow, differenceInHours, differenceInMinutes } from 'date-fns';
 import { toast } from 'sonner';
 import { missionControlNavItems } from '@/components/layout/AdminNav';
-
-// ── Types ──
-
-interface DomainCheck { name: string; ok: boolean; severity: 'blocker' | 'warning'; detail: string }
-interface DomainResult { safe: boolean; signal: string; checks: DomainCheck[]; blockerCount: number; warningCount: number }
-interface LockState {
-  inbound_paused: boolean; outbound_paused: boolean; intake_paused: boolean;
-  intake_unknown: boolean; lock_owner: 'governor' | 'operator' | 'none';
-  pause_reason: string | null; paused_at: string | null;
-}
-interface GovernorConfig {
-  enabled?: boolean;
-  auto_lock?: boolean;
-  auto_unlock?: boolean;
-  min_net_buffer?: number;
-  unlock_after_consecutive_safe?: number;
-  strict_launch_mode?: boolean;
-}
-interface GovernorResult {
-  verdict: 'safe' | 'not_safe' | 'error';
-  capital: DomainResult; processor: DomainResult; cohort: DomainResult; riskEngine: DomainResult;
-  blockers: { domain: string; detail: string; severity: string }[];
-  warnings: { domain: string; detail: string }[];
-  autoAction: string; autoActionDetail: string; certifiedAt: string;
-  safeStreak: number; strictMode: boolean; unlockThreshold: number; lockState: LockState;
-  effectiveConfig?: GovernorConfig;
-  source?: string;
-}
+import type { DomainCheck, DomainResult, LockState, GovernorConfig, GovernorResult } from '@/lib/governor/types';
+import { GovernorResultSchema } from '@/lib/governor/types';
 
 type Signal = 'green' | 'yellow' | 'red';
 
@@ -67,7 +41,12 @@ function useGovernor() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `HTTP ${res.status}`);
     }
-    return res.json();
+    const raw = await res.json();
+    const parsed = GovernorResultSchema.safeParse(raw);
+    if (!parsed.success) {
+      console.warn('Governor response contract violation:', parsed.error.flatten());
+    }
+    return raw as GovernorResult;
   };
 
   const query = useQuery({ queryKey: ['system-governor'], queryFn: fetchGovernor, refetchInterval: 60_000 });
