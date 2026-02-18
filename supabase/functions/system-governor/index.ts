@@ -452,7 +452,7 @@ Deno.serve(async (req) => {
   try {
     const authHeader = req.headers.get('Authorization')
     const cronSecret = Deno.env.get('CRON_SECRET')
-    let source = 'manual'
+    let source: 'manual' | 'cron' = 'manual'
     let isAuthorized = false
 
     if (cronSecret && authHeader === `Bearer ${cronSecret}`) {

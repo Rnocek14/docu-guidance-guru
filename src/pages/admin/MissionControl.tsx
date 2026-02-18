@@ -44,9 +44,10 @@ function useGovernor() {
     const raw = await res.json();
     const parsed = GovernorResultSchema.safeParse(raw);
     if (!parsed.success) {
-      console.warn('Governor response contract violation:', parsed.error.flatten());
+      console.error('Governor contract violation:', parsed.error.flatten());
+      throw new Error('Governor response invalid — verify edge deployment.');
     }
-    return raw as GovernorResult;
+    return parsed.data as GovernorResult;
   };
 
   const query = useQuery({ queryKey: ['system-governor'], queryFn: fetchGovernor, refetchInterval: 60_000 });
