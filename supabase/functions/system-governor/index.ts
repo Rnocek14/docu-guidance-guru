@@ -108,19 +108,22 @@ async function readLockState(svc: any): Promise<LockState> {
 
   const ps = psRes.data
   const intakeActive = parseBool(intakeRes.data?.value)
+  // Unknown intake = not confirmed active, so treat as "not locked" for lock-state booleans
+  // (this ensures lock reconciliation will run and fix it)
   const intakePaused = intakeActive === null ? false : !intakeActive
   const intakeUnknown = intakeActive === null
 
-  // Canonical lock owner from RPC-managed key
+  // Canonical lock owner from RPC-managed key (deterministic, not inferred from strings)
   const ownerData = parseSettingsValue(ownerRes.data?.value)
   const canonicalOwner = (ownerData?.owner as string) || 'none'
 
+  // Determine lock owner: use canonical owner record as truth
   const anyPaused = ps?.is_paused_inbound || ps?.is_paused_outbound || intakePaused
   let lockOwner: LockState['lock_owner'] = 'none'
-  if (anyPaused) {
+  if (anyPaused || canonicalOwner !== 'none') {
     if (canonicalOwner === 'governor') lockOwner = 'governor'
     else if (canonicalOwner === 'operator') lockOwner = 'operator'
-    else lockOwner = ps?.pause_reason?.startsWith('Governor') ? 'governor' : 'operator'
+    else if (anyPaused) lockOwner = ps?.pause_reason?.startsWith('Governor') ? 'governor' : 'operator'
   }
 
   return {
@@ -490,9 +493,18 @@ Deno.serve(async (req) => {
       .select('value')
       .eq('key', 'governor_config')
       .maybeSingle()
-    const config = parseSettingsValue(configRes.data?.value) as GovernorConfig
-    const strict = config.strict_launch_mode !== false
-    const unlockThreshold = config.unlock_after_consecutive_safe ?? 3
+    const rawConfig = parseSettingsValue(configRes.data?.value) as GovernorConfig
+    // Build effective config with all defaults resolved (for evaluation + audit snapshot)
+    const config: Required<GovernorConfig> = {
+      enabled: rawConfig.enabled !== false,
+      auto_lock: rawConfig.auto_lock !== false,
+      auto_unlock: rawConfig.auto_unlock !== false,
+      strict_launch_mode: rawConfig.strict_launch_mode !== false,
+      unlock_after_consecutive_safe: rawConfig.unlock_after_consecutive_safe ?? 3,
+      min_net_buffer: rawConfig.min_net_buffer ?? 1,
+    }
+    const strict = config.strict_launch_mode
+    const unlockThreshold = config.unlock_after_consecutive_safe
 
     // Read current lock state + run all 4 domains in parallel
     const [lockState, capital, processor, cohort, riskEngine] = await Promise.all([
@@ -538,16 +550,16 @@ Deno.serve(async (req) => {
     }
 
     // Auto-action
-    if (config.enabled !== false) {
+    if (config.enabled) {
       const blockerSummary = blockers.map(b => b.detail).join('; ')
       const autoResult = await executeAutoAction(svc, verdict, blockerSummary, config, currentStreak, lockState)
       result.autoAction = autoResult.action
       result.autoActionDetail = autoResult.detail
 
-      // Re-read lock state after auto-action to reflect true current state
-      if (autoResult.action !== 'none' && autoResult.action !== 'already_locked' && autoResult.action !== 'waiting_streak') {
-        result.lockState = await readLockState(svc)
-      }
+    // Always re-read lock state after auto-action (RPC may reconcile switches even on "already_locked")
+    if (autoResult.action !== 'none' && !autoResult.action.endsWith('_failed')) {
+      result.lockState = await readLockState(svc)
+    }
     }
 
     // Record certification (with warnings + config snapshot)
