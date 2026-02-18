@@ -546,6 +546,7 @@ Deno.serve(async (req) => {
       strictMode: strict,
       unlockThreshold,
       lockState,
+      effectiveConfig: config,
     }
 
     // Auto-action
