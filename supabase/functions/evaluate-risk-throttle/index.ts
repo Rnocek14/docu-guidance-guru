@@ -94,6 +94,15 @@ Deno.serve(async (req) => {
       } catch { /* best effort */ }
     }
 
+    // DEBUG: log secret comparison (remove after fix)
+    console.log('DEBUG auth:', JSON.stringify({
+      authHeaderLen: authHeader.length,
+      authHeaderPrefix: authHeader.slice(0, 13),
+      cronSecretLen: cronSecret.length,
+      cronSecretSource: Deno.env.get('CRON_SECRET') ? 'env' : 'db_fallback',
+      cronSecretPrefix: cronSecret.slice(0, 6),
+      match: cronSecret && authHeader === `Bearer ${cronSecret}`,
+    }))
     const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`
 
     let isAdmin = false
