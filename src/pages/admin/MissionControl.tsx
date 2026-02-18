@@ -340,6 +340,15 @@ export default function MissionControl() {
   const items = actionItems.data || [];
   const m = money.data;
 
+  // Extract live net buffer from Governor's capital domain checks (canonical truth)
+  const liveNetBuffer = (() => {
+    const check = gov?.capital?.checks?.find(c => c.name.includes('Net buffer'));
+    if (!check) return null;
+    // Format: "$-500" or "$14,500"
+    const match = check.detail.match(/\$([-+]?[\d,]+)/);
+    return match ? Number(match[1].replace(/,/g, '')) : null;
+  })();
+
   const isAllClear = gov?.verdict === 'safe' && items.length === 0 &&
     (['capital', 'processor', 'cohort', 'riskEngine'] as const).every(d => gov[d]?.signal !== 'red');
 
@@ -550,9 +559,21 @@ export default function MissionControl() {
           <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
             <SnapshotTile
               label="Net Buffer"
-              value={m.netBuffer !== null ? `$${Number(m.netBuffer).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'}
-              signal={m.netBuffer === null ? 'yellow' : Number(m.netBuffer) > 0 ? 'green' : 'red'}
-              sub={m.snapshotAge !== null ? `${m.snapshotAge}h ago` : undefined}
+              value={liveNetBuffer !== null
+                ? `$${liveNetBuffer.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                : m.netBuffer !== null
+                  ? `$${Number(m.netBuffer).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                  : '—'}
+              signal={
+                liveNetBuffer !== null
+                  ? liveNetBuffer > 0 ? 'green' : 'red'
+                  : m.netBuffer === null ? 'yellow' : Number(m.netBuffer) > 0 ? 'green' : 'red'
+              }
+              sub={liveNetBuffer !== null
+                ? 'LIVE (Governor)'
+                : m.snapshotAge !== null
+                  ? `⚠️ STALE (${m.snapshotAge}h ago)`
+                  : undefined}
             />
             <SnapshotTile
               label="In-Flight Payouts"
@@ -685,8 +706,11 @@ export default function MissionControl() {
                     warn={m?.passRate === null || m?.passRate === undefined}
                   />
                   <AutoPilotRow
-                    ok={m?.netBuffer !== null && cfg.min_net_buffer !== undefined ? Number(m?.netBuffer) >= cfg.min_net_buffer : m?.netBuffer !== null}
-                    label={`Buffer: $${m?.netBuffer !== null && m?.netBuffer !== undefined ? Number(m.netBuffer).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'} / min $${cfg.min_net_buffer !== undefined ? cfg.min_net_buffer.toLocaleString() : '—'}`}
+                    ok={(() => {
+                      const buf = liveNetBuffer ?? (m?.netBuffer !== null ? Number(m?.netBuffer) : null);
+                      return buf !== null && cfg.min_net_buffer !== undefined ? buf >= cfg.min_net_buffer : buf !== null;
+                    })()}
+                    label={`Buffer: $${(liveNetBuffer ?? (m?.netBuffer !== null && m?.netBuffer !== undefined ? Number(m.netBuffer) : null))?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? '—'} / min $${cfg.min_net_buffer !== undefined ? cfg.min_net_buffer.toLocaleString() : '—'}${liveNetBuffer !== null ? ' (live)' : ''}`}
                   />
                 </div>
               ) : (
