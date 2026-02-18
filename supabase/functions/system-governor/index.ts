@@ -206,11 +206,14 @@ async function evaluateProcessorSafety(svc: any, strict: boolean): Promise<Domai
   if (disputeRes.data?.http_content) {
     try {
       const parsed = JSON.parse(disputeRes.data.http_content)
-      const rate30d = parsed?.windows?.['30d']?.rate ?? null
-      if (rate30d !== null) {
+      // check-dispute-rate stores data as snapshot_30d.dispute_rate_percent (a percentage, e.g. 0.05 = 0.05%)
+      const ratePct = parsed?.snapshot_30d?.dispute_rate_percent ?? null
+      const alertLevel = parsed?.effective_alert_level ?? null
+      if (ratePct !== null) {
         disputeDataMissing = false
-        disputeOk = rate30d < 0.005
-        disputeDetail = `30d rate: ${(rate30d * 100).toFixed(2)}%`
+        // dispute_rate_percent is already a percentage (0.50 = 0.50%), threshold is 0.50%
+        disputeOk = ratePct < 0.50 && alertLevel !== 'emergency'
+        disputeDetail = `30d rate: ${Number(ratePct).toFixed(3)}%, alert: ${alertLevel ?? 'ok'}`
       }
     } catch { /* noop */ }
   }
