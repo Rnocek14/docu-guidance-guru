@@ -31,7 +31,11 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
     enabled: !!account.id,
   });
 
+  const hasTradingData = (dailyStats?.length ?? 0) > 0;
+
   const analysis = useMemo(() => {
+    if (!hasTradingData) return null;
+
     // Drawdown
     const drawdownPct = account.highest_balance > 0
       ? ((account.highest_balance - account.current_balance) / account.highest_balance) * 100
@@ -115,7 +119,7 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
       volatilityRatio,
       spikeDayRatio,
     };
-  }, [account, dailyStats, maxDailyLossPct, maxDrawdownPct]);
+  }, [account, dailyStats, maxDailyLossPct, maxDrawdownPct, hasTradingData]);
 
   const healthConfig: Record<HealthLevel, { icon: typeof CheckCircle2; label: string; color: string; bg: string; border: string }> = {
     stable: { icon: CheckCircle2, label: 'Stable', color: 'text-success', bg: 'bg-success/10', border: 'border-success/30' },
@@ -145,6 +149,27 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
     if (pf === 0) return '—';
     return pf.toFixed(2);
   };
+
+  if (!analysis) {
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Shield className="h-5 w-5 text-primary" />
+            Rule Health
+          </CardTitle>
+          <CardDescription>Safety rails &amp; discipline metrics</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <Shield className="h-10 w-10 text-muted-foreground/30 mb-3" />
+            <p className="text-sm text-muted-foreground">No trading data yet</p>
+            <p className="text-xs text-muted-foreground/60 mt-1">Your rule health will appear after your first trading day.</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
