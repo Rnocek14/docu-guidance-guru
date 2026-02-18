@@ -122,6 +122,9 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
   }, [account, dailyStats, maxDailyLossPct, maxDrawdownPct, hasTradingData]);
 
   if (!analysis) {
+    // Check if account summary suggests activity but daily stats are missing
+    const hasAccountActivity = account.trading_days_count > 0 || Math.abs(account.total_pnl) > 0;
+
     return (
       <Card>
         <CardHeader className="pb-3">
@@ -132,11 +135,26 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
           <CardDescription>Safety rails &amp; discipline metrics</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <Shield className="h-10 w-10 text-muted-foreground/30 mb-3" />
-            <p className="text-sm text-muted-foreground">No trading data yet</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Your rule health will appear after your first trading day.</p>
-          </div>
+          {hasAccountActivity ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <div className="rounded-full bg-warning/10 p-3 mb-3">
+                <Shield className="h-8 w-8 text-warning" />
+              </div>
+              <p className="text-sm font-medium text-foreground">Daily stats not available yet</p>
+              <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                Account activity detected; detailed stats will appear once daily data is processed.
+              </p>
+              <Badge variant="outline" className="mt-3 text-[10px] text-warning border-warning/30">
+                summary-only
+              </Badge>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Shield className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">No trading data yet</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">Your rule health will appear after your first trading day.</p>
+            </div>
+          )}
         </CardContent>
       </Card>
     );
