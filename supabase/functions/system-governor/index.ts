@@ -29,13 +29,14 @@ interface GovernorConfig {
   auto_unlock?: boolean
   strict_launch_mode?: boolean
   unlock_after_consecutive_safe?: number
-  min_net_buffer?: number // minimum net buffer to be SAFE (blocker)
+  min_net_buffer?: number
 }
 
 interface LockState {
   inbound_paused: boolean
   outbound_paused: boolean
   intake_paused: boolean
+  intake_unknown: boolean
   lock_owner: 'governor' | 'operator' | 'none'
   pause_reason: string | null
   paused_at: string | null
@@ -74,6 +75,16 @@ function parseSettingsValue(raw: unknown): Record<string, unknown> {
   return {}
 }
 
+function parseBool(raw: unknown): boolean | null {
+  if (raw === true) return true
+  if (raw === false) return false
+  if (typeof raw === 'string') {
+    if (raw.toLowerCase() === 'true') return true
+    if (raw.toLowerCase() === 'false') return false
+  }
+  return null
+}
+
 function deriveDomainResult(checks: DomainCheck[]): DomainResult {
   const blockerCount = checks.filter(c => !c.ok && c.severity === 'blocker').length
   const warningCount = checks.filter(c => !c.ok && c.severity === 'warning').length
@@ -87,31 +98,36 @@ function deriveDomainResult(checks: DomainCheck[]): DomainResult {
 // ============================================================================
 
 async function readLockState(svc: any): Promise<LockState> {
-  const psRes = await svc
-    .from('payment_system_state')
-    .select('id, is_paused_inbound, is_paused_outbound, pause_reason, paused_at')
-    .limit(1)
-    .maybeSingle()
+  const [psRes, intakeRes, ownerRes] = await Promise.all([
+    svc.from('payment_system_state')
+      .select('id, is_paused_inbound, is_paused_outbound, pause_reason, paused_at')
+      .limit(1).maybeSingle(),
+    svc.from('system_settings').select('value').eq('key', 'global_intake_active').maybeSingle(),
+    svc.from('system_settings').select('value').eq('key', 'kill_switch_owner').maybeSingle(),
+  ])
+
   const ps = psRes.data
+  const intakeActive = parseBool(intakeRes.data?.value)
+  const intakePaused = intakeActive === null ? false : !intakeActive
+  const intakeUnknown = intakeActive === null
 
-  const intakeRes = await svc
-    .from('system_settings')
-    .select('value')
-    .eq('key', 'global_intake_active')
-    .maybeSingle()
-  const intakeVal = intakeRes.data?.value
-  // intake is paused if value is explicitly false (jsonb false or string "false")
-  const intakePaused = intakeVal === false || intakeVal === 'false' || (typeof intakeVal === 'object' && intakeVal === false)
+  // Canonical lock owner from RPC-managed key
+  const ownerData = parseSettingsValue(ownerRes.data?.value)
+  const canonicalOwner = (ownerData?.owner as string) || 'none'
 
+  const anyPaused = ps?.is_paused_inbound || ps?.is_paused_outbound || intakePaused
   let lockOwner: LockState['lock_owner'] = 'none'
-  if (ps?.is_paused_inbound || ps?.is_paused_outbound || intakePaused) {
-    lockOwner = ps?.pause_reason?.startsWith('Governor') ? 'governor' : 'operator'
+  if (anyPaused) {
+    if (canonicalOwner === 'governor') lockOwner = 'governor'
+    else if (canonicalOwner === 'operator') lockOwner = 'operator'
+    else lockOwner = ps?.pause_reason?.startsWith('Governor') ? 'governor' : 'operator'
   }
 
   return {
     inbound_paused: ps?.is_paused_inbound ?? false,
     outbound_paused: ps?.is_paused_outbound ?? false,
     intake_paused: intakePaused,
+    intake_unknown: intakeUnknown,
     lock_owner: lockOwner,
     pause_reason: ps?.pause_reason ?? null,
     paused_at: ps?.paused_at ?? null,
@@ -124,7 +140,7 @@ async function readLockState(svc: any): Promise<LockState> {
 
 async function evaluateCapitalSafety(svc: any, config: GovernorConfig): Promise<DomainResult> {
   const checks: DomainCheck[] = []
-  const minBuffer = config.min_net_buffer ?? 0
+  const minBuffer = config.min_net_buffer ?? 1
 
   const settingsRes = await svc.rpc('get_liability_buffer_settings')
   const bufSettings = settingsRes.data as any
@@ -139,7 +155,6 @@ async function evaluateCapitalSafety(svc: any, config: GovernorConfig): Promise<
   const ld = liabilityRes.data as any
   const netBuffer = ld?.net_buffer ?? null
 
-  // Net buffer must exceed configured minimum (defaults to > 0)
   checks.push({
     name: `Net buffer ≥ $${minBuffer}`,
     ok: netBuffer !== null && netBuffer >= minBuffer,
@@ -147,7 +162,6 @@ async function evaluateCapitalSafety(svc: any, config: GovernorConfig): Promise<
     detail: netBuffer !== null ? `$${Math.round(netBuffer)}` : 'Unavailable',
   })
 
-  // No stuck payouts > 72h
   const stuckRes = await svc
     .from('payouts')
     .select('id')
@@ -161,7 +175,6 @@ async function evaluateCapitalSafety(svc: any, config: GovernorConfig): Promise<
     detail: (stuckRes.data?.length ?? 0) > 0 ? 'Stuck payout detected' : 'Clear',
   })
 
-  // Cash reserve configured
   checks.push({
     name: 'Cash reserve configured',
     ok: cashReserve > 0,
@@ -175,7 +188,6 @@ async function evaluateCapitalSafety(svc: any, config: GovernorConfig): Promise<
 async function evaluateProcessorSafety(svc: any, strict: boolean): Promise<DomainResult> {
   const checks: DomainCheck[] = []
 
-  // Dispute rate
   const disputeRes = await svc
     .from('cron_http_runs')
     .select('http_content, http_status')
@@ -207,7 +219,6 @@ async function evaluateProcessorSafety(svc: any, strict: boolean): Promise<Domai
     detail: disputeDetail,
   })
 
-  // Stripe key
   const stripeKey = Deno.env.get('STRIPE_SECRET_KEY')
   const hasKey = !!stripeKey && stripeKey.length > 10
   checks.push({
@@ -354,9 +365,9 @@ async function executeAutoAction(
 
   // ── NOT SAFE: enforce full lock (reconcile any missing switch) ──
   if (verdict === 'not_safe' && autoLock) {
-    const anyUnlocked = !lockState.inbound_paused || !lockState.outbound_paused || !lockState.intake_paused
+    const allLocked = lockState.inbound_paused && lockState.outbound_paused && lockState.intake_paused
 
-    if (anyUnlocked) {
+    if (!allLocked) {
       const reason = `Governor auto-lock: ${blockerSummary.slice(0, 200)}`
       const lockRes = await svc.rpc('governor_apply_lock', {
         p_action: 'lock',
@@ -532,6 +543,11 @@ Deno.serve(async (req) => {
       const autoResult = await executeAutoAction(svc, verdict, blockerSummary, config, currentStreak, lockState)
       result.autoAction = autoResult.action
       result.autoActionDetail = autoResult.detail
+
+      // Re-read lock state after auto-action to reflect true current state
+      if (autoResult.action !== 'none' && autoResult.action !== 'already_locked' && autoResult.action !== 'waiting_streak') {
+        result.lockState = await readLockState(svc)
+      }
     }
 
     // Record certification (with warnings + config snapshot)
