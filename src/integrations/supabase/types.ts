@@ -1097,6 +1097,7 @@ export type Database = {
           id: string
           processor_safe: boolean
           risk_engine_safe: boolean
+          safe_streak: number
           source: string
           verdict: string
         }
@@ -1111,6 +1112,7 @@ export type Database = {
           id?: string
           processor_safe?: boolean
           risk_engine_safe?: boolean
+          safe_streak?: number
           source?: string
           verdict: string
         }
@@ -1125,6 +1127,7 @@ export type Database = {
           id?: string
           processor_safe?: boolean
           risk_engine_safe?: boolean
+          safe_streak?: number
           source?: string
           verdict?: string
         }
@@ -3148,6 +3151,10 @@ export type Database = {
       get_user_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
+      }
+      governor_apply_lock: {
+        Args: { p_action: string; p_locked_by?: string; p_reason?: string }
+        Returns: Json
       }
       has_any_role: {
         Args: {
