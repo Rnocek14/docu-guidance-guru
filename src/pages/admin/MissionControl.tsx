@@ -218,47 +218,69 @@ function useMoneySnapshot() {
   });
 }
 
-// ── CPC hook ──
+// ── CPC hook (reads latest snapshot, does NOT compute) ──
 
-interface CpcResult {
+interface CpcSnapshot {
   score: number;
-  band: 'high' | 'medium' | 'low';
-  realizedMargin: number;
-  realizedMarginScore: number;
-  bufferCoverageRatio: number;
-  bufferCoverageScore: number;
-  passRate: number | null;
-  passRateScore: number;
-  monteCarloRuinPct: number;
-  monteCarloScore: number;
-  breakerLevel: string;
-  breakerPenalty: boolean;
-  revenue30d: number;
-  payouts30d: number;
-  pendingLiability: number;
-  netBuffer: number | null;
+  band: string;
+  realized_margin: number;
+  realized_margin_score: number;
+  buffer_coverage_ratio: number;
+  buffer_coverage_score: number;
+  pass_rate: number | null;
+  pass_rate_score: number;
+  monte_carlo_ruin_pct: number;
+  monte_carlo_score: number;
+  breaker_level: string;
+  breaker_penalty: boolean;
+  revenue_30d: number;
+  payouts_30d: number;
+  pending_liability: number;
+  net_buffer: number | null;
   source: string;
-  computedAt: string;
+  computed_at: string;
 }
 
 function useCpc() {
-  return useQuery({
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
     queryKey: ['mc-cpc'],
-    queryFn: async (): Promise<CpcResult | null> => {
+    queryFn: async (): Promise<CpcSnapshot | null> => {
+      const { data, error } = await supabase
+        .from('cpc_snapshots')
+        .select('*')
+        .order('computed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) { console.warn('CPC read failed:', error); return null; }
+      return data;
+    },
+    refetchInterval: 60_000,
+  });
+
+  // "Compute Now" calls edge function, then refetches snapshot
+  const computeNow = useMutation({
+    mutationFn: async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return null;
+      if (!session) throw new Error('Not authenticated');
       const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/compute-cpc`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        console.warn('CPC fetch failed:', body);
-        return null;
+        throw new Error(body.error || `HTTP ${res.status}`);
       }
       return res.json();
     },
-    refetchInterval: 5 * 60_000, // every 5 min
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mc-cpc'] });
+      toast.success('CPC computed');
+    },
+    onError: (err) => toast.error(`CPC error: ${(err as Error).message}`),
   });
+
+  return { ...query, computeNow };
 }
 
 // ── Components ──
@@ -562,46 +584,51 @@ export default function MissionControl() {
                 <Gauge className="h-4 w-4 text-muted-foreground" />
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cohort Profitability Confidence</p>
               </div>
-              {cpcData ? (
-                <Badge variant={cpcData.band === 'high' ? 'outline' : cpcData.band === 'medium' ? 'secondary' : 'destructive'}
-                  className={cpcData.band === 'high' ? 'border-success/50 text-success' : cpcData.band === 'medium' ? 'border-warning/50 text-warning' : ''}>
-                  {cpcData.band.toUpperCase()} ({cpcData.score})
-                </Badge>
-              ) : cpc.isLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-              ) : (
-                <Badge variant="outline" className="text-[10px] border-warning/50 text-warning">No data</Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {cpcData ? (
+                  <Badge variant={cpcData.band === 'high' ? 'outline' : cpcData.band === 'medium' ? 'secondary' : 'destructive'}
+                    className={cpcData.band === 'high' ? 'border-success/50 text-success' : cpcData.band === 'medium' ? 'border-warning/50 text-warning' : ''}>
+                    {cpcData.band.toUpperCase()} ({cpcData.score})
+                  </Badge>
+                ) : cpc.isLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                ) : (
+                  <Badge variant="outline" className="text-[10px] border-warning/50 text-warning">No data</Badge>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => cpc.computeNow.mutate()} disabled={cpc.computeNow.isPending} className="h-7 px-2">
+                  <RefreshCw className={`h-3 w-3 ${cpc.computeNow.isPending ? 'animate-spin' : ''}`} />
+                </Button>
+              </div>
             </div>
             {cpcData ? (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <CpcSubScore
                   label="Realized Margin"
-                  value={`$${cpcData.realizedMargin.toLocaleString()}`}
-                  score={cpcData.realizedMarginScore}
-                  sub={`Rev $${cpcData.revenue30d.toLocaleString()} · Pay $${cpcData.payouts30d.toLocaleString()}`}
+                  value={`$${Number(cpcData.realized_margin).toLocaleString()}`}
+                  score={Number(cpcData.realized_margin_score)}
+                  sub={`Rev $${Number(cpcData.revenue_30d).toLocaleString()} · Pay $${Number(cpcData.payouts_30d).toLocaleString()}`}
                 />
                 <CpcSubScore
                   label="Buffer Coverage"
-                  value={`${cpcData.bufferCoverageRatio}×`}
-                  score={cpcData.bufferCoverageScore}
-                  sub={`Buffer: $${cpcData.netBuffer?.toLocaleString() ?? '—'}`}
+                  value={`${cpcData.buffer_coverage_ratio}×`}
+                  score={Number(cpcData.buffer_coverage_score)}
+                  sub={`Buffer: $${cpcData.net_buffer !== null ? Number(cpcData.net_buffer).toLocaleString() : '—'}`}
                 />
                 <CpcSubScore
                   label="Stress Ruin Risk"
-                  value={`${cpcData.monteCarloRuinPct}%`}
-                  score={cpcData.monteCarloScore}
+                  value={`${cpcData.monte_carlo_ruin_pct}%`}
+                  score={Number(cpcData.monte_carlo_score)}
                   sub="Phase 2"
                 />
                 <CpcSubScore
                   label="Pass Rate"
-                  value={cpcData.passRate !== null ? `${cpcData.passRate}%` : '—'}
-                  score={cpcData.passRateScore}
-                  sub={cpcData.breakerPenalty ? `Breaker: ${cpcData.breakerLevel} (penalty)` : `Breaker: ${cpcData.breakerLevel}`}
+                  value={cpcData.pass_rate !== null ? `${(Number(cpcData.pass_rate) * 100).toFixed(1)}%` : '—'}
+                  score={Number(cpcData.pass_rate_score)}
+                  sub={cpcData.breaker_penalty ? `Breaker: ${cpcData.breaker_level} (penalty)` : `Breaker: ${cpcData.breaker_level}`}
                 />
               </div>
             ) : !cpc.isLoading && (
-              <p className="text-xs text-muted-foreground">CPC not yet computed. Run manually or wait for cron.</p>
+              <p className="text-xs text-muted-foreground">CPC not yet computed. Hit refresh or wait for cron.</p>
             )}
             {cpcData && cpcData.band === 'low' && (
               <div className="mt-3 pt-2 border-t border-destructive/20 text-xs text-destructive flex items-center gap-2">
@@ -611,7 +638,7 @@ export default function MissionControl() {
             )}
             {cpcData && (
               <div className="mt-2 pt-2 border-t border-border text-[11px] text-muted-foreground">
-                Computed {formatDistanceToNow(new Date(cpcData.computedAt), { addSuffix: true })} · Source: {cpcData.source}
+                Computed {formatDistanceToNow(new Date(cpcData.computed_at), { addSuffix: true })} · Source: {cpcData.source}
               </div>
             )}
           </CardContent>
