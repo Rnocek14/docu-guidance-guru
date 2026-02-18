@@ -1093,6 +1093,7 @@ export type Database = {
           capital_safe: boolean
           certified_at: string
           cohort_safe: boolean
+          config_snapshot: Json
           domains: Json
           id: string
           processor_safe: boolean
@@ -1100,6 +1101,7 @@ export type Database = {
           safe_streak: number
           source: string
           verdict: string
+          warnings: Json
         }
         Insert: {
           auto_action?: string | null
@@ -1108,6 +1110,7 @@ export type Database = {
           capital_safe?: boolean
           certified_at?: string
           cohort_safe?: boolean
+          config_snapshot?: Json
           domains?: Json
           id?: string
           processor_safe?: boolean
@@ -1115,6 +1118,7 @@ export type Database = {
           safe_streak?: number
           source?: string
           verdict: string
+          warnings?: Json
         }
         Update: {
           auto_action?: string | null
@@ -1123,6 +1127,7 @@ export type Database = {
           capital_safe?: boolean
           certified_at?: string
           cohort_safe?: boolean
+          config_snapshot?: Json
           domains?: Json
           id?: string
           processor_safe?: boolean
@@ -1130,6 +1135,7 @@ export type Database = {
           safe_streak?: number
           source?: string
           verdict?: string
+          warnings?: Json
         }
         Relationships: []
       }
@@ -3477,6 +3483,7 @@ export type Database = {
         Args: { _account_id: string; _request_id: string }
         Returns: Json
       }
+      update_governor_config: { Args: { p_config: Json }; Returns: Json }
       update_risk_throttle: {
         Args: {
           p_eligibility_delay_bonus_days: number
