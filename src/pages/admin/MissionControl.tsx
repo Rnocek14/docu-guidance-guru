@@ -514,6 +514,22 @@ export default function MissionControl() {
             />
           </div>
         )}
+
+        {/* ── Auto-Pilot Status ── */}
+        {gov && (
+          <Card className="border-border">
+            <CardContent className="pt-4 pb-3 px-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Auto-Pilot Status</p>
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-x-4 gap-y-1.5">
+                <AutoPilotRow ok={true} label="Auto-lock on NOT SAFE" />
+                <AutoPilotRow ok={gov.safeStreak >= 0} label="Staged unlock enabled" />
+                <AutoPilotRow ok={m?.breakerLevel !== undefined} label="Breaker active" />
+                <AutoPilotRow ok={m?.netBuffer !== null} label={`Buffer threshold: $${m?.netBuffer !== null ? Number(m?.netBuffer).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'}`} />
+                <AutoPilotRow ok={ls?.intake_paused === true || gov.verdict === 'safe'} label={gov.verdict === 'safe' ? 'Intake open (safe)' : 'Intake auto-paused'} />
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </DashboardLayout>
   );
@@ -530,5 +546,14 @@ function SnapshotTile({ label, value, signal, sub }: { label: string; value: str
         {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
       </CardContent>
     </Card>
+  );
+}
+
+function AutoPilotRow({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs">
+      {ok ? <CheckCircle2 className="h-3 w-3 text-success shrink-0" /> : <XCircle className="h-3 w-3 text-destructive shrink-0" />}
+      <span className="text-muted-foreground">{label}</span>
+    </div>
   );
 }
