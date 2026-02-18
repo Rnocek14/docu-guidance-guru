@@ -155,12 +155,13 @@ export function DashboardLayout({ children, title, navItems }: DashboardLayoutPr
                 </CollapsibleTrigger>
                 <CollapsibleContent className="space-y-0.5 mt-1 ml-2 border-l border-sidebar-border pl-2">
                   {toolsItems.length > 6 && (
-                    <div className="relative px-1 py-1">
+                    <div className="relative px-1 py-1" onClick={e => e.stopPropagation()}>
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                       <Input
                         placeholder="Filter tools…"
                         value={toolsSearch}
                         onChange={e => setToolsSearch(e.target.value)}
+                        onKeyDown={e => e.stopPropagation()}
                         className="h-7 pl-7 text-xs bg-sidebar-background border-sidebar-border"
                       />
                     </div>
