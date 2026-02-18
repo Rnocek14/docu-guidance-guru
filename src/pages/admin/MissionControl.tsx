@@ -40,6 +40,7 @@ interface GovernorResult {
   autoAction: string; autoActionDetail: string; certifiedAt: string;
   safeStreak: number; strictMode: boolean; unlockThreshold: number; lockState: LockState;
   effectiveConfig?: GovernorConfig;
+  source?: string;
 }
 
 type Signal = 'green' | 'yellow' | 'red';
@@ -565,11 +566,13 @@ export default function MissionControl() {
                   />
                 </div>
               ) : (
-                <p className="text-xs text-warning">Governor has not returned config yet. Hit "Run Now" to populate.</p>
+                <p className="text-xs text-warning">Config missing from governor response — verify edge deployment.</p>
               )}
               {/* Last run metadata */}
               <div className="flex items-center gap-3 mt-2 pt-2 border-t border-border text-[11px] text-muted-foreground">
                 <span>Last run: {formatDistanceToNow(new Date(gov.certifiedAt), { addSuffix: true })}</span>
+                <span>·</span>
+                <span>Source: <span className="font-medium text-foreground">{gov.source || '—'}</span></span>
                 <span>·</span>
                 <span>Action: <span className="font-medium text-foreground">{gov.autoAction || 'none'}</span></span>
                 {gov.strictMode && (
