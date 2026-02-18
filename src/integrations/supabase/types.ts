@@ -787,6 +787,75 @@ export type Database = {
         }
         Relationships: []
       }
+      cpc_snapshots: {
+        Row: {
+          band: string
+          breaker_level: string
+          breaker_penalty: boolean
+          buffer_coverage_ratio: number
+          buffer_coverage_score: number
+          computed_at: string
+          details: Json
+          id: string
+          monte_carlo_ruin_pct: number
+          monte_carlo_score: number
+          net_buffer: number | null
+          pass_rate: number
+          pass_rate_score: number
+          payouts_30d: number
+          pending_liability: number
+          realized_margin: number
+          realized_margin_score: number
+          revenue_30d: number
+          score: number
+          source: string
+        }
+        Insert: {
+          band?: string
+          breaker_level?: string
+          breaker_penalty?: boolean
+          buffer_coverage_ratio?: number
+          buffer_coverage_score?: number
+          computed_at?: string
+          details?: Json
+          id?: string
+          monte_carlo_ruin_pct?: number
+          monte_carlo_score?: number
+          net_buffer?: number | null
+          pass_rate?: number
+          pass_rate_score?: number
+          payouts_30d?: number
+          pending_liability?: number
+          realized_margin?: number
+          realized_margin_score?: number
+          revenue_30d?: number
+          score?: number
+          source?: string
+        }
+        Update: {
+          band?: string
+          breaker_level?: string
+          breaker_penalty?: boolean
+          buffer_coverage_ratio?: number
+          buffer_coverage_score?: number
+          computed_at?: string
+          details?: Json
+          id?: string
+          monte_carlo_ruin_pct?: number
+          monte_carlo_score?: number
+          net_buffer?: number | null
+          pass_rate?: number
+          pass_rate_score?: number
+          payouts_30d?: number
+          pending_liability?: number
+          realized_margin?: number
+          realized_margin_score?: number
+          revenue_30d?: number
+          score?: number
+          source?: string
+        }
+        Relationships: []
+      }
       cron_health_config: {
         Row: {
           created_at: string
