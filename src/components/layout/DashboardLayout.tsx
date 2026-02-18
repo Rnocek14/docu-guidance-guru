@@ -27,6 +27,7 @@ import {
   Flag,
   CreditCard,
   Activity,
+  Cpu,
 } from 'lucide-react';
 
 interface NavItem {
@@ -208,6 +209,7 @@ export const riskNavItems: NavItem[] = [
 ];
 
 export const adminNavItems: NavItem[] = [
+  { label: 'Governor', href: '/admin/governor', icon: <Cpu className="h-5 w-5" /> },
   { label: 'Dashboard', href: '/admin', icon: <LayoutDashboard className="h-5 w-5" /> },
   { label: 'System Overview', href: '/admin/system', icon: <Shield className="h-5 w-5" /> },
   { label: 'Payout Liability', href: '/admin/liability', icon: <CreditCard className="h-5 w-5" /> },

@@ -1085,6 +1085,51 @@ export type Database = {
         }
         Relationships: []
       }
+      governor_certifications: {
+        Row: {
+          auto_action: string | null
+          auto_action_detail: string | null
+          blockers: Json
+          capital_safe: boolean
+          certified_at: string
+          cohort_safe: boolean
+          domains: Json
+          id: string
+          processor_safe: boolean
+          risk_engine_safe: boolean
+          source: string
+          verdict: string
+        }
+        Insert: {
+          auto_action?: string | null
+          auto_action_detail?: string | null
+          blockers?: Json
+          capital_safe?: boolean
+          certified_at?: string
+          cohort_safe?: boolean
+          domains?: Json
+          id?: string
+          processor_safe?: boolean
+          risk_engine_safe?: boolean
+          source?: string
+          verdict: string
+        }
+        Update: {
+          auto_action?: string | null
+          auto_action_detail?: string | null
+          blockers?: Json
+          capital_safe?: boolean
+          certified_at?: string
+          cohort_safe?: boolean
+          domains?: Json
+          id?: string
+          processor_safe?: boolean
+          risk_engine_safe?: boolean
+          source?: string
+          verdict?: string
+        }
+        Relationships: []
+      }
       identity_clusters: {
         Row: {
           cluster_name: string | null
