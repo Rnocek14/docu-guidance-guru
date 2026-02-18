@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -9,13 +10,14 @@ import {
   ShieldCheck, ShieldX, AlertTriangle, CheckCircle2, XCircle,
   RefreshCw, Loader2, Activity, Cpu, TrendingUp, Zap, Lock,
   Unlock, Clock, Power, PowerOff, DollarSign, CreditCard,
-  Shield, ChevronRight, ExternalLink, Gauge,
+  Shield, ChevronRight, ExternalLink, Gauge, Save, Settings,
 } from 'lucide-react';
 import { formatDistanceToNow, differenceInHours, differenceInMinutes } from 'date-fns';
 import { toast } from 'sonner';
 import { missionControlNavItems } from '@/components/layout/AdminNav';
 import type { DomainCheck, DomainResult, LockState, GovernorConfig, GovernorResult } from '@/lib/governor/types';
 import { GovernorResultSchema } from '@/lib/governor/types';
+import { Input } from '@/components/ui/input';
 
 type Signal = 'green' | 'yellow' | 'red';
 
@@ -303,6 +305,100 @@ function SwitchDot({ paused, unknown, label }: { paused: boolean; unknown?: bool
       )}
       <span className="text-xs font-medium">{label}</span>
     </div>
+  );
+}
+
+// ── Cash Reserve Editor ──
+
+function CashReserveEditor({ onSaved }: { onSaved: () => void }) {
+  const [cashReserve, setCashReserve] = useState('');
+  const [avgPayout, setAvgPayout] = useState('');
+  const [loaded, setLoaded] = useState(false);
+
+  // Load current settings
+  const { data: settings } = useQuery({
+    queryKey: ['liability-buffer-settings'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_liability_buffer_settings');
+      if (error) throw error;
+      return data as { cash_reserve: number; assumed_avg_first_payout: number } | null;
+    },
+  });
+
+  useEffect(() => {
+    if (settings && !loaded) {
+      setCashReserve(String(settings.cash_reserve));
+      setAvgPayout(String(settings.assumed_avg_first_payout));
+      setLoaded(true);
+    }
+  }, [settings, loaded]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const cr = Number(cashReserve);
+      const avg = Number(avgPayout);
+      if (isNaN(cr) || cr < 0) throw new Error('Cash reserve must be ≥ 0');
+      if (isNaN(avg) || avg <= 0) throw new Error('Avg payout must be > 0');
+      const { error } = await supabase.rpc('upsert_liability_buffer_settings', {
+        _cash_reserve: cr,
+        _assumed_avg_first_payout: avg,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success('Cash reserve updated — re-running Governor…');
+      onSaved();
+    },
+    onError: (err) => toast.error(`Save failed: ${(err as Error).message}`),
+  });
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium flex items-center gap-2">
+          <Settings className="h-4 w-4" /> Cash Reserve Settings
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Cash Reserve ($)</label>
+            <Input
+              type="number"
+              min={0}
+              step={100}
+              value={cashReserve}
+              onChange={e => setCashReserve(e.target.value)}
+              className="w-40 h-8 text-sm"
+              placeholder="e.g. 20000"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Assumed Avg 1st Payout ($)</label>
+            <Input
+              type="number"
+              min={1}
+              step={50}
+              value={avgPayout}
+              onChange={e => setAvgPayout(e.target.value)}
+              className="w-40 h-8 text-sm"
+              placeholder="e.g. 300"
+            />
+          </div>
+          <Button
+            size="sm"
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Save className="h-3.5 w-3.5 mr-1" />}
+            Save & Recheck
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          This is your actual cash set aside for payout obligations. Net Buffer = Cash Reserve − pending liabilities − forward exposure.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -600,6 +696,9 @@ export default function MissionControl() {
             />
           </div>
         )}
+
+        {/* ── Cash Reserve Settings (inline) ── */}
+        <CashReserveEditor onSaved={() => { governor.refetch(); money.refetch(); }} />
 
         {/* ── Cohort Profitability Confidence ── */}
         <Card className={`border ${
