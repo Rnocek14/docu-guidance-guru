@@ -529,39 +529,55 @@ export default function MissionControl() {
         {gov && (
           <Card className="border-border">
             <CardContent className="pt-4 pb-3 px-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Auto-Pilot Status</p>
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2">
-                {/* Auto-lock */}
-                <AutoPilotRow
-                  ok={cfg?.auto_lock !== false}
-                  label={`Auto-lock: ${cfg?.auto_lock !== false ? 'ON' : 'OFF'}`}
-                />
-                {/* Staged unlock */}
-                <AutoPilotRow
-                  ok={cfg?.auto_unlock !== false}
-                  label={`Staged unlock: ${cfg?.auto_unlock !== false ? 'ON' : 'OFF'} (${gov.safeStreak}/${gov.unlockThreshold})`}
-                />
-                {/* Owner protection */}
-                <AutoPilotRow
-                  ok={true}
-                  label={`Owner: ${ls?.lock_owner ?? 'none'}`}
-                />
-                {/* Intake 3-way */}
-                <AutoPilotRow
-                  ok={!ls?.intake_unknown && (gov.verdict === 'safe' ? !ls?.intake_paused : ls?.intake_paused === true)}
-                  label={`Intake: ${ls?.intake_unknown ? 'UNKNOWN' : ls?.intake_paused ? 'PAUSED' : 'ACTIVE'}`}
-                  warn={ls?.intake_unknown}
-                />
-                {/* Breaker + pass rate */}
-                <AutoPilotRow
-                  ok={m?.breakerLevel === 'normal'}
-                  label={`Breaker: ${m?.breakerLevel?.toUpperCase() ?? '—'} · Pass rate: ${m?.passRate !== null && m?.passRate !== undefined ? `${Number(m.passRate).toFixed(1)}%` : '—'}`}
-                />
-                {/* Buffer: min + current */}
-                <AutoPilotRow
-                  ok={m?.netBuffer !== null && cfg?.min_net_buffer !== undefined ? Number(m?.netBuffer) >= cfg.min_net_buffer : m?.netBuffer !== null}
-                  label={`Buffer: $${m?.netBuffer !== null && m?.netBuffer !== undefined ? Number(m.netBuffer).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'} / min $${cfg?.min_net_buffer !== undefined ? cfg.min_net_buffer.toLocaleString() : '—'}`}
-                />
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Auto-Pilot Status</p>
+                {!cfg && (
+                  <Badge variant="outline" className="border-warning/50 text-warning text-[10px]">Config unavailable</Badge>
+                )}
+              </div>
+              {cfg ? (
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2">
+                  <AutoPilotRow
+                    ok={cfg.auto_lock !== false}
+                    label={`Auto-lock: ${cfg.auto_lock !== false ? 'ON' : 'OFF'}`}
+                  />
+                  <AutoPilotRow
+                    ok={cfg.auto_unlock !== false}
+                    label={`Staged unlock: ${cfg.auto_unlock !== false ? 'ON' : 'OFF'} (${gov.safeStreak}/${gov.unlockThreshold})`}
+                  />
+                  <AutoPilotRow
+                    ok={true}
+                    label={`Owner: ${ls?.lock_owner ?? 'none'}`}
+                  />
+                  <AutoPilotRow
+                    ok={!ls?.intake_unknown && (gov.verdict === 'safe' ? !ls?.intake_paused : ls?.intake_paused === true)}
+                    label={`Intake: ${ls?.intake_unknown ? 'UNKNOWN — global_intake_active unset' : ls?.intake_paused ? 'PAUSED' : 'ACTIVE'}`}
+                    warn={ls?.intake_unknown}
+                  />
+                  <AutoPilotRow
+                    ok={m?.breakerLevel === 'normal'}
+                    label={`Breaker: ${m?.breakerLevel?.toUpperCase() ?? '—'} · Pass rate: ${m?.passRate !== null && m?.passRate !== undefined ? `${Number(m.passRate).toFixed(1)}%` : '—'}`}
+                    warn={m?.passRate === null || m?.passRate === undefined}
+                  />
+                  <AutoPilotRow
+                    ok={m?.netBuffer !== null && cfg.min_net_buffer !== undefined ? Number(m?.netBuffer) >= cfg.min_net_buffer : m?.netBuffer !== null}
+                    label={`Buffer: $${m?.netBuffer !== null && m?.netBuffer !== undefined ? Number(m.netBuffer).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'} / min $${cfg.min_net_buffer !== undefined ? cfg.min_net_buffer.toLocaleString() : '—'}`}
+                  />
+                </div>
+              ) : (
+                <p className="text-xs text-warning">Governor has not returned config yet. Hit "Run Now" to populate.</p>
+              )}
+              {/* Last run metadata */}
+              <div className="flex items-center gap-3 mt-2 pt-2 border-t border-border text-[11px] text-muted-foreground">
+                <span>Last run: {formatDistanceToNow(new Date(gov.certifiedAt), { addSuffix: true })}</span>
+                <span>·</span>
+                <span>Action: <span className="font-medium text-foreground">{gov.autoAction || 'none'}</span></span>
+                {gov.strictMode && (
+                  <>
+                    <span>·</span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-warning/50 text-warning">Strict Mode</Badge>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>
