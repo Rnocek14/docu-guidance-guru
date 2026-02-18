@@ -76,7 +76,24 @@ Deno.serve(async (req) => {
   try {
     // Auth: cron secret OR admin JWT (for "Run now" button)
     const authHeader = req.headers.get('Authorization') ?? ''
-    const cronSecret = Deno.env.get('CRON_SECRET') ?? ''
+
+    // Resolve CRON_SECRET: prefer env var, fallback to internal_secrets table
+    let cronSecret = Deno.env.get('CRON_SECRET') ?? ''
+    if (!cronSecret) {
+      try {
+        const sbLookup = createClient(
+          Deno.env.get('SUPABASE_URL')!,
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+        )
+        const { data } = await sbLookup
+          .from('internal_secrets')
+          .select('value')
+          .eq('key', 'CRON_SECRET')
+          .single()
+        cronSecret = data?.value ?? ''
+      } catch { /* best effort */ }
+    }
+
     const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`
 
     let isAdmin = false
