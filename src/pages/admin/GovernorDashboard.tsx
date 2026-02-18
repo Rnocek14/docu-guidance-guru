@@ -26,6 +26,14 @@ interface LockState {
   pause_reason: string | null;
   paused_at: string | null;
 }
+interface GovernorConfig {
+  enabled?: boolean;
+  auto_lock?: boolean;
+  auto_unlock?: boolean;
+  min_net_buffer?: number;
+  unlock_after_consecutive_safe?: number;
+  strict_launch_mode?: boolean;
+}
 interface GovernorResult {
   verdict: 'safe' | 'not_safe' | 'error';
   capital: DomainResult;
@@ -41,6 +49,8 @@ interface GovernorResult {
   strictMode: boolean;
   unlockThreshold: number;
   lockState: LockState;
+  effectiveConfig?: GovernorConfig;
+  source?: string;
 }
 
 interface CertHistory {
