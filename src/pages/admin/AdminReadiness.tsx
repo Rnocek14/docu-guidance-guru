@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -100,7 +101,7 @@ export default function AdminReadiness() {
 
   if (error) {
     return (
-      <DashboardLayout title="Launch Readiness" navItems={adminNavItems}>
+      <DashboardLayout title="Launch Readiness" navItems={missionControlNavItems}>
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>{(error as Error).message}</AlertDescription>
@@ -110,7 +111,7 @@ export default function AdminReadiness() {
   }
 
   return (
-    <DashboardLayout title="Launch Readiness" navItems={adminNavItems}>
+    <DashboardLayout title="Launch Readiness" navItems={missionControlNavItems}>
       <div className="space-y-6 max-w-5xl">
         {/* Header */}
         <div className="flex items-center justify-between">

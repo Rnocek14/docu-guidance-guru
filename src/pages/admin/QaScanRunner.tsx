@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -144,7 +145,7 @@ export default function QaScanRunner() {
   }, {}) ?? {};
 
   return (
-    <DashboardLayout title="QA Scan Runner" navItems={adminNavItems}>
+    <DashboardLayout title="QA Scan Runner" navItems={missionControlNavItems}>
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Full QA Scan</h2>

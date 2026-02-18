@@ -1,4 +1,5 @@
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -352,7 +353,7 @@ export default function SystemOverview() {
 
   if (isLoading) {
     return (
-      <DashboardLayout title="System Overview" navItems={adminNavItems}>
+      <DashboardLayout title="System Overview" navItems={missionControlNavItems}>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
@@ -361,7 +362,7 @@ export default function SystemOverview() {
   }
 
   return (
-    <DashboardLayout title="System Overview" navItems={adminNavItems}>
+    <DashboardLayout title="System Overview" navItems={missionControlNavItems}>
       <div className="space-y-6">
         {/* Header with refresh */}
         <div className="flex items-center justify-between">

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -189,7 +190,7 @@ export default function GovernorDashboard() {
   const ls = data?.lockState;
 
   return (
-    <DashboardLayout title="System Governor" navItems={adminNavItems}>
+    <DashboardLayout title="System Governor" navItems={missionControlNavItems}>
       <div className="space-y-6 max-w-6xl">
         {/* Header */}
         <div className="flex items-center justify-between">

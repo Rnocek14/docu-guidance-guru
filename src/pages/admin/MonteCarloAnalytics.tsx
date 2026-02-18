@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -271,7 +272,7 @@ export default function MonteCarloAnalytics() {
   }, [result, comparison]);
 
   return (
-    <DashboardLayout title="Monte Carlo Analytics" navItems={adminNavItems}>
+    <DashboardLayout title="Monte Carlo Analytics" navItems={missionControlNavItems}>
       <div className="space-y-6">
         {/* Header */}
         <div>

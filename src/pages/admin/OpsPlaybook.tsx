@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -270,7 +271,7 @@ export default function OpsPlaybook() {
   }, [hash]);
 
   return (
-    <DashboardLayout title="Ops Playbook" navItems={adminNavItems}>
+    <DashboardLayout title="Ops Playbook" navItems={missionControlNavItems}>
       <div className="space-y-6 max-w-4xl">
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">

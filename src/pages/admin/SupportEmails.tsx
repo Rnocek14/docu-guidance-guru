@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { DashboardLayout, adminNavItems } from '@/components/layout/DashboardLayout';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -288,7 +289,7 @@ export default function SupportEmails() {
   };
 
   return (
-    <DashboardLayout title="AI Email Triage" navItems={adminNavItems}>
+    <DashboardLayout title="AI Email Triage" navItems={missionControlNavItems}>
       <div className="space-y-4">
         {/* Quick filter chips */}
         <div className="flex flex-wrap gap-2 items-center">
