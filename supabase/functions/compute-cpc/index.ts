@@ -21,15 +21,14 @@ function scoreRealizedMargin(revenue: number, payouts: number): number {
   const ratio = margin / revenue
   if (ratio >= 0.3) return 1.0
   if (ratio >= 0) return 0.7 + (ratio / 0.3) * 0.3
-  // Negative margin
   if (ratio >= -0.5) return Math.max(0, 0.7 + ratio * 1.4)
   return 0
 }
 
-/** Buffer coverage sub-score (0–1). Coverage = netBuffer / max(liability, 1) */
-function scoreBufferCoverage(netBuffer: number | null, liability: number): number {
+/** Buffer coverage sub-score (0–1). Coverage = netBuffer / max(inFlightPayouts, 1) */
+function scoreBufferCoverage(netBuffer: number | null, inFlightPayouts: number): number {
   if (netBuffer === null) return 0.3 // unknown = pessimistic
-  const effective = Math.max(liability, 1)
+  const effective = Math.max(inFlightPayouts, 1)
   const ratio = netBuffer / effective
   if (ratio >= 3) return 1.0
   if (ratio >= 2) return 0.85
@@ -38,15 +37,15 @@ function scoreBufferCoverage(netBuffer: number | null, liability: number): numbe
   return 0
 }
 
-/** Pass rate sub-score (0–1). In-band = ≤15%. Structural break = 35%+ */
+/** Pass rate sub-score (0–1). null = unknown = 0.5 */
 function scorePassRate(passRate: number | null): number {
-  if (passRate === null) return 0.5 // no data
+  if (passRate === null) return 0.5
   const pct = passRate * 100
   if (pct <= 10) return 1.0
   if (pct <= 15) return 0.8
   if (pct <= 20) return 0.6
   if (pct <= 30) return 0.3
-  return 0 // ≥30% structural risk
+  return 0
 }
 
 /** CPC band from weighted score */
@@ -102,24 +101,29 @@ Deno.serve(async (req) => {
 
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
+    // ── Fix #5: Fetch previous band BEFORE inserting ──
+    const prevRes = await svc
+      .from('cpc_snapshots')
+      .select('band')
+      .order('computed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const prevBand = prevRes.data?.band ?? null
+
     // Parallel fetch all inputs
-    const [revenueRes, payoutsRes, breakerRes, liabilitySettingsRes, pendingRes] = await Promise.all([
-      // Revenue = successful inbound payment transactions (last 30d)
+    const [revenueRes, payoutsRes, breakerRes, liabilitySettingsRes, inFlightRes] = await Promise.all([
       svc.from('payment_transactions')
         .select('amount')
         .eq('direction', 'inbound')
         .eq('status', 'completed')
         .gte('created_at', thirtyDaysAgo),
-      // Payouts paid out (last 30d)
       svc.from('payouts')
         .select('amount')
         .in('status', ['paid', 'paid_confirmed'])
         .gte('paid_at', thirtyDaysAgo),
-      // Breaker state
       svc.from('econ_breaker_state').select('*').limit(1).maybeSingle(),
-      // Liability buffer settings
       svc.rpc('get_liability_buffer_settings'),
-      // Pending + in-flight payouts (forward liability)
+      // Fix #2: renamed to inFlightPayouts (not "liability")
       svc.from('payouts')
         .select('amount')
         .in('status', ['pending', 'under_review', 'approved', 'payment_initiated']),
@@ -127,13 +131,13 @@ Deno.serve(async (req) => {
 
     const revenue30d = (revenueRes.data || []).reduce((s, r) => s + Number(r.amount || 0), 0)
     const payouts30d = (payoutsRes.data || []).reduce((s, p) => s + Number(p.amount || 0), 0)
-    const pendingLiability = (pendingRes.data || []).reduce((s, p) => s + Number(p.amount || 0), 0)
+    const inFlightPayouts = (inFlightRes.data || []).reduce((s, p) => s + Number(p.amount || 0), 0)
 
     const breaker = breakerRes.data
-    const passRate = breaker?.rolling_pass_rate ?? null
+    // Fix #1: keep null when unknown, never coerce to 0
+    const passRate: number | null = breaker?.rolling_pass_rate ?? null
     const breakerLevel = breaker?.breaker_level ?? 'normal'
 
-    // Get net buffer from liability snapshot
     const bufSettings = liabilitySettingsRes.data as any
     const cashReserve = bufSettings?.cash_reserve ?? 0
     const assumedAvg = bufSettings?.assumed_avg_first_payout ?? 300
@@ -147,17 +151,16 @@ Deno.serve(async (req) => {
 
     // Compute sub-scores
     const realizedMarginScore = scoreRealizedMargin(revenue30d, payouts30d)
-    const bufferCoverageRatio = netBuffer !== null ? netBuffer / Math.max(pendingLiability, 1) : 0
-    const bufferCoverageScore = scoreBufferCoverage(netBuffer, pendingLiability)
+    // Fix #3: coverage against inFlightPayouts (proxy, labeled clearly)
+    const bufferCoverageRatio = netBuffer !== null ? netBuffer / Math.max(inFlightPayouts, 1) : 0
+    const bufferCoverageScore = scoreBufferCoverage(netBuffer, inFlightPayouts)
     const passRateScore = scorePassRate(passRate)
-    const monteCarloScore = 1.0 // Phase 2: integrate Monte Carlo stress
+    const monteCarloScore = 1.0 // Phase 2
     const monteCarloRuinPct = 0 // Phase 2
 
-    // Breaker penalty: if elevated/critical, drop one tier worth
     const breakerPenalty = breakerLevel !== 'normal'
     const breakerAdjustment = breakerPenalty ? -0.15 : 0
 
-    // Weighted CPC score
     const rawScore =
       realizedMarginScore * 0.30 +
       bufferCoverageScore * 0.25 +
@@ -166,6 +169,7 @@ Deno.serve(async (req) => {
 
     const score = Math.max(0, Math.min(1, rawScore + breakerAdjustment))
     const band = cpcBand(score)
+    const computedAt = new Date().toISOString()
 
     const result = {
       score: Math.round(score * 100) / 100,
@@ -174,6 +178,7 @@ Deno.serve(async (req) => {
       realizedMarginScore: Math.round(realizedMarginScore * 100) / 100,
       bufferCoverageRatio: Math.round(bufferCoverageRatio * 100) / 100,
       bufferCoverageScore: Math.round(bufferCoverageScore * 100) / 100,
+      // Fix #1: null when unknown
       passRate: passRate !== null ? Math.round(passRate * 10000) / 100 : null,
       passRateScore: Math.round(passRateScore * 100) / 100,
       monteCarloRuinPct,
@@ -182,21 +187,24 @@ Deno.serve(async (req) => {
       breakerPenalty,
       revenue30d: Math.round(revenue30d),
       payouts30d: Math.round(payouts30d),
-      pendingLiability: Math.round(pendingLiability),
+      // Fix #2: renamed field
+      inFlightPayouts: Math.round(inFlightPayouts),
       netBuffer: netBuffer !== null ? Math.round(netBuffer) : null,
       source,
-      computedAt: new Date().toISOString(),
+      computedAt,
     }
 
-    // Persist snapshot
+    // Fix #4: pass computed_at explicitly
     await svc.from('cpc_snapshots').insert({
+      computed_at: computedAt,
       score: result.score,
       band: result.band,
       realized_margin: result.realizedMargin,
       realized_margin_score: result.realizedMarginScore,
       buffer_coverage_ratio: result.bufferCoverageRatio,
       buffer_coverage_score: result.bufferCoverageScore,
-      pass_rate: passRate ?? 0,
+      // Fix #1: store null, not 0
+      pass_rate: passRate,
       pass_rate_score: result.passRateScore,
       monte_carlo_ruin_pct: result.monteCarloRuinPct,
       monte_carlo_score: result.monteCarloScore,
@@ -204,21 +212,13 @@ Deno.serve(async (req) => {
       breaker_penalty: result.breakerPenalty,
       revenue_30d: result.revenue30d,
       payouts_30d: result.payouts30d,
-      pending_liability: result.pendingLiability,
+      pending_liability: result.inFlightPayouts,
       net_buffer: result.netBuffer,
       source: result.source,
       details: result,
     })
 
-    // Alert on band drop
-    const prevRes = await svc
-      .from('cpc_snapshots')
-      .select('band')
-      .order('computed_at', { ascending: false })
-      .range(1, 1) // second-most-recent (we just inserted the latest)
-      .maybeSingle()
-
-    const prevBand = prevRes.data?.band
+    // Fix #5: compare against prevBand fetched before insert
     const bandOrder = { high: 2, medium: 1, low: 0 }
     if (prevBand && bandOrder[band as keyof typeof bandOrder] < bandOrder[prevBand as keyof typeof bandOrder]) {
       await svc.from('staff_notifications').insert({
