@@ -20,6 +20,7 @@ interface LockState {
   inbound_paused: boolean;
   outbound_paused: boolean;
   intake_paused: boolean;
+  intake_unknown: boolean;
   lock_owner: 'governor' | 'operator' | 'none';
   pause_reason: string | null;
   paused_at: string | null;
@@ -61,7 +62,16 @@ const DOMAIN_META: Record<string, { icon: typeof ShieldCheck; label: string; col
   riskEngine: { icon: Cpu, label: 'Risk Engine Integrity', color: 'text-chart-4' },
 };
 
-function SwitchIndicator({ label, paused }: { label: string; paused: boolean }) {
+function SwitchIndicator({ label, paused, unknown }: { label: string; paused: boolean; unknown?: boolean }) {
+  if (unknown) {
+    return (
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4 text-warning" />
+        <span className="text-sm font-medium">{label}</span>
+        <Badge variant="outline" className="border-warning/50 text-warning">UNKNOWN</Badge>
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-2">
       {paused ? (
@@ -227,7 +237,7 @@ export default function GovernorDashboard() {
                     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Kill Switches</p>
                     <SwitchIndicator label="Inbound" paused={ls?.inbound_paused ?? false} />
                     <SwitchIndicator label="Outbound" paused={ls?.outbound_paused ?? false} />
-                    <SwitchIndicator label="Intake" paused={ls?.intake_paused ?? false} />
+                    <SwitchIndicator label="Intake" paused={ls?.intake_paused ?? false} unknown={ls?.intake_unknown} />
                   </div>
 
                   {/* Lock owner */}
