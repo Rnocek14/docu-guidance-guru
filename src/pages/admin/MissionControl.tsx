@@ -103,7 +103,7 @@ function useActionItems() {
           .eq('status', 'pending').order('created_at', { ascending: false }).limit(10),
         supabase.from('cron_health_config').select('*').eq('enabled', true),
         supabase.from('cron_http_runs').select('jobname, http_status, ran_at')
-          .order('ran_at', { ascending: false }).limit(200),
+          .order('ran_at', { ascending: false }).limit(1000),
         supabase.from('payout_payments').select('id, payout_id, status, initiated_at')
           .eq('status', 'failed').limit(10),
       ]);
