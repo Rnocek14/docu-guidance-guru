@@ -1,51 +1,29 @@
 import "https://deno.land/std@0.224.0/dotenv/load.ts";
 import { assertEquals, assertExists } from "https://deno.land/std@0.224.0/assert/mod.ts";
 
-const SUPABASE_URL = Deno.env.get("VITE_SUPABASE_URL")!;
-const SUPABASE_ANON_KEY = Deno.env.get("VITE_SUPABASE_PUBLISHABLE_KEY")!;
+Deno.test("system-governor contract invariants (cron path)", async () => {
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || Deno.env.get("VITE_SUPABASE_URL");
+  const CRON_SECRET = Deno.env.get("CRON_SECRET");
 
-Deno.test("governor response includes effectiveConfig, source, and lockState", async () => {
-  // Sign in as admin to get a token
-  const signInRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify({
-      email: Deno.env.get("TEST_ADMIN_EMAIL"),
-      password: Deno.env.get("TEST_ADMIN_PASSWORD"),
-    }),
-  });
-  const signInBody = await signInRes.json();
-
-  // If no test admin creds, skip gracefully
-  if (!signInBody.access_token) {
-    console.warn("⚠ Skipping: no TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD configured");
+  if (!SUPABASE_URL || !CRON_SECRET) {
+    console.warn("⚠ Skipping: SUPABASE_URL / CRON_SECRET not configured");
     return;
   }
 
   const res = await fetch(`${SUPABASE_URL}/functions/v1/system-governor`, {
-    headers: { Authorization: `Bearer ${signInBody.access_token}` },
+    headers: { Authorization: `Bearer ${CRON_SECRET}` },
   });
-  const body = await res.json();
+
+  const body = await res.json().catch(() => ({}));
 
   assertEquals(res.status, 200, `Expected 200, got ${res.status}: ${JSON.stringify(body)}`);
 
   // ── Core invariants ──
   assertExists(body.verdict, "verdict missing");
-  assertEquals(
-    ["safe", "not_safe", "error"].includes(body.verdict),
-    true,
-    `verdict must be safe|not_safe|error, got: ${body.verdict}`,
-  );
+  assertEquals(["safe", "not_safe"].includes(body.verdict), true, `verdict must be safe|not_safe, got: ${body.verdict}`);
 
   assertExists(body.source, "source missing");
-  assertEquals(
-    ["cron", "manual"].includes(body.source),
-    true,
-    `source must be cron|manual, got: ${body.source}`,
-  );
+  assertEquals(["cron", "manual"].includes(body.source), true, `source must be cron|manual, got: ${body.source}`);
 
   // ── effectiveConfig invariants ──
   assertExists(body.effectiveConfig, "effectiveConfig missing");
@@ -69,7 +47,7 @@ Deno.test("governor response includes effectiveConfig, source, and lockState", a
   );
 
   // ── Domain results exist ──
-  for (const domain of ["capital", "processor", "cohort", "riskEngine"]) {
+  for (const domain of ["capital", "processor", "cohort", "riskEngine"] as const) {
     assertExists(body[domain], `${domain} domain missing`);
     assertEquals(typeof body[domain].safe, "boolean", `${domain}.safe must be boolean`);
     assertEquals(Array.isArray(body[domain].checks), true, `${domain}.checks must be array`);
