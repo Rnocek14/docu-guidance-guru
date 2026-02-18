@@ -212,7 +212,7 @@ Deno.serve(async (req) => {
       breaker_penalty: result.breakerPenalty,
       revenue_30d: result.revenue30d,
       payouts_30d: result.payouts30d,
-      pending_liability: result.inFlightPayouts,
+      in_flight_payouts: result.inFlightPayouts,
       net_buffer: result.netBuffer,
       source: result.source,
       details: result,
@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
         severity: band === 'low' ? 'critical' : 'warning',
         title: `📉 CPC dropped: ${prevBand.toUpperCase()} → ${band.toUpperCase()} (${result.score})`,
         body: `Margin: $${result.realizedMargin.toLocaleString()} | Buffer: ${result.bufferCoverageRatio}× | Pass rate: ${result.passRate ?? '—'}%`,
-        dedup_key: `cpc-drop-${new Date().toISOString().slice(0, 13)}`,
+        idempotency_key: `cpc-drop-${new Date().toISOString().slice(0, 13)}`,
       })
     }
 
