@@ -24,6 +24,14 @@ interface LockState {
   intake_unknown: boolean; lock_owner: 'governor' | 'operator' | 'none';
   pause_reason: string | null; paused_at: string | null;
 }
+interface GovernorConfig {
+  enabled?: boolean;
+  auto_lock?: boolean;
+  auto_unlock?: boolean;
+  min_net_buffer?: number;
+  unlock_after_consecutive_safe?: number;
+  strict_launch_mode?: boolean;
+}
 interface GovernorResult {
   verdict: 'safe' | 'not_safe' | 'error';
   capital: DomainResult; processor: DomainResult; cohort: DomainResult; riskEngine: DomainResult;
@@ -31,6 +39,7 @@ interface GovernorResult {
   warnings: { domain: string; detail: string }[];
   autoAction: string; autoActionDetail: string; certifiedAt: string;
   safeStreak: number; strictMode: boolean; unlockThreshold: number; lockState: LockState;
+  effectiveConfig?: GovernorConfig;
 }
 
 type Signal = 'green' | 'yellow' | 'red';
@@ -254,6 +263,7 @@ export default function MissionControl() {
 
   const gov = governor.data;
   const ls = gov?.lockState;
+  const cfg = gov?.effectiveConfig;
   const isLoading = governor.isLoading;
 
   const refetchAll = () => {
@@ -520,12 +530,38 @@ export default function MissionControl() {
           <Card className="border-border">
             <CardContent className="pt-4 pb-3 px-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Auto-Pilot Status</p>
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-x-4 gap-y-1.5">
-                <AutoPilotRow ok={true} label="Auto-lock on NOT SAFE" />
-                <AutoPilotRow ok={gov.safeStreak >= 0} label="Staged unlock enabled" />
-                <AutoPilotRow ok={m?.breakerLevel !== undefined} label="Breaker active" />
-                <AutoPilotRow ok={m?.netBuffer !== null} label={`Buffer threshold: $${m?.netBuffer !== null ? Number(m?.netBuffer).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'}`} />
-                <AutoPilotRow ok={ls?.intake_paused === true || gov.verdict === 'safe'} label={gov.verdict === 'safe' ? 'Intake open (safe)' : 'Intake auto-paused'} />
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2">
+                {/* Auto-lock */}
+                <AutoPilotRow
+                  ok={cfg?.auto_lock !== false}
+                  label={`Auto-lock: ${cfg?.auto_lock !== false ? 'ON' : 'OFF'}`}
+                />
+                {/* Staged unlock */}
+                <AutoPilotRow
+                  ok={cfg?.auto_unlock !== false}
+                  label={`Staged unlock: ${cfg?.auto_unlock !== false ? 'ON' : 'OFF'} (${gov.safeStreak}/${gov.unlockThreshold})`}
+                />
+                {/* Owner protection */}
+                <AutoPilotRow
+                  ok={true}
+                  label={`Owner: ${ls?.lock_owner ?? 'none'}`}
+                />
+                {/* Intake 3-way */}
+                <AutoPilotRow
+                  ok={!ls?.intake_unknown && (gov.verdict === 'safe' ? !ls?.intake_paused : ls?.intake_paused === true)}
+                  label={`Intake: ${ls?.intake_unknown ? 'UNKNOWN' : ls?.intake_paused ? 'PAUSED' : 'ACTIVE'}`}
+                  warn={ls?.intake_unknown}
+                />
+                {/* Breaker + pass rate */}
+                <AutoPilotRow
+                  ok={m?.breakerLevel === 'normal'}
+                  label={`Breaker: ${m?.breakerLevel?.toUpperCase() ?? '—'} · Pass rate: ${m?.passRate !== null && m?.passRate !== undefined ? `${Number(m.passRate).toFixed(1)}%` : '—'}`}
+                />
+                {/* Buffer: min + current */}
+                <AutoPilotRow
+                  ok={m?.netBuffer !== null && cfg?.min_net_buffer !== undefined ? Number(m?.netBuffer) >= cfg.min_net_buffer : m?.netBuffer !== null}
+                  label={`Buffer: $${m?.netBuffer !== null && m?.netBuffer !== undefined ? Number(m.netBuffer).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'} / min $${cfg?.min_net_buffer !== undefined ? cfg.min_net_buffer.toLocaleString() : '—'}`}
+                />
               </div>
             </CardContent>
           </Card>
@@ -549,10 +585,16 @@ function SnapshotTile({ label, value, signal, sub }: { label: string; value: str
   );
 }
 
-function AutoPilotRow({ ok, label }: { ok: boolean; label: string }) {
+function AutoPilotRow({ ok, label, warn }: { ok: boolean; label: string; warn?: boolean }) {
   return (
     <div className="flex items-center gap-1.5 text-xs">
-      {ok ? <CheckCircle2 className="h-3 w-3 text-success shrink-0" /> : <XCircle className="h-3 w-3 text-destructive shrink-0" />}
+      {warn ? (
+        <AlertTriangle className="h-3 w-3 text-warning shrink-0" />
+      ) : ok ? (
+        <CheckCircle2 className="h-3 w-3 text-success shrink-0" />
+      ) : (
+        <XCircle className="h-3 w-3 text-destructive shrink-0" />
+      )}
       <span className="text-muted-foreground">{label}</span>
     </div>
   );
