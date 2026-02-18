@@ -2,13 +2,12 @@ import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, TrendingDown, AlertTriangle, Target, Calendar, DollarSign, Eye } from 'lucide-react';
+import { TrendingUp, Target } from 'lucide-react';
 import type { Account, Cohort, PayoutEligibility } from '@/lib/types';
 import { isTerminalPaid } from '@/lib/types';
 import { AccountPhaseIndicator } from '@/components/trader/AccountPhaseIndicator';
@@ -20,6 +19,7 @@ import { SafeDayPanel } from '@/components/trader/SafeDayPanel';
 import { ConsistencyPreviewCard } from '@/components/trader/ConsistencyPreviewCard';
 import { PortfolioOverview } from '@/components/trader/PortfolioOverview';
 import { AccountSwitcher, sortAccounts } from '@/components/trader/AccountSwitcher';
+import { SmartGreeting } from '@/components/trader/SmartGreeting';
 
 export default function TraderDashboard() {
   const { user } = useAuth();
@@ -95,43 +95,11 @@ export default function TraderDashboard() {
     enabled: !!activeAccount?.id && isPerformanceAccount,
   });
 
-  const getStatusBadge = (status: string) => {
-    const variants: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-      active: 'default',
-      passed: 'secondary',
-      breached_detected: 'destructive',
-      under_review: 'outline',
-      failed_confirmed: 'destructive',
-    };
-    return (
-      <Badge variant={variants[status] || 'secondary'}>
-        {status.replace('_', ' ')}
-      </Badge>
-    );
-  };
-
-  const calculateDrawdown = (account: Account) => {
-    if (!account) return 0;
-    const drawdown = ((account.highest_balance - account.current_balance) / account.highest_balance) * 100;
-    return Math.max(0, drawdown);
-  };
-
-  const calculateProgress = (account: Account & { cohort: Cohort }) => {
-    if (!account?.cohort) return 0;
-    const profitPercent = (account.total_pnl / account.starting_balance) * 100;
-    return Math.min(100, (profitPercent / account.cohort.profit_target_percent) * 100);
-  };
-
   return (
     <DashboardLayout title="Trader Dashboard" navItems={traderNavItems}>
       <div className="space-y-6">
-        {/* Welcome section */}
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Welcome back</h2>
-          <p className="text-muted-foreground">
-            Here's an overview of your trading challenge progress.
-          </p>
-        </div>
+        {/* Smart greeting */}
+        <SmartGreeting accounts={accounts ?? []} />
 
         {isLoading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -177,179 +145,30 @@ export default function TraderDashboard() {
                   />
                 )}
 
-                {/* Stats grid */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Current Balance</CardTitle>
-                      <DollarSign className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">
-                        ${activeAccount.current_balance.toLocaleString()}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Started at ${activeAccount.starting_balance.toLocaleString()}
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Total P&L</CardTitle>
-                      {activeAccount.total_pnl >= 0 ? (
-                        <TrendingUp className="h-4 w-4 text-success" />
-                      ) : (
-                        <TrendingDown className="h-4 w-4 text-destructive" />
-                      )}
-                    </CardHeader>
-                    <CardContent>
-                      <div
-                        className={`text-2xl font-bold ${
-                          activeAccount.total_pnl >= 0 ? 'text-success' : 'text-destructive'
-                        }`}
-                      >
-                        {activeAccount.total_pnl >= 0 ? '+' : ''}
-                        ${activeAccount.total_pnl.toLocaleString()}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {((activeAccount.total_pnl / activeAccount.starting_balance) * 100).toFixed(2)}% simulated return
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Current Drawdown</CardTitle>
-                      <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">
-                        {calculateDrawdown(activeAccount).toFixed(2)}%
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Max allowed: {activeAccount.cohort?.max_total_drawdown_percent}%
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Trading Days</CardTitle>
-                      <Calendar className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">{activeAccount.trading_days_count}</div>
-                      <p className="text-xs text-muted-foreground">
-                        Minimum: {activeAccount.cohort?.min_trading_days} days
-                      </p>
-                    </CardContent>
-                  </Card>
+                {/* Primary zone: Equity Curve + Rule Health side-by-side */}
+                <div className="grid gap-4 lg:grid-cols-5">
+                  <div className="lg:col-span-3">
+                    <EquityCurveChart
+                      accountId={activeAccount.id}
+                      startingBalance={activeAccount.starting_balance}
+                      maxDrawdownPct={activeAccount.cohort?.max_total_drawdown_percent ?? 10}
+                      profitTargetPct={activeAccount.cohort?.profit_target_percent ?? 10}
+                      minTradingDays={activeAccount.cohort?.min_trading_days ?? 5}
+                    />
+                  </div>
+                  <div className="lg:col-span-2">
+                    <RuleHealthCard account={activeAccount} />
+                  </div>
                 </div>
 
-                {/* Equity Curve */}
-                <EquityCurveChart
-                  accountId={activeAccount.id}
-                  startingBalance={activeAccount.starting_balance}
-                  maxDrawdownPct={activeAccount.cohort?.max_total_drawdown_percent ?? 10}
-                  profitTargetPct={activeAccount.cohort?.profit_target_percent ?? 10}
-                  minTradingDays={activeAccount.cohort?.min_trading_days ?? 5}
-                />
-
-                {/* Rule Health + What's Next + Safe Day */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  <RuleHealthCard account={activeAccount} />
+                {/* Guidance zone: What's Next + Safe Day side-by-side */}
+                <div className="grid gap-4 md:grid-cols-2">
                   <WhatsNextCard account={activeAccount} />
                   <SafeDayPanel account={activeAccount} />
                 </div>
 
                 {/* Consistency Preview (Challenge phase only) */}
                 <ConsistencyPreviewCard account={activeAccount} />
-
-                {/* Progress section — binary status only */}
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Target className="h-5 w-5" />
-                        Performance Target
-                      </CardTitle>
-                      <CardDescription>
-                        Target: {activeAccount.cohort?.profit_target_percent}% profit
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex items-center gap-3">
-                        {calculateProgress(activeAccount) >= 100 ? (
-                          <Badge variant="default" className="text-sm">Target Met</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-sm">In Progress</Badge>
-                        )}
-                        <span className="text-sm text-muted-foreground">
-                        {calculateProgress(activeAccount) >= 100
-                            ? "You've reached the profit target."
-                            : 'Keep trading — target not yet reached.'}
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <AlertTriangle className="h-5 w-5" />
-                        Drawdown Monitor
-                      </CardTitle>
-                      <CardDescription>
-                        Maximum allowed: {activeAccount.cohort?.max_total_drawdown_percent}%
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex items-center gap-3">
-                        {calculateDrawdown(activeAccount) > (activeAccount.cohort?.max_total_drawdown_percent || 10) * 0.8 ? (
-                          <Badge variant="destructive" className="text-sm">⚠️ Approaching Limit</Badge>
-                        ) : calculateDrawdown(activeAccount) > (activeAccount.cohort?.max_total_drawdown_percent || 10) * 0.5 ? (
-                          <Badge variant="outline" className="text-sm">Moderate</Badge>
-                        ) : (
-                          <Badge variant="default" className="text-sm">Comfortable</Badge>
-                        )}
-                        <span className="text-sm text-muted-foreground">
-                          {calculateDrawdown(activeAccount) > (activeAccount.cohort?.max_total_drawdown_percent || 10) * 0.8
-                            ? 'Close to your drawdown limit — trade cautiously.'
-                            : 'Drawdown within acceptable range.'}
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Account status */}
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle>Account Status</CardTitle>
-                        <CardDescription>
-                          Account #{activeAccount.account_number}
-                        </CardDescription>
-                      </div>
-                      <Button asChild size="sm" variant="outline">
-                        <Link to={`/trader/accounts/${activeAccount.id}`}>
-                          <Eye className="h-4 w-4 mr-2" />
-                          View Details
-                        </Link>
-                      </Button>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center gap-4">
-                      {getStatusBadge(activeAccount.status)}
-                      <span className="text-muted-foreground">
-                        Cohort: {activeAccount.cohort?.name} v{activeAccount.cohort?.version}
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
               </>
             )}
           </>
