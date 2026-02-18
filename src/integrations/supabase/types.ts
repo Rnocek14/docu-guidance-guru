@@ -797,13 +797,13 @@ export type Database = {
           computed_at: string
           details: Json
           id: string
+          in_flight_payouts: number
           monte_carlo_ruin_pct: number
           monte_carlo_score: number
           net_buffer: number | null
-          pass_rate: number
+          pass_rate: number | null
           pass_rate_score: number
           payouts_30d: number
-          pending_liability: number
           realized_margin: number
           realized_margin_score: number
           revenue_30d: number
@@ -819,13 +819,13 @@ export type Database = {
           computed_at?: string
           details?: Json
           id?: string
+          in_flight_payouts?: number
           monte_carlo_ruin_pct?: number
           monte_carlo_score?: number
           net_buffer?: number | null
-          pass_rate?: number
+          pass_rate?: number | null
           pass_rate_score?: number
           payouts_30d?: number
-          pending_liability?: number
           realized_margin?: number
           realized_margin_score?: number
           revenue_30d?: number
@@ -841,13 +841,13 @@ export type Database = {
           computed_at?: string
           details?: Json
           id?: string
+          in_flight_payouts?: number
           monte_carlo_ruin_pct?: number
           monte_carlo_score?: number
           net_buffer?: number | null
-          pass_rate?: number
+          pass_rate?: number | null
           pass_rate_score?: number
           payouts_30d?: number
-          pending_liability?: number
           realized_margin?: number
           realized_margin_score?: number
           revenue_30d?: number

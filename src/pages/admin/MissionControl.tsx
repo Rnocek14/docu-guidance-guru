@@ -235,7 +235,7 @@ interface CpcSnapshot {
   breaker_penalty: boolean;
   revenue_30d: number;
   payouts_30d: number;
-  pending_liability: number;
+  in_flight_payouts: number;
   net_buffer: number | null;
   source: string;
   computed_at: string;
@@ -260,8 +260,14 @@ function useCpc() {
   });
 
   // "Compute Now" calls edge function, then refetches snapshot
+  // Cooldown: disable if last snapshot < 2 min old
+  const isFresh = query.data?.computed_at
+    ? differenceInMinutes(new Date(), new Date(query.data.computed_at)) < 2
+    : false;
+
   const computeNow = useMutation({
     mutationFn: async () => {
+      if (isFresh) throw new Error('Snapshot is less than 2 minutes old');
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
       const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/compute-cpc`, {
@@ -280,7 +286,7 @@ function useCpc() {
     onError: (err) => toast.error(`CPC error: ${(err as Error).message}`),
   });
 
-  return { ...query, computeNow };
+  return { ...query, computeNow, isFresh };
 }
 
 // ── Components ──
@@ -595,7 +601,7 @@ export default function MissionControl() {
                 ) : (
                   <Badge variant="outline" className="text-[10px] border-warning/50 text-warning">No data</Badge>
                 )}
-                <Button variant="ghost" size="sm" onClick={() => cpc.computeNow.mutate()} disabled={cpc.computeNow.isPending} className="h-7 px-2">
+                <Button variant="ghost" size="sm" onClick={() => cpc.computeNow.mutate()} disabled={cpc.computeNow.isPending || cpc.isFresh} className="h-7 px-2" title={cpc.isFresh ? 'Snapshot is fresh (< 2 min)' : 'Compute CPC now'}>
                   <RefreshCw className={`h-3 w-3 ${cpc.computeNow.isPending ? 'animate-spin' : ''}`} />
                 </Button>
               </div>
