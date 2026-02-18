@@ -121,35 +121,6 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
     };
   }, [account, dailyStats, maxDailyLossPct, maxDrawdownPct, hasTradingData]);
 
-  const healthConfig: Record<HealthLevel, { icon: typeof CheckCircle2; label: string; color: string; bg: string; border: string }> = {
-    stable: { icon: CheckCircle2, label: 'Stable', color: 'text-success', bg: 'bg-success/10', border: 'border-success/30' },
-    caution: { icon: AlertTriangle, label: 'Caution', color: 'text-warning', bg: 'bg-warning/10', border: 'border-warning/30' },
-    at_risk: { icon: XCircle, label: 'At Risk', color: 'text-destructive', bg: 'bg-destructive/10', border: 'border-destructive/30' },
-  };
-
-  const config = healthConfig[analysis.health];
-  const HealthIcon = config.icon;
-
-  // Quantize bar widths into bands to prevent visual precision
-  const quantizeBand = (usagePct: number) => {
-    if (usagePct <= 5) return 5;
-    if (usagePct <= 33) return 33;
-    if (usagePct <= 66) return 66;
-    return 100;
-  };
-
-  const barColor = (usagePct: number) =>
-    usagePct > 70 ? 'bg-destructive' : usagePct > 50 ? 'bg-warning' : 'bg-success';
-
-  const usageLabel = (usagePct: number) =>
-    usagePct > 70 ? 'High' : usagePct > 50 ? 'Moderate' : 'Low';
-
-  const formatPF = (pf: number) => {
-    if (pf === Infinity) return '∞';
-    if (pf === 0) return '—';
-    return pf.toFixed(2);
-  };
-
   if (!analysis) {
     return (
       <Card>
@@ -170,6 +141,34 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
       </Card>
     );
   }
+
+  const healthConfig: Record<HealthLevel, { icon: typeof CheckCircle2; label: string; color: string; bg: string; border: string }> = {
+    stable: { icon: CheckCircle2, label: 'Stable', color: 'text-success', bg: 'bg-success/10', border: 'border-success/30' },
+    caution: { icon: AlertTriangle, label: 'Caution', color: 'text-warning', bg: 'bg-warning/10', border: 'border-warning/30' },
+    at_risk: { icon: XCircle, label: 'At Risk', color: 'text-destructive', bg: 'bg-destructive/10', border: 'border-destructive/30' },
+  };
+
+  const config = healthConfig[analysis.health];
+  const HealthIcon = config.icon;
+
+  const quantizeBand = (usagePct: number) => {
+    if (usagePct <= 5) return 5;
+    if (usagePct <= 33) return 33;
+    if (usagePct <= 66) return 66;
+    return 100;
+  };
+
+  const barColor = (usagePct: number) =>
+    usagePct > 70 ? 'bg-destructive' : usagePct > 50 ? 'bg-warning' : 'bg-success';
+
+  const usageLabel = (usagePct: number) =>
+    usagePct > 70 ? 'High' : usagePct > 50 ? 'Moderate' : 'Low';
+
+  const formatPF = (pf: number) => {
+    if (pf === Infinity) return '∞';
+    if (pf === 0) return '—';
+    return pf.toFixed(2);
+  };
 
   return (
     <Card>
