@@ -6,10 +6,21 @@ const corsHeaders = {
 }
 
 // ── Types ──
+type CheckSeverity = 'blocker' | 'warning'
+
+interface DomainCheck {
+  name: string
+  ok: boolean
+  severity: CheckSeverity
+  detail: string
+}
+
 interface DomainResult {
   safe: boolean
   signal: 'green' | 'yellow' | 'red'
-  checks: { name: string; ok: boolean; detail: string }[]
+  checks: DomainCheck[]
+  blockerCount: number
+  warningCount: number
 }
 
 interface GovernorResult {
@@ -18,10 +29,22 @@ interface GovernorResult {
   processor: DomainResult
   cohort: DomainResult
   riskEngine: DomainResult
-  blockers: { domain: string; detail: string }[]
+  blockers: { domain: string; detail: string; severity: CheckSeverity }[]
+  warnings: { domain: string; detail: string }[]
   autoAction: string
   autoActionDetail: string
   certifiedAt: string
+  safeStreak: number
+  strictMode: boolean
+  unlockThreshold: number
+}
+
+interface GovernorConfig {
+  enabled?: boolean
+  auto_lock?: boolean
+  auto_unlock?: boolean
+  strict_launch_mode?: boolean
+  unlock_after_consecutive_safe?: number
 }
 
 function json(status: number, body: unknown) {
@@ -31,7 +54,6 @@ function json(status: number, body: unknown) {
   })
 }
 
-/** Parse system_settings value which may be JSONB, string, or null */
 function parseSettingsValue(raw: unknown): Record<string, unknown> {
   if (!raw) return {}
   if (typeof raw === 'object') return raw as Record<string, unknown>
@@ -41,12 +63,20 @@ function parseSettingsValue(raw: unknown): Record<string, unknown> {
   return {}
 }
 
+function deriveDomainResult(checks: DomainCheck[]): DomainResult {
+  const blockerCount = checks.filter(c => !c.ok && c.severity === 'blocker').length
+  const warningCount = checks.filter(c => !c.ok && c.severity === 'warning').length
+  const safe = blockerCount === 0
+  const signal: DomainResult['signal'] = blockerCount > 0 ? 'red' : warningCount > 0 ? 'yellow' : 'green'
+  return { safe, signal, checks, blockerCount, warningCount }
+}
+
 // ============================================================================
 // DOMAIN EVALUATORS
 // ============================================================================
 
 async function evaluateCapitalSafety(svc: any): Promise<DomainResult> {
-  const checks: DomainResult['checks'] = []
+  const checks: DomainCheck[] = []
 
   // 1. Fetch liability buffer settings
   const settingsRes = await svc.rpc('get_liability_buffer_settings')
@@ -66,6 +96,7 @@ async function evaluateCapitalSafety(svc: any): Promise<DomainResult> {
   checks.push({
     name: 'Net buffer positive',
     ok: netBuffer !== null && netBuffer > 0,
+    severity: 'blocker',
     detail: netBuffer !== null ? `$${Math.round(netBuffer)}` : 'Unavailable',
   })
 
@@ -80,6 +111,7 @@ async function evaluateCapitalSafety(svc: any): Promise<DomainResult> {
   checks.push({
     name: 'No stuck payouts > 72h',
     ok: !hasStuck,
+    severity: 'blocker',
     detail: hasStuck ? 'Stuck payout detected' : 'Clear',
   })
 
@@ -87,17 +119,17 @@ async function evaluateCapitalSafety(svc: any): Promise<DomainResult> {
   checks.push({
     name: 'Cash reserve configured',
     ok: cashReserve > 0,
+    severity: 'warning',
     detail: cashReserve > 0 ? `$${Math.round(cashReserve)}` : 'Not set',
   })
 
-  const safe = checks.every(c => c.ok)
-  return { safe, signal: safe ? 'green' : 'red', checks }
+  return deriveDomainResult(checks)
 }
 
-async function evaluateProcessorSafety(svc: any): Promise<DomainResult> {
-  const checks: DomainResult['checks'] = []
+async function evaluateProcessorSafety(svc: any, strict: boolean): Promise<DomainResult> {
+  const checks: DomainCheck[] = []
 
-  // 1. Dispute rate — check latest from check-dispute-rate cron runs
+  // 1. Dispute rate
   const disputeRes = await svc
     .from('cron_http_runs')
     .select('http_content, http_status')
@@ -108,42 +140,58 @@ async function evaluateProcessorSafety(svc: any): Promise<DomainResult> {
 
   let disputeOk = false
   let disputeDetail = 'No dispute check data'
+  let disputeDataMissing = true
+
   if (disputeRes.data?.http_content) {
     try {
       const parsed = JSON.parse(disputeRes.data.http_content)
       const rate30d = parsed?.windows?.['30d']?.rate ?? null
       if (rate30d !== null) {
-        disputeOk = rate30d < 0.005 // 0.5% kill switch threshold
+        disputeDataMissing = false
+        disputeOk = rate30d < 0.005
         disputeDetail = `30d rate: ${(rate30d * 100).toFixed(2)}%`
       }
     } catch { /* noop */ }
   }
-  checks.push({ name: 'Dispute rate < 0.5%', ok: disputeOk, detail: disputeDetail })
 
-  // 2. Payment system not paused inbound
+  // Missing signal severity depends on strict mode
+  checks.push({
+    name: 'Dispute rate < 0.5%',
+    ok: disputeDataMissing ? false : disputeOk,
+    severity: disputeDataMissing ? (strict ? 'blocker' : 'warning') : 'blocker',
+    detail: disputeDetail,
+  })
+
+  // 2. Payment system not paused inbound (by operator, not governor)
   const psRes = await svc
     .from('payment_system_state')
-    .select('is_paused_inbound, pause_reason')
+    .select('id, is_paused_inbound, pause_reason')
     .limit(1)
     .maybeSingle()
   const ps = psRes.data
+  const pausedByOperator = ps?.is_paused_inbound && ps?.pause_reason && !ps.pause_reason.startsWith('Governor')
   checks.push({
-    name: 'Inbound not paused',
-    ok: ps ? !ps.is_paused_inbound : false,
-    detail: ps?.is_paused_inbound ? (ps.pause_reason || 'Paused') : (ps ? 'Active' : 'State missing'),
+    name: 'Not operator-paused',
+    ok: !pausedByOperator,
+    severity: 'warning',
+    detail: pausedByOperator ? (ps.pause_reason || 'Paused by operator') : 'OK',
   })
 
   // 3. Stripe key present
   const stripeKey = Deno.env.get('STRIPE_SECRET_KEY')
   const hasKey = !!stripeKey && stripeKey.length > 10
-  checks.push({ name: 'Stripe key configured', ok: hasKey, detail: hasKey ? 'Present' : 'Missing' })
+  checks.push({
+    name: 'Stripe key configured',
+    ok: hasKey,
+    severity: 'blocker',
+    detail: hasKey ? 'Present' : 'Missing',
+  })
 
-  const safe = checks.every(c => c.ok)
-  return { safe, signal: safe ? 'green' : checks.some(c => !c.ok && c.name.includes('Dispute')) ? 'red' : 'yellow', checks }
+  return deriveDomainResult(checks)
 }
 
 async function evaluateCohortSafety(svc: any): Promise<DomainResult> {
-  const checks: DomainResult['checks'] = []
+  const checks: DomainCheck[] = []
 
   // 1. Active cohorts exist
   const cohortsRes = await svc.from('cohorts').select('id, name, is_active, tier_id').eq('is_active', true)
@@ -151,34 +199,36 @@ async function evaluateCohortSafety(svc: any): Promise<DomainResult> {
   checks.push({
     name: 'Active cohorts exist',
     ok: cohorts.length > 0,
+    severity: 'blocker',
     detail: cohorts.length > 0 ? `${cohorts.length} active` : 'None',
   })
 
-  // 2. Pass rate within range (check breaker state)
+  // 2. Pass rate within range
   const breakerRes = await svc.from('econ_breaker_state').select('*').limit(1).maybeSingle()
   const breaker = breakerRes.data
   const passRate = breaker?.rolling_pass_rate ?? 0
-  const passRateOk = passRate <= 0.15 // 15% max safe
+  const passRateOk = passRate <= 0.15
   checks.push({
     name: 'Pass rate ≤ 15%',
     ok: passRateOk,
+    severity: 'blocker',
     detail: `${(passRate * 100).toFixed(1)}% (${breaker?.rolling_pass_count ?? 0}/${breaker?.rolling_total_count ?? 0})`,
   })
 
-  // 3. No anomalous pass spike (breaker in normal)
+  // 3. Breaker in normal
   const breakerNormal = breaker?.breaker_level === 'normal'
   checks.push({
     name: 'Breaker normal',
     ok: breakerNormal,
+    severity: breakerNormal ? 'blocker' : 'blocker',
     detail: breaker?.breaker_level ?? 'Missing',
   })
 
-  const safe = checks.every(c => c.ok)
-  return { safe, signal: safe ? 'green' : 'red', checks }
+  return deriveDomainResult(checks)
 }
 
-async function evaluateRiskEngineSafety(svc: any): Promise<DomainResult> {
-  const checks: DomainResult['checks'] = []
+async function evaluateRiskEngineSafety(svc: any, strict: boolean): Promise<DomainResult> {
+  const checks: DomainCheck[] = []
 
   // 1. Risk snapshot freshness (< 26h)
   const snapRes = await svc
@@ -193,6 +243,7 @@ async function evaluateRiskEngineSafety(svc: any): Promise<DomainResult> {
   checks.push({
     name: 'Risk snapshot fresh (< 26h)',
     ok: snapAge !== null && snapAge < 26,
+    severity: snapAge === null ? (strict ? 'blocker' : 'warning') : 'blocker',
     detail: snapAge !== null ? `${Math.round(snapAge)}h old` : 'Never run',
   })
 
@@ -207,6 +258,7 @@ async function evaluateRiskEngineSafety(svc: any): Promise<DomainResult> {
   checks.push({
     name: 'No failed audits (24h)',
     ok: failures === 0,
+    severity: 'blocker',
     detail: failures === 0 ? 'Clear' : `${failures} failure(s)`,
   })
 
@@ -221,10 +273,11 @@ async function evaluateRiskEngineSafety(svc: any): Promise<DomainResult> {
   checks.push({
     name: 'Reserve gate active',
     ok: reserveOk,
+    severity: 'warning',
     detail: reserveOk ? 'Enabled with sim run' : 'Not configured',
   })
 
-  // 4. Cron health — check monitor has run recently
+  // 4. Cron health
   const cronRes = await svc
     .from('cron_http_runs')
     .select('ran_at, http_status')
@@ -238,98 +291,134 @@ async function evaluateRiskEngineSafety(svc: any): Promise<DomainResult> {
   checks.push({
     name: 'Cron monitor alive',
     ok: cronAge !== null && cronAge < 2,
+    severity: cronAge === null ? (strict ? 'blocker' : 'warning') : 'warning',
     detail: cronAge !== null ? `${Math.round(cronAge * 60)}m ago` : 'Never',
   })
 
-  const safe = checks.every(c => c.ok)
-  return { safe, signal: safe ? 'green' : 'red', checks }
+  return deriveDomainResult(checks)
 }
 
 // ============================================================================
-// AUTO-HEAL / AUTO-LOCK
+// SAFE STREAK CALCULATION
+// ============================================================================
+
+async function getSafeStreak(svc: any): Promise<number> {
+  const { data } = await svc
+    .from('governor_certifications')
+    .select('verdict')
+    .order('certified_at', { ascending: false })
+    .limit(50)
+
+  if (!data || data.length === 0) return 0
+  let streak = 0
+  for (const row of data) {
+    if (row.verdict === 'safe') streak++
+    else break
+  }
+  return streak
+}
+
+// ============================================================================
+// AUTO-HEAL / AUTO-LOCK (using atomic RPC)
 // ============================================================================
 
 async function executeAutoAction(
   svc: any,
-  result: GovernorResult,
-  config: Record<string, unknown>,
+  verdict: string,
+  blockerSummary: string,
+  config: GovernorConfig,
+  safeStreak: number,
 ): Promise<{ action: string; detail: string }> {
   const autoLock = config.auto_lock !== false
   const autoUnlock = config.auto_unlock !== false
+  const unlockThreshold = config.unlock_after_consecutive_safe ?? 3
 
-  if (result.verdict === 'not_safe' && autoLock) {
-    // Check if already locked
+  if (verdict === 'not_safe' && autoLock) {
+    // Check if already locked by governor
     const psRes = await svc
       .from('payment_system_state')
-      .select('is_paused_inbound, is_paused_outbound')
+      .select('id, is_paused_inbound, is_paused_outbound, pause_reason')
       .limit(1)
       .maybeSingle()
     const ps = psRes.data
 
     if (ps && (!ps.is_paused_inbound || !ps.is_paused_outbound)) {
-      // Auto-lock: pause inbound and outbound
-      await svc
-        .from('payment_system_state')
-        .update({
-          is_paused_inbound: true,
-          is_paused_outbound: true,
-          pause_reason: `Governor auto-lock: ${result.blockers.map(b => b.detail).join('; ').slice(0, 200)}`,
-          paused_at: new Date().toISOString(),
-        })
-        .eq('id', ps.id || psRes.data?.id)
+      const reason = `Governor auto-lock: ${blockerSummary.slice(0, 200)}`
+      const lockRes = await svc.rpc('governor_apply_lock', {
+        p_action: 'lock',
+        p_reason: reason,
+        p_locked_by: 'governor',
+      })
 
-      // Log to staff_notifications
+      if (lockRes.error) {
+        console.error('governor_apply_lock error:', lockRes.error)
+        return { action: 'lock_failed', detail: lockRes.error.message }
+      }
+
+      // Notify staff
       await svc.from('staff_notifications').insert({
         category: 'governor',
         severity: 'critical',
         title: '🚨 Governor AUTO-LOCK activated',
-        body: `System locked: ${result.blockers.length} blocker(s). ${result.blockers.map(b => b.detail).join('; ')}`,
-        dedup_key: `governor-lock-${new Date().toISOString().slice(0, 13)}`, // hourly dedup
-      }).single()
+        body: `System locked (inbound + outbound + intake): ${blockerSummary.slice(0, 300)}`,
+        dedup_key: `governor-lock-${new Date().toISOString().slice(0, 13)}`,
+      })
 
-      return { action: 'locked', detail: `Auto-locked: ${result.blockers.length} blocking issue(s)` }
+      return { action: 'locked', detail: `Auto-locked: inbound + outbound + intake paused` }
     }
     return { action: 'already_locked', detail: 'System already locked' }
   }
 
-  if (result.verdict === 'safe' && autoUnlock) {
-    // Check if currently locked by governor
+  if (verdict === 'safe' && autoUnlock) {
+    // Only unlock if safe streak meets threshold
+    if (safeStreak < unlockThreshold) {
+      return {
+        action: 'waiting_streak',
+        detail: `Safe streak ${safeStreak}/${unlockThreshold} — waiting for ${unlockThreshold} consecutive SAFE before unlock`,
+      }
+    }
+
+    // Check if locked by governor
     const psRes = await svc
       .from('payment_system_state')
-      .select('is_paused_inbound, is_paused_outbound, pause_reason')
+      .select('id, is_paused_inbound, is_paused_outbound, pause_reason')
       .limit(1)
       .maybeSingle()
     const ps = psRes.data
 
     if (ps && (ps.is_paused_inbound || ps.is_paused_outbound)) {
-      // Only auto-unlock if it was locked by the governor
-      if (ps.pause_reason?.startsWith('Governor auto-lock')) {
-        await svc
-          .from('payment_system_state')
-          .update({
-            is_paused_inbound: false,
-            is_paused_outbound: false,
-            pause_reason: null,
-            paused_at: null,
-          })
-          .eq('id', ps.id)
-
-        await svc.from('staff_notifications').insert({
-          category: 'governor',
-          severity: 'info',
-          title: '✅ Governor AUTO-UNLOCK — all clear',
-          body: 'All 4 domains green. System unlocked automatically.',
-          dedup_key: `governor-unlock-${new Date().toISOString().slice(0, 13)}`,
-        }).single()
-
-        return { action: 'unlocked', detail: 'All domains green — auto-unlocked' }
+      if (!ps.pause_reason?.startsWith('Governor')) {
+        return { action: 'none', detail: 'Locked by operator — governor will not override' }
       }
-      return { action: 'none', detail: 'Locked manually (not by governor) — skipping auto-unlock' }
+
+      // Staged unlock: intake → outbound → inbound
+      // We do all 3 stages atomically since we've verified safe streak
+      for (const stage of ['unlock_intake', 'unlock_outbound', 'unlock_inbound'] as const) {
+        const res = await svc.rpc('governor_apply_lock', {
+          p_action: stage,
+          p_reason: null,
+          p_locked_by: 'governor',
+        })
+        if (res.error) {
+          console.error(`governor_apply_lock ${stage} error:`, res.error)
+          return { action: 'unlock_failed', detail: `Failed at ${stage}: ${res.error.message}` }
+        }
+      }
+
+      await svc.from('staff_notifications').insert({
+        category: 'governor',
+        severity: 'info',
+        title: '✅ Governor AUTO-UNLOCK — all clear',
+        body: `${safeStreak} consecutive SAFE certifications. Staged unlock complete: intake → outbound → inbound.`,
+        dedup_key: `governor-unlock-${new Date().toISOString().slice(0, 13)}`,
+      })
+
+      return { action: 'unlocked', detail: `Staged unlock complete after ${safeStreak} safe runs` }
     }
     return { action: 'none', detail: 'System already unlocked' }
   }
 
-  return { action: 'none', detail: 'No auto-action configured or needed' }
+  return { action: 'none', detail: 'No auto-action needed' }
 }
 
 // ============================================================================
@@ -342,19 +431,17 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Auth: either CRON_SECRET (for cron) or admin JWT
+    // Auth: CRON_SECRET or admin JWT
     const authHeader = req.headers.get('Authorization')
     const cronSecret = Deno.env.get('CRON_SECRET')
     let source = 'manual'
     let isAuthorized = false
 
-    // Check cron secret
     if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
       isAuthorized = true
       source = 'cron'
     }
 
-    // Check admin JWT
     if (!isAuthorized && authHeader?.startsWith('Bearer ')) {
       const supabase = createClient(
         Deno.env.get('SUPABASE_URL')!,
@@ -376,7 +463,6 @@ Deno.serve(async (req) => {
 
     if (!isAuthorized) return json(401, { error: 'Unauthorized' })
 
-    // Service client for privileged operations
     const svc = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -388,43 +474,59 @@ Deno.serve(async (req) => {
       .select('value')
       .eq('key', 'governor_config')
       .maybeSingle()
-    const config = parseSettingsValue(configRes.data?.value)
+    const config = parseSettingsValue(configRes.data?.value) as GovernorConfig
+    const strict = config.strict_launch_mode !== false // default strict
+    const unlockThreshold = config.unlock_after_consecutive_safe ?? 3
 
     // Run all 4 domain evaluations in parallel
     const [capital, processor, cohort, riskEngine] = await Promise.all([
       evaluateCapitalSafety(svc),
-      evaluateProcessorSafety(svc),
+      evaluateProcessorSafety(svc, strict),
       evaluateCohortSafety(svc),
-      evaluateRiskEngineSafety(svc),
+      evaluateRiskEngineSafety(svc, strict),
     ])
 
-    // Aggregate blockers
+    // Aggregate blockers and warnings
     const blockers: GovernorResult['blockers'] = []
-    const addBlockers = (domain: string, d: DomainResult) => {
+    const warnings: GovernorResult['warnings'] = []
+    const addIssues = (domain: string, d: DomainResult) => {
       for (const c of d.checks) {
-        if (!c.ok) blockers.push({ domain, detail: `${c.name}: ${c.detail}` })
+        if (!c.ok && c.severity === 'blocker') {
+          blockers.push({ domain, detail: `${c.name}: ${c.detail}`, severity: 'blocker' })
+        } else if (!c.ok && c.severity === 'warning') {
+          warnings.push({ domain, detail: `${c.name}: ${c.detail}` })
+        }
       }
     }
-    addBlockers('capital', capital)
-    addBlockers('processor', processor)
-    addBlockers('cohort', cohort)
-    addBlockers('risk_engine', riskEngine)
+    addIssues('capital', capital)
+    addIssues('processor', processor)
+    addIssues('cohort', cohort)
+    addIssues('risk_engine', riskEngine)
 
-    const verdict = (capital.safe && processor.safe && cohort.safe && riskEngine.safe)
-      ? 'safe' : 'not_safe'
+    // Verdict based ONLY on blockers
+    const verdict = blockers.length === 0 ? 'safe' : 'not_safe'
+
+    // Calculate safe streak (before this run)
+    const previousStreak = await getSafeStreak(svc)
+    const currentStreak = verdict === 'safe' ? previousStreak + 1 : 0
 
     const result: GovernorResult = {
       verdict,
       capital, processor, cohort, riskEngine,
       blockers,
+      warnings,
       autoAction: 'none',
       autoActionDetail: '',
       certifiedAt: new Date().toISOString(),
+      safeStreak: currentStreak,
+      strictMode: strict,
+      unlockThreshold,
     }
 
-    // Execute auto-action if enabled
+    // Execute auto-action
     if (config.enabled !== false) {
-      const autoResult = await executeAutoAction(svc, result, config)
+      const blockerSummary = blockers.map(b => b.detail).join('; ')
+      const autoResult = await executeAutoAction(svc, verdict, blockerSummary, config, currentStreak)
       result.autoAction = autoResult.action
       result.autoActionDetail = autoResult.detail
     }
@@ -441,6 +543,7 @@ Deno.serve(async (req) => {
       blockers,
       domains: { capital, processor, cohort, riskEngine },
       source,
+      safe_streak: currentStreak,
     })
 
     // Cleanup old certifications (> 30 days)

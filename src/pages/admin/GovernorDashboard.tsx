@@ -9,23 +9,27 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   ShieldCheck, ShieldX, AlertTriangle, CheckCircle2, XCircle,
   RefreshCw, Loader2, Activity, Cpu, TrendingUp, Lock, Unlock,
-  Zap, Clock,
+  Zap, Clock, Info,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 
-interface DomainCheck { name: string; ok: boolean; detail: string }
-interface DomainResult { safe: boolean; signal: string; checks: DomainCheck[] }
+interface DomainCheck { name: string; ok: boolean; severity: 'blocker' | 'warning'; detail: string }
+interface DomainResult { safe: boolean; signal: string; checks: DomainCheck[]; blockerCount: number; warningCount: number }
 interface GovernorResult {
   verdict: 'safe' | 'not_safe' | 'error';
   capital: DomainResult;
   processor: DomainResult;
   cohort: DomainResult;
   riskEngine: DomainResult;
-  blockers: { domain: string; detail: string }[];
+  blockers: { domain: string; detail: string; severity: string }[];
+  warnings: { domain: string; detail: string }[];
   autoAction: string;
   autoActionDetail: string;
   certifiedAt: string;
+  safeStreak: number;
+  strictMode: boolean;
+  unlockThreshold: number;
 }
 
 interface CertHistory {
@@ -38,10 +42,7 @@ interface CertHistory {
   risk_engine_safe: boolean;
   auto_action: string;
   auto_action_detail: string;
-}
-
-function fmt(n: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+  safe_streak: number;
 }
 
 const DOMAIN_META: Record<string, { icon: typeof ShieldCheck; label: string; color: string }> = {
@@ -54,28 +55,48 @@ const DOMAIN_META: Record<string, { icon: typeof ShieldCheck; label: string; col
 function DomainCard({ domainKey, domain }: { domainKey: string; domain: DomainResult }) {
   const meta = DOMAIN_META[domainKey];
   const Icon = meta.icon;
+  const borderClass = domain.signal === 'green' ? 'border-success/30' : domain.signal === 'yellow' ? 'border-warning/30' : 'border-destructive/30';
 
   return (
-    <Card className={`border ${domain.safe ? 'border-success/30' : 'border-destructive/30'}`}>
+    <Card className={`border ${borderClass}`}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <Icon className={`h-4 w-4 ${meta.color}`} />
             {meta.label}
           </CardTitle>
-          <Badge variant={domain.safe ? 'default' : 'destructive'} className={domain.safe ? 'bg-success text-success-foreground' : ''}>
-            {domain.safe ? 'SAFE' : 'UNSAFE'}
-          </Badge>
+          <div className="flex gap-1.5">
+            {domain.blockerCount > 0 && (
+              <Badge variant="destructive">{domain.blockerCount} blocker{domain.blockerCount > 1 ? 's' : ''}</Badge>
+            )}
+            {domain.warningCount > 0 && (
+              <Badge variant="outline" className="border-warning/50 text-warning">{domain.warningCount} warn</Badge>
+            )}
+            {domain.blockerCount === 0 && domain.warningCount === 0 && (
+              <Badge variant="default" className="bg-success text-success-foreground">SAFE</Badge>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
         {domain.checks.map((c, i) => (
           <div key={i} className="flex items-start gap-2 text-sm">
-            {c.ok
-              ? <CheckCircle2 className="h-4 w-4 text-success shrink-0 mt-0.5" />
-              : <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />}
-            <div className="min-w-0">
-              <span className="font-medium">{c.name}</span>
+            {c.ok ? (
+              <CheckCircle2 className="h-4 w-4 text-success shrink-0 mt-0.5" />
+            ) : c.severity === 'blocker' ? (
+              <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium">{c.name}</span>
+                {!c.ok && (
+                  <Badge variant="outline" className={`text-[10px] px-1 py-0 ${c.severity === 'blocker' ? 'border-destructive/50 text-destructive' : 'border-warning/50 text-warning'}`}>
+                    {c.severity}
+                  </Badge>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground truncate">{c.detail}</p>
             </div>
           </div>
@@ -104,16 +125,15 @@ export default function GovernorDashboard() {
   const { data, isLoading, error, refetch, isRefetching } = useQuery({
     queryKey: ['system-governor'],
     queryFn: fetchGovernor,
-    refetchInterval: 60_000, // auto-refresh every minute
+    refetchInterval: 60_000,
   });
 
-  // Certification history
   const { data: history } = useQuery({
     queryKey: ['governor-history'],
     queryFn: async () => {
       const { data } = await supabase
         .from('governor_certifications')
-        .select('id, certified_at, verdict, capital_safe, processor_safe, cohort_safe, risk_engine_safe, auto_action, auto_action_detail')
+        .select('id, certified_at, verdict, capital_safe, processor_safe, cohort_safe, risk_engine_safe, auto_action, auto_action_detail, safe_streak')
         .order('certified_at', { ascending: false })
         .limit(20);
       return (data || []) as CertHistory[];
@@ -121,7 +141,6 @@ export default function GovernorDashboard() {
     refetchInterval: 60_000,
   });
 
-  // Manual run
   const runMutation = useMutation({
     mutationFn: fetchGovernor,
     onSuccess: (result) => {
@@ -142,7 +161,7 @@ export default function GovernorDashboard() {
               <Cpu className="h-6 w-6" /> System Governor
             </h2>
             <p className="text-muted-foreground text-sm">
-              Autonomous capital flight computer. Auto-certifies or auto-locks every 5 minutes.
+              Autonomous capital flight computer. Auto-certifies or auto-locks.
             </p>
           </div>
           <Button
@@ -188,8 +207,11 @@ export default function GovernorDashboard() {
                           return (
                             <Badge
                               key={d}
-                              variant={domain.safe ? 'outline' : 'destructive'}
-                              className={domain.safe ? 'border-success/50 text-success' : ''}
+                              variant={domain.signal === 'green' ? 'outline' : domain.signal === 'yellow' ? 'outline' : 'destructive'}
+                              className={
+                                domain.signal === 'green' ? 'border-success/50 text-success' :
+                                domain.signal === 'yellow' ? 'border-warning/50 text-warning' : ''
+                              }
                             >
                               {meta.label.split(' ')[0]}
                             </Badge>
@@ -197,16 +219,27 @@ export default function GovernorDashboard() {
                         })}
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Certified {formatDistanceToNow(new Date(data.certifiedAt), { addSuffix: true })}
-                    </p>
+
+                    {/* Meta info row */}
+                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground flex-wrap">
+                      <span>Certified {formatDistanceToNow(new Date(data.certifiedAt), { addSuffix: true })}</span>
+                      <span>Safe streak: <strong className={data.safeStreak >= data.unlockThreshold ? 'text-success' : ''}>{data.safeStreak}/{data.unlockThreshold}</strong></span>
+                      {data.strictMode && (
+                        <Badge variant="outline" className="text-[10px] border-warning/50 text-warning">STRICT MODE</Badge>
+                      )}
+                    </div>
 
                     {/* Auto-action indicator */}
                     {data.autoAction !== 'none' && (
                       <div className={`flex items-center gap-2 mt-3 text-sm font-medium ${
-                        data.autoAction === 'locked' ? 'text-destructive' : 'text-success'
+                        data.autoAction === 'locked' || data.autoAction === 'lock_failed' ? 'text-destructive' :
+                        data.autoAction === 'unlocked' ? 'text-success' :
+                        data.autoAction === 'waiting_streak' ? 'text-warning' : 'text-muted-foreground'
                       }`}>
-                        {data.autoAction === 'locked' ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                        {data.autoAction === 'locked' ? <Lock className="h-4 w-4" /> :
+                         data.autoAction === 'unlocked' ? <Unlock className="h-4 w-4" /> :
+                         data.autoAction === 'waiting_streak' ? <Clock className="h-4 w-4" /> :
+                         <Info className="h-4 w-4" />}
                         {data.autoActionDetail}
                       </div>
                     )}
@@ -214,12 +247,27 @@ export default function GovernorDashboard() {
                     {/* Blockers */}
                     {data.blockers.length > 0 && (
                       <div className="mt-4 space-y-1.5">
-                        <p className="text-sm font-medium">{data.blockers.length} blocking issue(s)</p>
+                        <p className="text-sm font-medium text-destructive">{data.blockers.length} blocker(s)</p>
                         {data.blockers.map((b, i) => (
                           <div key={i} className="flex items-start gap-2 text-sm">
                             <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
                             <span className="text-destructive">
                               <span className="font-medium">[{b.domain}]</span> {b.detail}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Warnings */}
+                    {data.warnings && data.warnings.length > 0 && (
+                      <div className="mt-3 space-y-1">
+                        <p className="text-sm font-medium text-warning">{data.warnings.length} warning(s)</p>
+                        {data.warnings.map((w, i) => (
+                          <div key={i} className="flex items-start gap-2 text-sm">
+                            <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                            <span className="text-warning">
+                              <span className="font-medium">[{w.domain}]</span> {w.detail}
                             </span>
                           </div>
                         ))}
@@ -247,7 +295,7 @@ export default function GovernorDashboard() {
               </CardHeader>
               <CardContent>
                 {(!history || history.length === 0) ? (
-                  <p className="text-sm text-muted-foreground">No certifications yet. Run the governor to generate the first one.</p>
+                  <p className="text-sm text-muted-foreground">No certifications yet.</p>
                 ) : (
                   <div className="space-y-1 max-h-80 overflow-y-auto">
                     {history.map(h => (
@@ -264,6 +312,7 @@ export default function GovernorDashboard() {
                           <span className={h.cohort_safe ? 'text-success' : 'text-destructive'}>Co</span>
                           <span className={h.risk_engine_safe ? 'text-success' : 'text-destructive'}>R</span>
                         </div>
+                        <span className="text-xs text-muted-foreground">streak:{h.safe_streak ?? 0}</span>
                         {h.auto_action && h.auto_action !== 'none' && (
                           <Badge variant="outline" className="text-xs">
                             {h.auto_action}
