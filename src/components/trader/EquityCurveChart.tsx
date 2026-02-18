@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis, Tooltip } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { ChartContainer } from '@/components/ui/chart';
 import { TrendingUp } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
@@ -30,6 +31,7 @@ interface TradePoint {
 interface EquityCurveChartProps {
   accountId: string;
   startingBalance: number;
+  currentBalance?: number;
   maxDrawdownPct?: number;
   profitTargetPct?: number;
   minTradingDays?: number;
@@ -76,7 +78,7 @@ function EventDot(props: Record<string, unknown>) {
   );
 }
 
-export function EquityCurveChart({ accountId, startingBalance, maxDrawdownPct = 10, profitTargetPct = 10, minTradingDays = 5 }: EquityCurveChartProps) {
+export function EquityCurveChart({ accountId, startingBalance, currentBalance: currentBalanceProp, maxDrawdownPct = 10, profitTargetPct = 10, minTradingDays = 5 }: EquityCurveChartProps) {
   const { data: trades, dataUpdatedAt } = useQuery({
     queryKey: ['equity-curve-trades', accountId],
     queryFn: async () => {
@@ -162,6 +164,10 @@ export function EquityCurveChart({ accountId, startingBalance, maxDrawdownPct = 
   }, [trades, startingBalance, maxDrawdownPct, profitTargetPct, minTradingDays]);
 
   if (!chartData.length) {
+    // Check if account-level summary suggests activity but trade rows are missing
+    const impliedPnl = (currentBalanceProp ?? startingBalance) - startingBalance;
+    const isSyncing = Math.abs(impliedPnl) > 0;
+
     return (
       <Card>
         <CardHeader className="pb-2">
@@ -172,11 +178,26 @@ export function EquityCurveChart({ accountId, startingBalance, maxDrawdownPct = 
           <CardDescription>Cumulative balance — each point is a closed trade.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <TrendingUp className="h-10 w-10 text-muted-foreground/30 mb-3" />
-            <p className="text-sm text-muted-foreground">No trades yet</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Your equity curve will appear after your first closed trade.</p>
-          </div>
+          {isSyncing ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <div className="rounded-full bg-warning/10 p-3 mb-3">
+                <TrendingUp className="h-8 w-8 text-warning" />
+              </div>
+              <p className="text-sm font-medium text-foreground">Trading data is still syncing</p>
+              <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                Account summary is available; trade history will appear shortly.
+              </p>
+              <Badge variant="outline" className="mt-3 text-[10px] text-warning border-warning/30">
+                summary-only
+              </Badge>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <TrendingUp className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">No trades yet</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">Your equity curve will appear after your first closed trade.</p>
+            </div>
+          )}
         </CardContent>
       </Card>
     );
