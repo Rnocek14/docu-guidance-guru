@@ -366,24 +366,24 @@ async function executeAutoAction(
   const autoUnlock = config.auto_unlock !== false
   const unlockThreshold = config.unlock_after_consecutive_safe ?? 3
 
-  // ── NOT SAFE: enforce full lock (reconcile any missing switch) ──
+  // ── NOT SAFE: always call RPC to reconcile all 3 switches + owner ──
   if (verdict === 'not_safe' && autoLock) {
-    const allLocked = lockState.inbound_paused && lockState.outbound_paused && lockState.intake_paused
+    const reason = `Governor auto-lock: ${blockerSummary.slice(0, 200)}`
+    const lockRes = await svc.rpc('governor_apply_lock', {
+      p_action: 'lock',
+      p_reason: reason,
+      p_locked_by: 'governor',
+    })
 
-    if (!allLocked) {
-      const reason = `Governor auto-lock: ${blockerSummary.slice(0, 200)}`
-      const lockRes = await svc.rpc('governor_apply_lock', {
-        p_action: 'lock',
-        p_reason: reason,
-        p_locked_by: 'governor',
-      })
+    if (lockRes.error) {
+      console.error('governor_apply_lock error:', lockRes.error)
+      return { action: 'lock_failed', detail: lockRes.error.message }
+    }
 
-      if (lockRes.error) {
-        console.error('governor_apply_lock error:', lockRes.error)
-        return { action: 'lock_failed', detail: lockRes.error.message }
-      }
+    const changed = lockRes.data?.changed ?? []
+    const wasFull = changed.length === 0 || (changed.length === 1 && changed[0] === 'owner')
 
-      const changed = lockRes.data?.changed ?? []
+    if (!wasFull) {
       await svc.from('staff_notifications').insert({
         category: 'governor',
         severity: 'critical',
@@ -391,10 +391,9 @@ async function executeAutoAction(
         body: `Locked switches: ${JSON.stringify(changed)}. Blockers: ${blockerSummary.slice(0, 300)}`,
         dedup_key: `governor-lock-${new Date().toISOString().slice(0, 13)}`,
       })
-
       return { action: 'locked', detail: `Auto-locked (changed: ${JSON.stringify(changed)})` }
     }
-    return { action: 'already_locked', detail: 'All 3 switches already locked' }
+    return { action: 'already_locked', detail: 'All 3 switches already locked (owner reconciled)' }
   }
 
   // ── SAFE: staged unlock (only if governor-locked + streak met) ──
