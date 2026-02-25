@@ -72,7 +72,7 @@ export default function Login() {
         </div>
 
         <p className="text-sm text-primary-foreground/60">
-          © 2024 Meridian. Your fixed point in trading.
+          © {new Date().getFullYear()} Meridian. Your fixed point in trading.
         </p>
       </div>
 

@@ -22,7 +22,7 @@ export const TRUST_BADGES = [
 // ── Stats bar claims (StatsCounter) ─────────────────────────────────────
 
 export const STATS = [
-  { value: 'Early Access', label: 'Platform Status' },
+  { value: 'Now Open', label: 'Platform Status' },
   { value: 'Staff-Reviewed', label: 'Payout Decisions' },
   { value: '3–5 Days', label: 'Typical Review Time' },
   { value: 'Published', label: 'Rules at Purchase' },
