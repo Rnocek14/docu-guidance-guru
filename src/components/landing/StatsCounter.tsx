@@ -3,10 +3,10 @@ import { Shield, Users, Clock, Lock } from 'lucide-react';
 import { track } from '@/lib/track';
 
 const stats = [
-  { icon: Users, value: 'Early Access', label: 'Platform Status', highlight: true },
-  { icon: Shield, value: 'Human-Reviewed', label: 'Payout Decisions' },
+  { icon: Users, value: 'Now Open', label: 'Platform Status', highlight: true },
+  { icon: Shield, value: 'Staff-Reviewed', label: 'Payout Decisions' },
   { icon: Clock, value: '3–5 Days', label: 'Typical Review Time' },
-  { icon: Lock, value: 'Frozen', label: 'Rules at Purchase' },
+  { icon: Lock, value: 'Published', label: 'Rules at Purchase' },
 ];
 
 export function StatsCounter() {
