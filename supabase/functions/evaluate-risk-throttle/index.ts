@@ -76,10 +76,12 @@ Deno.serve(async (req) => {
   try {
     // Auth: cron secret OR admin JWT (for "Run now" button)
     const authHeader = req.headers.get('Authorization') ?? ''
+    const cronSecretHeader = req.headers.get('X-Cron-Secret') ?? ''
 
     // Resolve CRON_SECRET: prefer env var, fallback to internal_secrets table
     let cronSecret = Deno.env.get('CRON_SECRET') ?? ''
-    if (!cronSecret) {
+    if (!cronSecret || cronSecret.length < 16) {
+      console.warn('CRON_SECRET env var missing/short — falling back to internal_secrets table\n')
       try {
         const sbLookup = createClient(
           Deno.env.get('SUPABASE_URL')!,
@@ -94,7 +96,11 @@ Deno.serve(async (req) => {
       } catch { /* best effort */ }
     }
 
-    const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`
+    // Accept cron secret via X-Cron-Secret header (preferred) or Authorization: Bearer
+    const isCron = cronSecret && (
+      cronSecretHeader === cronSecret ||
+      authHeader === `Bearer ${cronSecret}`
+    )
 
     let isAdmin = false
     if (!isCron && authHeader.startsWith('Bearer ')) {
