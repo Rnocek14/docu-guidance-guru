@@ -40,6 +40,7 @@ interface NavItem {
   href: string;
   icon: ReactNode;
   section?: 'daily' | 'tools';
+  external?: boolean;
 }
 
 interface DashboardLayoutProps {
@@ -131,6 +132,7 @@ export function DashboardLayout({ children, title, navItems }: DashboardLayoutPr
                 <Link
                   key={item.href}
                   to={item.href}
+                  {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                   onClick={() => setSidebarOpen(false)}
                   className={cn(
                     'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
@@ -263,9 +265,9 @@ export const traderNavItems: NavItem[] = [
   { label: 'Accounts', href: '/trader/accounts', icon: <TrendingUp className="h-5 w-5" /> },
   { label: 'Trades', href: '/trader/trades', icon: <Activity className="h-5 w-5" /> },
   { label: 'Payouts', href: '/trader/payouts', icon: <CreditCard className="h-5 w-5" /> },
-  { label: 'Buy New Account', href: '/checkout', icon: <CreditCard className="h-5 w-5" /> },
-  { label: 'Rules', href: '/rules', icon: <FileText className="h-5 w-5" /> },
-  { label: 'Help & FAQ', href: '/#faq', icon: <Shield className="h-5 w-5" /> },
+  { label: 'Buy New Account', href: '/checkout', icon: <CreditCard className="h-5 w-5" />, external: true },
+  { label: 'Rules', href: '/rules', icon: <FileText className="h-5 w-5" />, external: true },
+  { label: 'Help & FAQ', href: '/#faq', icon: <Shield className="h-5 w-5" />, external: true },
 ];
 
 export const riskNavItems: NavItem[] = [
