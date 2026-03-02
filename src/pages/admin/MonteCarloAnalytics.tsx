@@ -20,6 +20,7 @@ import { CustomerGrowthTab } from '@/components/admin/CustomerGrowthTab';
 import { BreakerValidationPanel } from '@/components/admin/BreakerValidationPanel';
 import { HOSTILE_PRESETS, evaluateAssertions, computeOverallVerdict, type HostilePreset, type AssertionResult } from '@/lib/hostile-presets';
 import { captureDbConfigSnapshot, validateBreakerConfig, type BreakerValidationResult } from '@/lib/breaker-evaluator';
+import { V1StressBattery } from '@/components/admin/V1StressBattery';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -431,6 +432,7 @@ export default function MonteCarloAnalytics() {
                 <TabsTrigger value="histogram">Profit Distribution</TabsTrigger>
                 <TabsTrigger value="risk">Risk Report</TabsTrigger>
                 <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
+                <TabsTrigger value="stress">V1 Stress Test</TabsTrigger>
               </TabsList>
 
               <TabsContent value="bands">
@@ -627,22 +629,30 @@ export default function MonteCarloAnalytics() {
                   </div>
                 </div>
               </TabsContent>
+              <TabsContent value="stress">
+                <V1StressBattery />
+              </TabsContent>
             </Tabs>
           </>
         ) : (
-          <Card className="border-dashed">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <Zap className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium mb-2">No Simulation Data</h3>
-              <p className="text-muted-foreground text-center mb-4">
-                Run a simulation to see profit forecasts, risk metrics, and monthly bands — all derived from your live cohort rules.
-              </p>
-              <Button onClick={runServerSimulation} disabled={isRunning} size="lg">
-                <Play className="mr-2 h-4 w-4" />
-                Run Simulation
-              </Button>
-            </CardContent>
-          </Card>
+          <div className="space-y-6">
+            <Card className="border-dashed">
+              <CardContent className="flex flex-col items-center justify-center py-16">
+                <Zap className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-medium mb-2">No Simulation Data</h3>
+                <p className="text-muted-foreground text-center mb-4">
+                  Run a simulation to see profit forecasts, risk metrics, and monthly bands — all derived from your live cohort rules.
+                </p>
+                <Button onClick={runServerSimulation} disabled={isRunning} size="lg">
+                  <Play className="mr-2 h-4 w-4" />
+                  Run Simulation
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* V1 Stress Test available even without server sim */}
+            <V1StressBattery />
+          </div>
         )}
       </div>
     </DashboardLayout>
