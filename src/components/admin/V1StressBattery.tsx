@@ -10,6 +10,8 @@ import {
   type MonteCarloConfig,
   type MonteCarloResult,
 } from '@/lib/monte-carlo';
+import { PAY_REV_GUARDRAIL_V1 } from '@/lib/breaker-policy';
+import { BreakerEfficacyPanel, type BreakerComparisonRow } from './BreakerEfficacyPanel';
 
 // ============================================================================
 // CONFIG
@@ -163,6 +165,7 @@ interface StressBatteryResult {
   scenarios: ScenarioRow[];
   priceScenarios: PriceRow[];
   drawdown: DrawdownRow[];
+  breakerComparisons: BreakerComparisonRow[];
   baselineDiag: BaselineDiagnostics;
   configCheck: {
     firstPayoutCap: number | null;
@@ -440,10 +443,76 @@ function runStressBattery(): StressBatteryResult {
     // (Mature window length is now validated per-run inside the drawdown loop above)
   }
 
+  // =========================================================================
+  // BREAKER EFFICACY: A/B comparison on key stress scenarios
+  // =========================================================================
+  const breakerTargets = [
+    { name: 'Payout clustering', assumptions: SHARED_ASSUMPTIONS.clustering },
+    { name: 'Adversarial-but-plausible', assumptions: SHARED_ASSUMPTIONS.softAttack },
+    { name: 'Baseline (control)', assumptions: DEFAULT_ASSUMPTIONS },
+  ];
+
+  const CONFIG_BREAKER: MonteCarloConfig = { iterations: 500, monthsPerIteration: 15, seed: 42 };
+  const CONFIG_BREAKER_WITH: MonteCarloConfig = { ...CONFIG_BREAKER, breakerPolicy: PAY_REV_GUARDRAIL_V1 };
+
+  const breakerComparisons: BreakerComparisonRow[] = breakerTargets.map(target => {
+    const rNo = runMonteCarlo(CONFIG_BREAKER, target.assumptions);
+    const rWith = runMonteCarlo(CONFIG_BREAKER_WITH, target.assumptions);
+
+    // Extract 90-day window metrics (M12–M14) for both runs
+    const extractWindow = (r: MonteCarloResult) => {
+      let maxDD = 0, cumP5 = 0, payRevP95 = 0, payRevP99 = 0;
+      if (r.rawSamples && r.rawSamples.length > 0) {
+        const windowSamples = r.rawSamples.map(iter => iter.slice(MEASURE_START, MEASURE_START + MEASURE_LEN));
+        const cumProfits = windowSamples.map(iter => iter.reduce((a, b) => a + b, 0));
+        cumProfits.sort((a, b) => a - b);
+        cumP5 = cumProfits[safeIdx(0.05, cumProfits.length)];
+        for (const iter of windowSamples) {
+          let cum = 0, peak = 0;
+          for (const p of iter) { cum += p; peak = Math.max(peak, cum); maxDD = Math.max(maxDD, peak - cum); }
+        }
+        if (r.rawMonthResults) {
+          const ratios: number[] = [];
+          for (const iter of r.rawMonthResults) {
+            for (let m = MEASURE_START; m < MEASURE_START + MEASURE_LEN; m++) {
+              if (m < iter.length) {
+                const rev = totalRevenue(iter[m]);
+                if (rev > 0) ratios.push(iter[m].payouts / rev);
+              }
+            }
+          }
+          ratios.sort((a, b) => a - b);
+          payRevP95 = ratios.length > 0 ? ratios[safeIdx(0.95, ratios.length)] : 0;
+          payRevP99 = ratios.length > 0 ? ratios[safeIdx(0.99, ratios.length)] : 0;
+        }
+      }
+      return { maxDD, cumP5, payRevP95, payRevP99 };
+    };
+
+    const noMetrics = extractWindow(rNo);
+    const withMetrics = extractWindow(rWith);
+
+    return {
+      scenarioName: target.name,
+      noBreaker: {
+        ...noMetrics,
+        margin: rNo.diagnostics.effectiveMargin,
+        lossProb: rNo.risk.probabilityOfLoss,
+      },
+      withBreaker: {
+        ...withMetrics,
+        margin: rWith.diagnostics.effectiveMargin,
+        lossProb: rWith.risk.probabilityOfLoss,
+        diagnostics: rWith.breakerDiagnostics!,
+      },
+    };
+  });
+
   return {
     scenarios,
     priceScenarios,
     drawdown,
+    breakerComparisons,
     baselineDiag,
     configCheck: {
       firstPayoutCap: DEFAULT_ASSUMPTIONS.knobs.firstPayoutCap,
@@ -850,6 +919,11 @@ export function V1StressBattery() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Breaker Efficacy A/B */}
+      {result.breakerComparisons.length > 0 && (
+        <BreakerEfficacyPanel comparisons={result.breakerComparisons} />
+      )}
 
       {/* Re-run button */}
       <div className="flex justify-end">

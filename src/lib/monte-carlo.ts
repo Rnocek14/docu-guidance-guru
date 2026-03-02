@@ -15,6 +15,16 @@
 // TYPES
 // ============================================================================
 
+import {
+  type BreakerPolicy,
+  type BreakerState,
+  type BreakerDiagnostics,
+  createBreakerState,
+  updateHysteresisCounters,
+  computeRollingPayRevAvg3,
+  aggregateBreakerDiagnostics,
+} from './breaker-policy';
+
 export interface MonteCarloAssumptions {
   // Acquisition
   accountsPerMonth: number;
@@ -66,6 +76,7 @@ export interface MonteCarloConfig {
   monthsPerIteration: number;
   seed?: number; // undefined = use default seed for reproducibility
   randomSeed?: boolean; // true = ignore seed, use Math.random()
+  breakerPolicy?: BreakerPolicy | null; // optional dynamic breaker
 }
 
 export interface MonteCarloResult {
@@ -164,6 +175,7 @@ export interface MonteCarloResult {
 
   rawSamples?: number[][]; // optional: all monthly profits per iteration
   rawMonthResults?: MonthResult[][]; // optional: full per-month breakdown per iteration
+  breakerDiagnostics?: BreakerDiagnostics; // populated when breakerPolicy is set
 }
 
 export interface MonthResult {
@@ -182,6 +194,12 @@ export interface MonthResult {
   resetsThisMonth: number;      // count of resets
   expectedResetsThisMonth: number; // expected resets based on hazard rate (for sanity checks)
   newPassedAccountsThisMonth: number; // new accounts that passed this month (for test bounds)
+  
+  // Breaker state (populated when breakerPolicy is set)
+  breakerLevel: number; // 0 | 1 | 2 — BreakerLevel from breaker-policy
+  breakerApplied: boolean;      // true if knobs were overridden this month
+  payRevRatio: number;           // Pay/Rev for this month
+  payoutsSuppressedByBreaker: number; // payout requests skipped due to L2 freeze
   
   // Detailed payout tracking
   payoutDetails: {
@@ -768,6 +786,9 @@ function simulateMonth(
     );
   }
   
+  const totalRevenueForPayRev = revenue + resetRevenue;
+  const payRevRatio = totalRevenueForPayRev > 0 ? totalPayouts / totalRevenueForPayRev : 0;
+
   return {
     revenue,
     resetRevenue,
@@ -782,6 +803,11 @@ function simulateMonth(
     resetsThisMonth,
     expectedResetsThisMonth,
     newPassedAccountsThisMonth: newPassedAccounts,
+    // Breaker fields — defaults; overridden by caller when policy is active
+    breakerLevel: 0,
+    breakerApplied: false,
+    payRevRatio,
+    payoutsSuppressedByBreaker: 0,
     payoutDetails: {
       requestCount: payoutRequestCount,
       approvedCount: payoutApprovedCount,
@@ -806,7 +832,7 @@ export function runMonteCarlo(
   config: MonteCarloConfig,
   assumptions: MonteCarloAssumptions
 ): MonteCarloResult {
-  const { iterations, monthsPerIteration, seed = 42, randomSeed = false } = config;
+  const { iterations, monthsPerIteration, seed = 42, randomSeed = false, breakerPolicy = null } = config;
   
   // Apply attack intensity
   const effectiveAssumptions = applyAttackIntensity(assumptions, () => 0.5);
@@ -836,6 +862,9 @@ export function runMonteCarlo(
   // NEW: Aggregate account stats from REAL iteration data
   const allIterationStats: IterationAccountStats[] = [];
   
+  // Breaker state collection (one per iteration, only when policy is set)
+  const allBreakerStates: BreakerState[] = [];
+  
   for (let iter = 0; iter < iterations; iter++) {
     const random = createRng(iter);
     const monthProfits: number[] = [];
@@ -850,8 +879,82 @@ export function runMonteCarlo(
       totalEverCompleted: 0,
     };
     
+    // Breaker state for this iteration
+    const breakerState = breakerPolicy ? createBreakerState() : null;
+    const payRevHistory: number[] = [];
+    
     for (let month = 0; month < monthsPerIteration; month++) {
-      const result = simulateMonth(effectiveAssumptions, random, ctx, month);
+      // ── BREAKER POLICY: evaluate and apply knob overrides ──────────
+      let monthAssumptions = effectiveAssumptions;
+      let breakerApplied = false;
+      
+      if (breakerPolicy && breakerState) {
+        const rollingPayRevAvg3 = computeRollingPayRevAvg3(payRevHistory, payRevHistory.length - 1);
+        
+        // Update hysteresis counters BEFORE evaluation
+        updateHysteresisCounters(breakerState, rollingPayRevAvg3);
+        
+        const evaluation = breakerPolicy.evaluate({
+          monthIndex: month,
+          rollingPayRevAvg3,
+          currentLevel: breakerState.level,
+          state: breakerState,
+        });
+        
+        // Record transition
+        if (evaluation.nextLevel !== breakerState.level) {
+          breakerState.events.push({
+            monthIndex: month,
+            fromLevel: breakerState.level,
+            toLevel: evaluation.nextLevel,
+            reason: evaluation.reason,
+            knobOverrides: evaluation.knobOverrides,
+          });
+        }
+        
+        breakerState.level = evaluation.nextLevel;
+        breakerState.levelByMonth.push(evaluation.nextLevel);
+        
+        // Apply knob overrides for L1
+        if (evaluation.knobOverrides && evaluation.nextLevel === 1) {
+          monthAssumptions = {
+            ...effectiveAssumptions,
+            knobs: { ...effectiveAssumptions.knobs, ...evaluation.knobOverrides },
+          };
+          breakerApplied = true;
+        }
+        
+        // L2 = freeze: set payout request rate to 0 effectively
+        if (evaluation.nextLevel === 2) {
+          monthAssumptions = {
+            ...effectiveAssumptions,
+            payoutRequestRate: { min: 0, mode: 0, max: 0 },
+          };
+          breakerApplied = true;
+        }
+      }
+      
+      const result = simulateMonth(monthAssumptions, random, ctx, month);
+      
+      // ── Stamp breaker metadata onto result ─────────────────────────
+      if (breakerState) {
+        result.breakerLevel = breakerState.level;
+        result.breakerApplied = breakerApplied;
+        
+        // Count suppressed payouts at L2
+        if (breakerState.level === 2) {
+          // At L2, all eligible accounts that would have requested are "suppressed"
+          // We approximate: eligible cohort × baseline request rate mode
+          const suppressedEstimate = result.eligibleCohortSize *
+            effectiveAssumptions.payoutRequestRate.mode;
+          result.payoutsSuppressedByBreaker = Math.round(suppressedEstimate);
+          breakerState.payoutsSuppressedByBreaker += result.payoutsSuppressedByBreaker;
+        }
+      }
+      
+      // Track Pay/Rev for rolling window
+      payRevHistory.push(result.payRevRatio);
+      
       monthProfits.push(result.netProfit);
       monthResults.push(result);
       
@@ -875,6 +978,8 @@ export function runMonteCarlo(
         }
       }
     }
+    
+    if (breakerState) allBreakerStates.push(breakerState);
     
     allMonthlyProfits.push(monthProfits);
     allMonthResults.push(monthResults);
@@ -1145,6 +1250,9 @@ export function runMonteCarlo(
     },
     rawSamples: allMonthlyProfits,
     rawMonthResults: allMonthResults,
+    breakerDiagnostics: breakerPolicy && allBreakerStates.length > 0
+      ? aggregateBreakerDiagnostics(breakerPolicy, allBreakerStates)
+      : undefined,
   };
 }
 
