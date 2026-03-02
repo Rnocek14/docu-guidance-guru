@@ -284,6 +284,12 @@ function runStressBattery(): StressBatteryResult {
 
   const drawdown: DrawdownRow[] = ddScenarios.map(s => {
     const r = runMonteCarlo(CONFIG_MATURE_90DAY, s.assumptions);
+    if (import.meta.env.DEV) {
+      const months = r.rawSamples?.[0]?.length ?? 0;
+      if (months && months < MEASURE_START + MEASURE_LEN) {
+        console.warn(`[StressBattery] Mature sim "${s.id}" returned ${months} months; need ${MEASURE_START + MEASURE_LEN}`);
+      }
+    }
     let cumP5: number;
     let cumMean: number;
     let maxDD = 0;
@@ -420,12 +426,7 @@ function runStressBattery(): StressBatteryResult {
     const ddids = new Set(drawdown.map(d => d.id));
     if (ddids.size !== drawdown.length) console.warn('[StressBattery] Duplicate ScenarioId detected in drawdown');
 
-    // Verify measurement window fits within simulation length
-    const sampleLen = scenarios[0]?.result.rawSamples?.[0]?.length ?? 0;
-    const matureLen = drawdown.length > 0 ? (CONFIG_MATURE_90DAY.monthsPerIteration ?? 0) : 0;
-    if (matureLen > 0 && matureLen < MEASURE_START + MEASURE_LEN) {
-      console.warn(`[StressBattery] CONFIG_MATURE_90DAY too short: ${matureLen} months, need ${MEASURE_START + MEASURE_LEN}`);
-    }
+    // (Mature window length is now validated per-run inside the drawdown loop above)
   }
 
   return {
