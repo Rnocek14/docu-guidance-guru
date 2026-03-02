@@ -694,17 +694,18 @@ function simulateMonth(
       // =====================================================================
       let traderPayout = rawPayoutAmount * knobs.payoutSplitPercent;
       
-      const capCount = knobs.firstPayoutCapCount ?? 1;
-      const isCapEligible = account.payoutCount < capCount;
+      const capCount = knobs.firstPayoutCap !== null ? (knobs.firstPayoutCapCount ?? 1) : 0;
+      const isCapEligible = capCount > 0 && account.payoutCount < capCount;
       
       // Apply first-N payout cap (e.g., Apex: first 5 payouts capped at $2k)
-      if (isCapEligible && knobs.firstPayoutCap !== null) {
-        firstPayoutSizes.push(traderPayout); // track before cap
-        if (traderPayout > knobs.firstPayoutCap) {
-          traderPayout = knobs.firstPayoutCap;
+      if (isCapEligible) {
+        const beforeCap = traderPayout;
+        if (traderPayout > knobs.firstPayoutCap!) {
+          traderPayout = knobs.firstPayoutCap!;
           firstPayoutCapHits++;
         }
-        firstPayoutSizes.push(traderPayout); // track after cap
+        // Track after-cap size only (single entry per payout, no double-counting)
+        firstPayoutSizes.push(traderPayout);
       }
       
       // Apply lifetime cap using lifetimePaidTotal (per-user, never resets)
