@@ -498,11 +498,13 @@ function runStressBattery(): StressBatteryResult {
         ...noMetrics,
         margin: rNo.diagnostics.effectiveMargin,
         lossProb: rNo.risk.probabilityOfLoss,
+        meanProfit: rNo.profit.mean,
       },
       withBreaker: {
         ...withMetrics,
         margin: rWith.diagnostics.effectiveMargin,
         lossProb: rWith.risk.probabilityOfLoss,
+        meanProfit: rWith.profit.mean,
         diagnostics: rWith.breakerDiagnostics!,
       },
     };
