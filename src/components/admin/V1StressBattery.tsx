@@ -80,6 +80,25 @@ function withNoVelocityGates(base = DEFAULT_ASSUMPTIONS): MonteCarloAssumptions 
   return a;
 }
 
+function withCostStack(base = DEFAULT_ASSUMPTIONS): MonteCarloAssumptions {
+  const a = deepClone(base);
+  // Add realistic business costs: refunds (~5% of revenue), CAC/affiliates (~15% of revenue)
+  // Model as increased fixed costs + variable costs
+  a.variableCostPerAccount = a.variableCostPerAccount + (a.pricePerAccount * 0.15); // ~15% CAC
+  a.fixedMonthlyCosts = a.fixedMonthlyCosts + (a.accountsPerMonth * a.pricePerAccount * 0.05); // ~5% refunds
+  return a;
+}
+
+function withSoftAttack(base = DEFAULT_ASSUMPTIONS): MonteCarloAssumptions {
+  const a = deepClone(base);
+  // Realistic adversary: skilled traders + higher withdrawal behavior (not coordinated attack)
+  a.passRate = { min: 0.07, mode: 0.10, max: 0.14 };
+  a.payoutRequestRate = { min: 0.35, mode: 0.45, max: 0.55 };
+  a.payoutsPerPaidAccountPerMonth = { min: 0.6, mode: 1.0, max: 1.4 };
+  a.avgPayoutAmount = { mean: a.avgPayoutAmount.mean * 1.2, stdDev: a.avgPayoutAmount.stdDev * 1.2 };
+  return a;
+}
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -93,7 +112,8 @@ interface ScenarioRow {
 interface DrawdownRow {
   name: string;
   maxDD: number;
-  minMonth: number;  // renamed from worstMonth for clarity
+  minMonth: number;
+  cumMean: number;   // mean cumulative 3-month profit (for sanity check vs cumP5)
   cumP5: number;
   isAttack?: boolean;
 }
@@ -165,6 +185,13 @@ function runStressBattery(): StressBatteryResult {
   // Velocity gate impact
   run('No velocity gates (baseline)', withNoVelocityGates());
 
+  // Realism scenarios: business costs
+  run('+ Refunds & CAC (20% costs)', withCostStack());
+  run('+ Costs + 10% pass', withCostStack(withPassRate(0.10)));
+
+  // Soft attack: realistic adversary (not coordinated, just skilled population)
+  run('Soft attack (10% pass, 45% req)', withSoftAttack());
+
   // Price sensitivity
   const priceScenarios: ScenarioRow[] = [];
   const runPrice = (name: string, assumptions: MonteCarloAssumptions) => {
@@ -183,6 +210,8 @@ function runStressBattery(): StressBatteryResult {
     { name: '10% pass rate', assumptions: withPassRate(0.10), isAttack: false },
     { name: '1.5× profitability', assumptions: withHighProfitability(1.5), isAttack: false },
     { name: 'Payout clustering', assumptions: withPayoutClustering(), isAttack: false },
+    { name: 'Soft attack', assumptions: withSoftAttack(), isAttack: false },
+    { name: '+ Refunds & CAC', assumptions: withCostStack(), isAttack: false },
     { name: '10% + clustering + attack', assumptions: withAttack(1.5, withPayoutClustering(withPassRate(0.10))), isAttack: true },
     { name: 'No velocity gates', assumptions: withNoVelocityGates(), isAttack: false },
   ];
@@ -190,14 +219,17 @@ function runStressBattery(): StressBatteryResult {
   const drawdown: DrawdownRow[] = ddScenarios.map(s => {
     const r = runMonteCarlo(CONFIG_90DAY, s.assumptions);
     let cumP5: number;
+    let cumMean: number;
     if (r.rawSamples && r.rawSamples.length > 0) {
       const cumProfits = r.rawSamples.map(iter => iter.reduce((a, b) => a + b, 0));
+      cumMean = cumProfits.reduce((a, b) => a + b, 0) / cumProfits.length;
       cumProfits.sort((a, b) => a - b);
       cumP5 = cumProfits[Math.floor(cumProfits.length * 0.05)];
     } else {
+      cumMean = r.profit.mean * 3;
       cumP5 = r.profit.p5 * 3;
     }
-    return { name: s.name, maxDD: r.risk.maxDrawdown, minMonth: r.risk.worstMonth, cumP5, isAttack: s.isAttack };
+    return { name: s.name, maxDD: r.risk.maxDrawdown, minMonth: r.risk.worstMonth, cumMean, cumP5, isAttack: s.isAttack };
   });
 
   // Baseline diagnostics — compute from rawSamples
@@ -575,8 +607,8 @@ export function V1StressBattery() {
         <CardHeader>
           <CardTitle>90-Day Worst-Case Drawdown (1000 iter × 3 months)</CardTitle>
           <CardDescription>
-            Min Profit Month = single worst month across all iterations (positive = never lost money that month).
-            Cum P5 = 5th percentile of cumulative 3-month net profit.
+            Cum Mean/P5 = cumulative 3-month net profit (mean and 5th percentile).
+            Note: 90-day profits are higher than 12-month monthly mean because early months have minimal payouts (cohort ramp-up).
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -586,6 +618,7 @@ export function V1StressBattery() {
                 <th className="pb-2 pr-4">Scenario</th>
                 <th className="pb-2 pr-4 text-right">90d Max DD</th>
                 <th className="pb-2 pr-4 text-right">Min Profit Month</th>
+                <th className="pb-2 pr-4 text-right">Cum Mean (90d)</th>
                 <th className="pb-2 text-right">Cum P5 (90d)</th>
               </tr>
             </thead>
@@ -598,7 +631,11 @@ export function V1StressBattery() {
                   </td>
                   <td className={`py-2 pr-4 text-right font-mono ${d.maxDD > 0 ? 'text-destructive' : ''}`}>{fmt(d.maxDD)}</td>
                   <td className={`py-2 pr-4 text-right font-mono ${d.minMonth < 0 ? 'text-destructive' : ''}`}>{fmt(d.minMonth)}</td>
-                  <td className={`py-2 text-right font-mono ${d.cumP5 < 0 ? 'text-destructive' : ''}`}>{fmt(d.cumP5)}</td>
+                  <td className="py-2 pr-4 text-right font-mono">{fmt(d.cumMean)}</td>
+                  <td className={`py-2 text-right font-mono ${d.cumP5 < 0 ? 'text-destructive' : d.cumP5 > d.cumMean ? 'text-warning' : ''}`}>
+                    {fmt(d.cumP5)}
+                    {d.cumP5 > d.cumMean && <span className="ml-1 text-xs" title="P5 > Mean indicates very low variance (all iterations profitable)">⚠</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
