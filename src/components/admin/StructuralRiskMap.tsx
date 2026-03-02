@@ -14,7 +14,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Play, Loader2, Grid3X3, AlertTriangle } from 'lucide-react';
+import { Play, Loader2, Grid3X3, AlertTriangle, Building2 } from 'lucide-react';
 import {
   runMonteCarlo,
   DEFAULT_ASSUMPTIONS,
@@ -22,6 +22,8 @@ import {
   type MonteCarloConfig,
 } from '@/lib/monte-carlo';
 import { PAY_REV_GUARDRAIL_V1 } from '@/lib/breaker-policy';
+import { CompetitorOverlayPanel } from './CompetitorOverlay';
+import { ALL_COMPETITOR_SCENARIOS } from '@/lib/competitor-profiles';
 
 // ============================================================================
 // GRID AXES — extended into danger zone to find the real frontier
@@ -176,6 +178,7 @@ export function StructuralRiskMap() {
   const [isRunning, setIsRunning] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('no-breaker');
   const [clustering, setClustering] = useState(false);
+  const [showCompetitors, setShowCompetitors] = useState(false);
 
   const handleRun = useCallback(() => {
     setIsRunning(true);
@@ -200,6 +203,23 @@ export function StructuralRiskMap() {
     for (const c of result.grid) m.set(gridKey(c.passRate, c.requestRate), c);
     return m;
   }, [result]);
+
+  // Competitor markers mapped to nearest grid cell
+  const competitorsByCell = useMemo(() => {
+    if (!showCompetitors) return new Map<string, typeof ALL_COMPETITOR_SCENARIOS>();
+    const findClosest = (val: number, axis: number[]) =>
+      axis.reduce((prev, curr) => Math.abs(curr - val) < Math.abs(prev - val) ? curr : prev);
+    const m = new Map<string, typeof ALL_COMPETITOR_SCENARIOS>();
+    for (const s of ALL_COMPETITOR_SCENARIOS) {
+      const cp = findClosest(s.passRate, PASS_RATES);
+      const cr = findClosest(s.requestRate, REQUEST_RATES);
+      const key = gridKey(cp, cr);
+      const existing = m.get(key) ?? [];
+      existing.push(s);
+      m.set(key, existing);
+    }
+    return m;
+  }, [showCompetitors]);
 
   // Summary stats
   const summary = useMemo(() => {
@@ -307,6 +327,14 @@ export function StructuralRiskMap() {
             >
               With Breakers
             </Button>
+            <Button
+              variant={showCompetitors ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setShowCompetitors(v => !v)}
+            >
+              <Building2 className="mr-1 h-3 w-3" />
+              {showCompetitors ? 'Hide Competitors' : 'Competitors'}
+            </Button>
             <Badge variant="secondary" className="ml-auto">
               {(result.elapsed / 1000).toFixed(1)}s · {PASS_RATES.length}×{REQUEST_RATES.length}
             </Badge>
@@ -378,6 +406,16 @@ export function StructuralRiskMap() {
                         {showBreakers && isBreakerDep && !isRescued && (
                           <div className="text-[10px] text-warning font-semibold">dep</div>
                         )}
+                        {/* Competitor markers */}
+                        {showCompetitors && competitorsByCell.get(gridKey(pr, rr))?.map(s => (
+                          <div
+                            key={s.label}
+                            className={`text-[9px] font-bold ${s.firmId === 'apex' ? 'text-orange-500' : 'text-blue-500'}`}
+                            title={s.notes}
+                          >
+                            {s.firmId === 'apex' ? 'A' : 'F'}{s.variant[0].toUpperCase()}
+                          </div>
+                        ))}
                       </td>
                     );
                   })}
@@ -504,6 +542,20 @@ export function StructuralRiskMap() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Competitor Overlay */}
+      {showCompetitors && (
+        <CompetitorOverlayPanel clustering={result.clustering} />
+      )}
+
+      {/* Competitor legend (inline with grid) */}
+      {showCompetitors && (
+        <div className="flex items-center gap-4 text-xs text-muted-foreground px-1">
+          <span className="font-medium">Grid markers:</span>
+          <span><span className="text-orange-500 font-bold">A</span>C/B/A = Apex Conservative/Base/Aggressive</span>
+          <span><span className="text-blue-500 font-bold">F</span>C/B/A = FTMO Conservative/Base/Aggressive</span>
+        </div>
       )}
 
       {/* Actions */}
