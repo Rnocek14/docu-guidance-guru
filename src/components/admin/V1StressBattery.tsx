@@ -15,10 +15,10 @@ import {
 // CONFIG
 // ============================================================================
 const CONFIG: MonteCarloConfig = { iterations: 500, monthsPerIteration: 12, seed: 42 };
-// Mature 90-day: run 15 months, discard first 12 (full ramp-up), measure months 12–14
-// This gives a true steady-state 3-month window where the cohort is fully mature
-const CONFIG_MATURE_90DAY: MonteCarloConfig = { iterations: 1000, monthsPerIteration: 15, seed: 42 };
-const DD_WARMUP_MONTHS = 12; // skip first 12 months — measure only steady-state
+// Mature 90-day: run 15 months, measure only months 12–14 (true steady-state)
+const CONFIG_MATURE_90DAY: MonteCarloConfig = { iterations: 500, monthsPerIteration: 15, seed: 42 };
+const MEASURE_START = 12;  // first month of measurement window
+const MEASURE_LEN = 3;     // 3-month measurement window
 
 // ============================================================================
 // SCENARIO BUILDERS (deep clone, never drops caps)
@@ -112,14 +112,18 @@ function withSoftAttack(base = DEFAULT_ASSUMPTIONS): MonteCarloAssumptions {
 // ============================================================================
 // TYPES
 // ============================================================================
+type ScenarioId = 'baseline' | 'pass5' | 'pass10' | 'shift2pp' | 'profit15x' | 'clustering' | 'max_withdrawal' | 'pass5_profit15x' | 'attack_combined' | 'solo200' | 'solo200_pass10' | 'no_gates' | 'cost_stack' | 'cost_pass10' | 'soft_attack';
+
 interface ScenarioRow {
+  id: ScenarioId;
   name: string;
   result: MonteCarloResult;
   assumptions: MonteCarloAssumptions;
-  isAttack?: boolean; // marks adversarial scenarios
+  isAttack?: boolean;
 }
 
 interface DrawdownRow {
+  id: string;
   name: string;
   maxDD: number;
   minMonth: number;
@@ -127,7 +131,7 @@ interface DrawdownRow {
   cumP5: number;
   payRevP95: number;
   payRevP99: number;
-  pctAbove45: number;   // % of months with Pay/Rev > 45%
+  pctAbove45: number;
   monthMeansWindow: number[];
   isAttack?: boolean;
 }
@@ -193,63 +197,61 @@ function monthMeans(rawSamples: number[][]): number[] {
 // ============================================================================
 function runStressBattery(): StressBatteryResult {
   const scenarios: ScenarioRow[] = [];
-  const run = (name: string, assumptions: MonteCarloAssumptions, isAttack = false) => {
-    scenarios.push({ name, assumptions, result: runMonteCarlo(CONFIG, assumptions), isAttack });
+  const run = (id: ScenarioId, name: string, assumptions: MonteCarloAssumptions, isAttack = false) => {
+    scenarios.push({ id, name, assumptions, result: runMonteCarlo(CONFIG, assumptions), isAttack });
   };
 
   // Core scenarios
-  run('Baseline (7% pass, 500/mo)', DEFAULT_ASSUMPTIONS);
-  run('5% pass rate (conservative)', withPassRate(0.05));
-  run('10% pass rate (danger zone)', withPassRate(0.10));
+  run('baseline', 'Baseline (7% pass, 500/mo)', DEFAULT_ASSUMPTIONS);
+  run('pass5', '5% pass rate (conservative)', withPassRate(0.05));
+  run('pass10', '10% pass rate (danger zone)', withPassRate(0.10));
 
   const baseMode = DEFAULT_ASSUMPTIONS.passRate.mode;
-  run(`+2pp shift (${(baseMode * 100).toFixed(0)}% → ${((baseMode + 0.02) * 100).toFixed(0)}%)`, withPassRate(baseMode + 0.02));
+  run('shift2pp', `+2pp shift (${(baseMode * 100).toFixed(0)}% → ${((baseMode + 0.02) * 100).toFixed(0)}%)`, withPassRate(baseMode + 0.02));
 
   // Payout stress
-  run('1.5× funded profitability', withHighProfitability(1.5));
-  run('Payout clustering', withPayoutClustering());
-  run('Max withdrawal pressure', withMaxWithdrawalPressure());
+  run('profit15x', '1.5× funded profitability', withHighProfitability(1.5));
+  run('clustering', 'Payout clustering', withPayoutClustering());
+  run('max_withdrawal', 'Max withdrawal pressure', withMaxWithdrawalPressure());
 
   // Combined stress
-  run('5% pass + 1.5× profit', withHighProfitability(1.5, withPassRate(0.05)));
-  run('10% + clustering + attack', withAttack(1.5, withPayoutClustering(withPassRate(0.10))), true); // ATTACK
+  run('pass5_profit15x', '5% pass + 1.5× profit', withHighProfitability(1.5, withPassRate(0.05)));
+  run('attack_combined', '10% + clustering + attack', withAttack(1.5, withPayoutClustering(withPassRate(0.10))), true);
 
   // Solo operator
-  run('Solo ramp (200/mo)', withVolume(200));
-  run('Solo ramp + 10% pass', withPassRate(0.10, withVolume(200)));
+  run('solo200', 'Solo ramp (200/mo)', withVolume(200));
+  run('solo200_pass10', 'Solo ramp + 10% pass', withPassRate(0.10, withVolume(200)));
 
   // Velocity gate impact
-  run('No velocity gates (baseline)', withNoVelocityGates());
+  run('no_gates', 'No velocity gates (baseline)', withNoVelocityGates());
 
   // Realism scenarios: business costs
-  run('+ Refunds & CAC (20% costs)', withCostStack());
-  run('+ Costs + 10% pass', withCostStack(withPassRate(0.10)));
+  run('cost_stack', '+ Refunds & CAC (stochastic)', withCostStack());
+  run('cost_pass10', '+ Costs + 10% pass', withCostStack(withPassRate(0.10)));
 
-  // Soft attack: realistic adversary (not coordinated, just skilled population)
-  run('Adversarial-but-plausible (breaker target)', withSoftAttack());
+  // Soft attack: realistic adversary (breaker design target)
+  run('soft_attack', 'Adversarial-but-plausible (breaker target)', withSoftAttack());
 
   // Price sensitivity
   const priceScenarios: ScenarioRow[] = [];
-  const runPrice = (name: string, assumptions: MonteCarloAssumptions) => {
-    priceScenarios.push({ name, assumptions, result: runMonteCarlo(CONFIG, assumptions) });
+  const runPrice = (id: ScenarioId, name: string, assumptions: MonteCarloAssumptions) => {
+    priceScenarios.push({ id, name, assumptions, result: runMonteCarlo(CONFIG, assumptions) });
   };
-  runPrice('$149 (current)', DEFAULT_ASSUMPTIONS);
-  runPrice('$179', withPrice(179));
-  runPrice('$199', withPrice(199));
-  runPrice('$249', withPrice(249));
-  runPrice('$199 @ 10% pass', withPassRate(0.10, withPrice(199)));
-  runPrice('$249 @ 10% pass', withPassRate(0.10, withPrice(249)));
+  runPrice('baseline', '$149 (current)', DEFAULT_ASSUMPTIONS);
+  runPrice('baseline', '$179', withPrice(179));
+  runPrice('baseline', '$199', withPrice(199));
+  runPrice('baseline', '$249', withPrice(249));
+  runPrice('pass10', '$199 @ 10% pass', withPassRate(0.10, withPrice(199)));
+  runPrice('pass10', '$249 @ 10% pass', withPassRate(0.10, withPrice(249)));
 
-  // 90-day drawdown
-  const ddScenarios = [
-    { name: 'Baseline', assumptions: DEFAULT_ASSUMPTIONS, isAttack: false },
-    { name: '10% pass rate', assumptions: withPassRate(0.10), isAttack: false },
-    { name: '1.5× profitability', assumptions: withHighProfitability(1.5), isAttack: false },
-    { name: 'Payout clustering', assumptions: withPayoutClustering(), isAttack: false },
-    { name: 'Adversarial-but-plausible', assumptions: withSoftAttack(), isAttack: false },
-    { name: '+ Refunds & CAC', assumptions: withCostStack(), isAttack: false },
-    { name: '10% + clustering + attack', assumptions: withAttack(1.5, withPayoutClustering(withPassRate(0.10))), isAttack: true },
-    { name: 'No velocity gates', assumptions: withNoVelocityGates(), isAttack: false },
+  // Steady-state 90-day panel — reduced set for performance (15mo × 500 iter each)
+  const ddScenarios: { id: string; name: string; assumptions: MonteCarloAssumptions; isAttack: boolean }[] = [
+    { id: 'baseline', name: 'Baseline', assumptions: DEFAULT_ASSUMPTIONS, isAttack: false },
+    { id: 'clustering', name: 'Payout clustering', assumptions: withPayoutClustering(), isAttack: false },
+    { id: 'soft_attack', name: 'Adversarial-but-plausible', assumptions: withSoftAttack(), isAttack: false },
+    { id: 'cost_stack', name: '+ Refunds & CAC', assumptions: withCostStack(), isAttack: false },
+    { id: 'attack_combined', name: '10% + clustering + attack', assumptions: withAttack(1.5, withPayoutClustering(withPassRate(0.10))), isAttack: true },
+    { id: 'no_gates', name: 'No velocity gates', assumptions: withNoVelocityGates(), isAttack: false },
   ];
 
   const drawdown: DrawdownRow[] = ddScenarios.map(s => {
@@ -264,28 +266,28 @@ function runStressBattery(): StressBatteryResult {
     let monthMeansWindow: number[] = [];
 
     if (r.rawSamples && r.rawSamples.length > 0) {
-      const matureSamples = r.rawSamples.map(iter => iter.slice(DD_WARMUP_MONTHS));
+      // Explicit measurement window: months MEASURE_START to MEASURE_START+MEASURE_LEN
+      const windowSamples = r.rawSamples.map(iter => iter.slice(MEASURE_START, MEASURE_START + MEASURE_LEN));
 
-      // Cumulative 3-month profit (post warm-up)
-      const cumProfits = matureSamples.map(iter => iter.reduce((a, b) => a + b, 0));
+      // Cumulative profit in measurement window
+      const cumProfits = windowSamples.map(iter => iter.reduce((a, b) => a + b, 0));
       cumMean = cumProfits.reduce((a, b) => a + b, 0) / cumProfits.length;
       cumProfits.sort((a, b) => a - b);
       cumP5 = cumProfits[Math.floor(cumProfits.length * 0.05)];
 
-      // Min monthly profit (post warm-up)
-      const allMatureMonths = matureSamples.flat();
-      minMonth = allMatureMonths.length > 0 ? Math.min(...allMatureMonths) : 0;
+      // Min monthly profit in window
+      const allWindowMonths = windowSamples.flat();
+      minMonth = allWindowMonths.length > 0 ? Math.min(...allWindowMonths) : 0;
 
       // Per-month means in the measurement window
-      const windowMonths = matureSamples[0]?.length ?? 0;
-      for (let m = 0; m < windowMonths; m++) {
-        let s2 = 0;
-        for (let i = 0; i < matureSamples.length; i++) s2 += matureSamples[i][m];
-        monthMeansWindow.push(s2 / matureSamples.length);
+      for (let m = 0; m < MEASURE_LEN; m++) {
+        let sum = 0;
+        for (let i = 0; i < windowSamples.length; i++) sum += windowSamples[i][m];
+        monthMeansWindow.push(sum / windowSamples.length);
       }
 
-      // Recompute DD on mature window (peak-to-trough on cumulative equity)
-      for (const iter of matureSamples) {
+      // Peak-to-trough DD on cumulative equity within window
+      for (const iter of windowSamples) {
         let cum = 0;
         let peak = 0;
         for (const p of iter) {
@@ -295,28 +297,30 @@ function runStressBattery(): StressBatteryResult {
         }
       }
 
-      // Pay/Rev P95, P99, and % above 45% from rawMonthResults (mature window)
+      // Pay/Rev P95, P99, %>45% from rawMonthResults (same measurement window)
       if (r.rawMonthResults && r.rawMonthResults.length > 0) {
-        const matureRatios: number[] = [];
+        const ratios: number[] = [];
         for (const iter of r.rawMonthResults) {
-          for (let m = DD_WARMUP_MONTHS; m < iter.length; m++) {
-            const rev = totalRevenue(iter[m]);
-            if (rev > 0) matureRatios.push(iter[m].payouts / rev);
+          for (let m = MEASURE_START; m < MEASURE_START + MEASURE_LEN; m++) {
+            if (m < iter.length) {
+              const rev = totalRevenue(iter[m]);
+              if (rev > 0) ratios.push(iter[m].payouts / rev);
+            }
           }
         }
-        matureRatios.sort((a, b) => a - b);
-        const n = matureRatios.length;
-        payRevP95 = n > 0 ? matureRatios[Math.floor(n * 0.95)] : 0;
-        payRevP99 = n > 0 ? matureRatios[Math.floor(n * 0.99)] : 0;
-        pctAbove45 = n > 0 ? matureRatios.filter(r => r > 0.45).length / n : 0;
+        ratios.sort((a, b) => a - b);
+        const n = ratios.length;
+        payRevP95 = n > 0 ? ratios[Math.floor(n * 0.95)] : 0;
+        payRevP99 = n > 0 ? ratios[Math.floor(n * 0.99)] : 0;
+        pctAbove45 = n > 0 ? ratios.filter(r => r > 0.45).length / n : 0;
       }
     } else {
-      cumMean = r.profit.mean * 3;
-      cumP5 = r.profit.p5 * 3;
+      cumMean = r.profit.mean * MEASURE_LEN;
+      cumP5 = r.profit.p5 * MEASURE_LEN;
       maxDD = r.risk.maxDrawdown;
       minMonth = r.risk.worstMonth;
     }
-    return { name: s.name, maxDD, minMonth, cumMean, cumP5, payRevP95, payRevP99, pctAbove45, monthMeansWindow, isAttack: s.isAttack };
+    return { id: s.id, name: s.name, maxDD, minMonth, cumMean, cumP5, payRevP95, payRevP99, pctAbove45, monthMeansWindow, isAttack: s.isAttack };
   });
 
   // Baseline diagnostics — compute from rawSamples
@@ -355,8 +359,8 @@ function runStressBattery(): StressBatteryResult {
   );
 
   // Soft attack (breaker target) scenario checks
-  const softAttackScenario = scenarios.find(s => s.name.includes('Adversarial-but-plausible'));
-  const softAttackDD = drawdown.find(d => d.name.includes('Adversarial-but-plausible'));
+  const softAttackScenario = scenarios.find(s => s.id === 'soft_attack');
+  const softAttackDD = drawdown.find(d => d.id === 'soft_attack');
 
   const verdict = [
     { label: 'Baseline margin > 0%', pass: baselineResult.diagnostics.effectiveMargin > 0 },
@@ -365,11 +369,11 @@ function runStressBattery(): StressBatteryResult {
     { label: 'Non-attack scenarios margin > -15%', pass: realisticScenarios.every(s => s.result.diagnostics.effectiveMargin > -0.15) },
     { label: 'Non-attack scenarios loss < $10k/mo', pass: realisticScenarios.every(s => s.result.profit.mean > -10000) },
     { label: 'Realistic DD < $100k', pass: worstDDRealistic < 100000 },
-    { label: '5% pass still profitable', pass: (scenarios.find(s => s.name.includes('5%') && !s.isAttack)?.result.profit.mean ?? 0) > 0 },
-    { label: '+2pp shift still profitable', pass: (scenarios.find(s => s.name.includes('+2pp'))?.result.profit.mean ?? 0) > 0 },
+    { label: '5% pass still profitable', pass: (scenarios.find(s => s.id === 'pass5')?.result.profit.mean ?? 0) > 0 },
+    { label: '+2pp shift still profitable', pass: (scenarios.find(s => s.id === 'shift2pp')?.result.profit.mean ?? 0) > 0 },
     { label: 'Velocity gates reduce payout ratio', pass: (() => {
-      const withGates = scenarios.find(s => s.name.startsWith('Baseline'));
-      const noGates = scenarios.find(s => s.name.includes('No velocity gates'));
+      const withGates = scenarios.find(s => s.id === 'baseline');
+      const noGates = scenarios.find(s => s.id === 'no_gates');
       if (!withGates || !noGates) return true;
       return withGates.result.diagnostics.payoutToRevenueRatio <= noGates.result.diagnostics.payoutToRevenueRatio;
     })() },
@@ -762,7 +766,7 @@ export function V1StressBattery() {
                     {fmt(d.cumP5)}
                   </td>
                   <td className="py-2 text-right font-mono text-xs text-muted-foreground">
-                    {d.monthMeansWindow.map((m, mi) => `M${mi + DD_WARMUP_MONTHS}:${Math.round(m / 1000)}k`).join(' ')}
+                    {d.monthMeansWindow.map((m, mi) => `M${MEASURE_START + mi}:${Math.round(m / 1000)}k`).join(' ')}
                   </td>
                 </tr>
               ))}
