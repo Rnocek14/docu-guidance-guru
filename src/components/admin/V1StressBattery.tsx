@@ -113,6 +113,7 @@ function withSoftAttack(base = DEFAULT_ASSUMPTIONS): MonteCarloAssumptions {
 // TYPES
 // ============================================================================
 type ScenarioId = 'baseline' | 'pass5' | 'pass10' | 'shift2pp' | 'profit15x' | 'clustering' | 'max_withdrawal' | 'pass5_profit15x' | 'attack_combined' | 'solo200' | 'solo200_pass10' | 'no_gates' | 'cost_stack' | 'cost_pass10' | 'soft_attack';
+type PriceId = 'p149' | 'p179' | 'p199' | 'p249' | 'p199_pass10' | 'p249_pass10';
 
 interface ScenarioRow {
   id: ScenarioId;
@@ -123,7 +124,7 @@ interface ScenarioRow {
 }
 
 interface DrawdownRow {
-  id: string;
+  id: ScenarioId;
   name: string;
   maxDD: number;
   minMonth: number;
@@ -151,9 +152,16 @@ interface BaselineDiagnostics {
   monthProfitMeans: number[]; // per-month mean profit (shows ramp-up effect)
 }
 
+interface PriceRow {
+  id: PriceId;
+  name: string;
+  assumptions: MonteCarloAssumptions;
+  result: MonteCarloResult;
+}
+
 interface StressBatteryResult {
   scenarios: ScenarioRow[];
-  priceScenarios: ScenarioRow[];
+  priceScenarios: PriceRow[];
   drawdown: DrawdownRow[];
   baselineDiag: BaselineDiagnostics;
   configCheck: {
@@ -233,19 +241,19 @@ function runStressBattery(): StressBatteryResult {
   run('soft_attack', 'Adversarial-but-plausible (breaker target)', withSoftAttack());
 
   // Price sensitivity
-  const priceScenarios: ScenarioRow[] = [];
-  const runPrice = (id: ScenarioId, name: string, assumptions: MonteCarloAssumptions) => {
+  const priceScenarios: { id: PriceId; name: string; assumptions: MonteCarloAssumptions; result: MonteCarloResult }[] = [];
+  const runPrice = (id: PriceId, name: string, assumptions: MonteCarloAssumptions) => {
     priceScenarios.push({ id, name, assumptions, result: runMonteCarlo(CONFIG, assumptions) });
   };
-  runPrice('baseline', '$149 (current)', DEFAULT_ASSUMPTIONS);
-  runPrice('baseline', '$179', withPrice(179));
-  runPrice('baseline', '$199', withPrice(199));
-  runPrice('baseline', '$249', withPrice(249));
-  runPrice('pass10', '$199 @ 10% pass', withPassRate(0.10, withPrice(199)));
-  runPrice('pass10', '$249 @ 10% pass', withPassRate(0.10, withPrice(249)));
+  runPrice('p149', '$149 (current)', DEFAULT_ASSUMPTIONS);
+  runPrice('p179', '$179', withPrice(179));
+  runPrice('p199', '$199', withPrice(199));
+  runPrice('p249', '$249', withPrice(249));
+  runPrice('p199_pass10', '$199 @ 10% pass', withPassRate(0.10, withPrice(199)));
+  runPrice('p249_pass10', '$249 @ 10% pass', withPassRate(0.10, withPrice(249)));
 
   // Steady-state 90-day panel — reduced set for performance (15mo × 500 iter each)
-  const ddScenarios: { id: string; name: string; assumptions: MonteCarloAssumptions; isAttack: boolean }[] = [
+  const ddScenarios: { id: ScenarioId; name: string; assumptions: MonteCarloAssumptions; isAttack: boolean }[] = [
     { id: 'baseline', name: 'Baseline', assumptions: DEFAULT_ASSUMPTIONS, isAttack: false },
     { id: 'clustering', name: 'Payout clustering', assumptions: withPayoutClustering(), isAttack: false },
     { id: 'soft_attack', name: 'Adversarial-but-plausible', assumptions: withSoftAttack(), isAttack: false },
@@ -273,7 +281,8 @@ function runStressBattery(): StressBatteryResult {
       const cumProfits = windowSamples.map(iter => iter.reduce((a, b) => a + b, 0));
       cumMean = cumProfits.reduce((a, b) => a + b, 0) / cumProfits.length;
       cumProfits.sort((a, b) => a - b);
-      cumP5 = cumProfits[Math.floor(cumProfits.length * 0.05)];
+      const safeIdx = (p: number, len: number) => Math.min(len - 1, Math.max(0, Math.floor(len * p)));
+      cumP5 = cumProfits[safeIdx(0.05, cumProfits.length)];
 
       // Min monthly profit in window
       const allWindowMonths = windowSamples.flat();
@@ -310,8 +319,9 @@ function runStressBattery(): StressBatteryResult {
         }
         ratios.sort((a, b) => a - b);
         const n = ratios.length;
-        payRevP95 = n > 0 ? ratios[Math.floor(n * 0.95)] : 0;
-        payRevP99 = n > 0 ? ratios[Math.floor(n * 0.99)] : 0;
+        const pIdx = (p: number) => Math.min(n - 1, Math.max(0, Math.floor(n * p)));
+        payRevP95 = n > 0 ? ratios[pIdx(0.95)] : 0;
+        payRevP99 = n > 0 ? ratios[pIdx(0.99)] : 0;
         pctAbove45 = n > 0 ? ratios.filter(r => r > 0.45).length / n : 0;
       }
     } else {
