@@ -191,7 +191,8 @@ function totalRevenue(month: { revenue: number; resetRevenue: number }) {
 /** Safe percentile index — guards len<=0 */
 function safeIdx(p: number, len: number): number {
   if (len <= 0) return 0;
-  return Math.min(len - 1, Math.max(0, Math.floor(len * p)));
+  const pp = Math.min(1, Math.max(0, p));
+  return Math.min(len - 1, Math.max(0, Math.floor(len * pp)));
 }
 
 /** Compute per-month mean profit across iterations */
@@ -207,11 +208,15 @@ function monthMeans(rawSamples: number[][]): number[] {
 }
 
 // Pre-build shared assumptions so 12-month and 90-day panels use identical configs
+const _pass10 = withPassRate(0.10);
+const _clustering_pass10 = withPayoutClustering(_pass10);
+
 const SHARED_ASSUMPTIONS = {
   clustering: withPayoutClustering(),
   costStack: withCostStack(),
   softAttack: withSoftAttack(),
-  attackCombined: withAttack(1.5, withPayoutClustering(withPassRate(0.10))),
+  clusteringPass10: _clustering_pass10,
+  attackCombined: withAttack(1.5, _clustering_pass10),
   noGates: withNoVelocityGates(),
 } as const;
 
@@ -412,6 +417,15 @@ function runStressBattery(): StressBatteryResult {
     if (sids.size !== scenarios.length) console.warn('[StressBattery] Duplicate ScenarioId detected in scenarios');
     const pids = new Set(priceScenarios.map(s => s.id));
     if (pids.size !== priceScenarios.length) console.warn('[StressBattery] Duplicate PriceId detected in priceScenarios');
+    const ddids = new Set(drawdown.map(d => d.id));
+    if (ddids.size !== drawdown.length) console.warn('[StressBattery] Duplicate ScenarioId detected in drawdown');
+
+    // Verify measurement window fits within simulation length
+    const sampleLen = scenarios[0]?.result.rawSamples?.[0]?.length ?? 0;
+    const matureLen = drawdown.length > 0 ? (CONFIG_MATURE_90DAY.monthsPerIteration ?? 0) : 0;
+    if (matureLen > 0 && matureLen < MEASURE_START + MEASURE_LEN) {
+      console.warn(`[StressBattery] CONFIG_MATURE_90DAY too short: ${matureLen} months, need ${MEASURE_START + MEASURE_LEN}`);
+    }
   }
 
   return {
