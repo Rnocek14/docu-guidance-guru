@@ -85,10 +85,17 @@ function withNoVelocityGates(base = DEFAULT_ASSUMPTIONS): MonteCarloAssumptions 
 
 function withCostStack(base = DEFAULT_ASSUMPTIONS): MonteCarloAssumptions {
   const a = deepClone(base);
-  // Add realistic business costs: refunds (~5% of revenue), CAC/affiliates (~15% of revenue)
-  // Model as increased fixed costs + variable costs
-  a.variableCostPerAccount = a.variableCostPerAccount + (a.pricePerAccount * 0.15); // ~15% CAC
-  a.fixedMonthlyCosts = a.fixedMonthlyCosts + (a.accountsPerMonth * a.pricePerAccount * 0.05); // ~5% refunds
+  // Stochastic business costs:
+  // CAC: ~$35/sale ± $10 (modeled as variable cost per account)
+  // Refunds: ~4% of revenue ± 2% (modeled as increased fixed costs with variance baked into chargebacks)
+  a.variableCostPerAccount = a.variableCostPerAccount + 35; // ~$35 CAC per sale
+  a.fixedMonthlyCosts = a.fixedMonthlyCosts + (a.accountsPerMonth * a.pricePerAccount * 0.04); // ~4% refund baseline
+  // Increase chargeback variance to model stochastic refund spikes ("usually low, sometimes ugly")
+  a.chargebackRate = {
+    min: a.chargebackRate.min + 0.01,
+    mode: a.chargebackRate.mode + 0.02,
+    max: Math.min(a.chargebackRate.max + 0.08, 0.15), // occasional ugly months up to 15%
+  };
   return a;
 }
 
@@ -116,8 +123,10 @@ interface DrawdownRow {
   name: string;
   maxDD: number;
   minMonth: number;
-  cumMean: number;   // mean cumulative 3-month profit (for sanity check vs cumP5)
+  cumMean: number;
   cumP5: number;
+  payRevP95: number;  // 95th percentile of monthly payout/revenue ratio (liquidity stress)
+  monthMeansWindow: number[]; // per-month means in measurement window
   isAttack?: boolean;
 }
 
@@ -210,7 +219,7 @@ function runStressBattery(): StressBatteryResult {
   run('+ Costs + 10% pass', withCostStack(withPassRate(0.10)));
 
   // Soft attack: realistic adversary (not coordinated, just skilled population)
-  run('Soft attack (10% pass, 45% req)', withSoftAttack());
+  run('Adversarial-but-plausible (breaker target)', withSoftAttack());
 
   // Price sensitivity
   const priceScenarios: ScenarioRow[] = [];
@@ -230,7 +239,7 @@ function runStressBattery(): StressBatteryResult {
     { name: '10% pass rate', assumptions: withPassRate(0.10), isAttack: false },
     { name: '1.5× profitability', assumptions: withHighProfitability(1.5), isAttack: false },
     { name: 'Payout clustering', assumptions: withPayoutClustering(), isAttack: false },
-    { name: 'Soft attack', assumptions: withSoftAttack(), isAttack: false },
+    { name: 'Adversarial-but-plausible', assumptions: withSoftAttack(), isAttack: false },
     { name: '+ Refunds & CAC', assumptions: withCostStack(), isAttack: false },
     { name: '10% + clustering + attack', assumptions: withAttack(1.5, withPayoutClustering(withPassRate(0.10))), isAttack: true },
     { name: 'No velocity gates', assumptions: withNoVelocityGates(), isAttack: false },
@@ -242,10 +251,10 @@ function runStressBattery(): StressBatteryResult {
     let cumMean: number;
     let maxDD = 0;
     let minMonth = 0;
+    let payRevP95 = 0;
+    let monthMeansWindow: number[] = [];
 
     if (r.rawSamples && r.rawSamples.length > 0) {
-      // Use only post-warmup months (months DD_WARMUP_MONTHS..end) for measurement
-      // This gives a "mature cohort" 90-day window, fixing DD=0 from ramp-up
       const matureSamples = r.rawSamples.map(iter => iter.slice(DD_WARMUP_MONTHS));
 
       // Cumulative 3-month profit (post warm-up)
@@ -258,7 +267,15 @@ function runStressBattery(): StressBatteryResult {
       const allMatureMonths = matureSamples.flat();
       minMonth = allMatureMonths.length > 0 ? Math.min(...allMatureMonths) : 0;
 
-      // Recompute DD on mature window (peak-to-trough on cumulative)
+      // Per-month means in the measurement window
+      const windowMonths = matureSamples[0]?.length ?? 0;
+      for (let m = 0; m < windowMonths; m++) {
+        let s2 = 0;
+        for (let i = 0; i < matureSamples.length; i++) s2 += matureSamples[i][m];
+        monthMeansWindow.push(s2 / matureSamples.length);
+      }
+
+      // Recompute DD on mature window (peak-to-trough on cumulative equity)
       for (const iter of matureSamples) {
         let cum = 0;
         let peak = 0;
@@ -268,13 +285,26 @@ function runStressBattery(): StressBatteryResult {
           maxDD = Math.max(maxDD, peak - cum);
         }
       }
+
+      // Pay/Rev P95: compute per-month payout/revenue ratios from rawMonthResults (mature window)
+      if (r.rawMonthResults && r.rawMonthResults.length > 0) {
+        const matureRatios: number[] = [];
+        for (const iter of r.rawMonthResults) {
+          for (let m = DD_WARMUP_MONTHS; m < iter.length; m++) {
+            const rev = iter[m].revenue + iter[m].resetRevenue;
+            if (rev > 0) matureRatios.push(iter[m].payouts / rev);
+          }
+        }
+        matureRatios.sort((a, b) => a - b);
+        payRevP95 = matureRatios.length > 0 ? matureRatios[Math.floor(matureRatios.length * 0.95)] : 0;
+      }
     } else {
       cumMean = r.profit.mean * 3;
       cumP5 = r.profit.p5 * 3;
       maxDD = r.risk.maxDrawdown;
       minMonth = r.risk.worstMonth;
     }
-    return { name: s.name, maxDD, minMonth, cumMean, cumP5, isAttack: s.isAttack };
+    return { name: s.name, maxDD, minMonth, cumMean, cumP5, payRevP95, monthMeansWindow, isAttack: s.isAttack };
   });
 
   // Baseline diagnostics — compute from rawSamples
@@ -680,8 +710,10 @@ export function V1StressBattery() {
                 <th className="pb-2 pr-4">Scenario</th>
                 <th className="pb-2 pr-4 text-right">90d Max DD</th>
                 <th className="pb-2 pr-4 text-right">Min Profit Month</th>
+                <th className="pb-2 pr-4 text-right">Pay/Rev P95</th>
                 <th className="pb-2 pr-4 text-right">Cum Mean (90d)</th>
-                <th className="pb-2 text-right">Cum P5 (90d)</th>
+                <th className="pb-2 pr-4 text-right">Cum P5 (90d)</th>
+                <th className="pb-2 text-right">Month Means</th>
               </tr>
             </thead>
             <tbody>
@@ -691,12 +723,21 @@ export function V1StressBattery() {
                     {d.isAttack && <span className="mr-1">🔴</span>}
                     {d.name}
                   </td>
-                  <td className={`py-2 pr-4 text-right font-mono ${d.maxDD > 0 ? 'text-destructive' : ''}`}>{fmt(d.maxDD)}</td>
+                  <td className={`py-2 pr-4 text-right font-mono ${d.maxDD > 0 ? 'text-destructive' : ''}`}>
+                    {fmt(d.maxDD)}
+                    {d.maxDD === 0 && <span className="ml-1 text-xs text-muted-foreground" title="All months profitable — no peak-to-trough decline exists">≡0</span>}
+                  </td>
                   <td className={`py-2 pr-4 text-right font-mono ${d.minMonth < 0 ? 'text-destructive' : ''}`}>{fmt(d.minMonth)}</td>
+                  <td className={`py-2 pr-4 text-right font-mono ${d.payRevP95 > 0.5 ? 'text-destructive font-bold' : d.payRevP95 > 0.35 ? 'text-warning' : ''}`}>
+                    {pct(d.payRevP95)}
+                  </td>
                   <td className="py-2 pr-4 text-right font-mono">{fmt(d.cumMean)}</td>
-                  <td className={`py-2 text-right font-mono ${d.cumP5 < 0 ? 'text-destructive' : d.cumP5 > d.cumMean ? 'text-warning' : ''}`}>
+                  <td className={`py-2 pr-4 text-right font-mono ${d.cumP5 < 0 ? 'text-destructive' : d.cumP5 > d.cumMean ? 'text-warning' : ''}`}>
                     {fmt(d.cumP5)}
-                    {d.cumP5 > d.cumMean && <span className="ml-1 text-xs" title="P5 > Mean indicates very low variance (all iterations profitable)">⚠</span>}
+                    {d.cumP5 > d.cumMean && <span className="ml-1 text-xs" title="P5 > Mean indicates very low variance">⚠</span>}
+                  </td>
+                  <td className="py-2 text-right font-mono text-xs text-muted-foreground">
+                    {d.monthMeansWindow.map((m, mi) => `M${mi + DD_WARMUP_MONTHS}:${Math.round(m / 1000)}k`).join(' ')}
                   </td>
                 </tr>
               ))}
