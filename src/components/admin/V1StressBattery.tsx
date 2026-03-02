@@ -188,6 +188,12 @@ function totalRevenue(month: { revenue: number; resetRevenue: number }) {
   return month.revenue + month.resetRevenue;
 }
 
+/** Safe percentile index — guards len<=0 */
+function safeIdx(p: number, len: number): number {
+  if (len <= 0) return 0;
+  return Math.min(len - 1, Math.max(0, Math.floor(len * p)));
+}
+
 /** Compute per-month mean profit across iterations */
 function monthMeans(rawSamples: number[][]): number[] {
   const months = rawSamples[0]?.length ?? 0;
@@ -199,6 +205,15 @@ function monthMeans(rawSamples: number[][]): number[] {
   }
   return means;
 }
+
+// Pre-build shared assumptions so 12-month and 90-day panels use identical configs
+const SHARED_ASSUMPTIONS = {
+  clustering: withPayoutClustering(),
+  costStack: withCostStack(),
+  softAttack: withSoftAttack(),
+  attackCombined: withAttack(1.5, withPayoutClustering(withPassRate(0.10))),
+  noGates: withNoVelocityGates(),
+} as const;
 
 // ============================================================================
 // RUNNER
@@ -219,29 +234,29 @@ function runStressBattery(): StressBatteryResult {
 
   // Payout stress
   run('profit15x', '1.5× funded profitability', withHighProfitability(1.5));
-  run('clustering', 'Payout clustering', withPayoutClustering());
+  run('clustering', 'Payout clustering', SHARED_ASSUMPTIONS.clustering);
   run('max_withdrawal', 'Max withdrawal pressure', withMaxWithdrawalPressure());
 
   // Combined stress
   run('pass5_profit15x', '5% pass + 1.5× profit', withHighProfitability(1.5, withPassRate(0.05)));
-  run('attack_combined', '10% + clustering + attack', withAttack(1.5, withPayoutClustering(withPassRate(0.10))), true);
+  run('attack_combined', '10% + clustering + attack', SHARED_ASSUMPTIONS.attackCombined, true);
 
   // Solo operator
   run('solo200', 'Solo ramp (200/mo)', withVolume(200));
   run('solo200_pass10', 'Solo ramp + 10% pass', withPassRate(0.10, withVolume(200)));
 
   // Velocity gate impact
-  run('no_gates', 'No velocity gates (baseline)', withNoVelocityGates());
+  run('no_gates', 'No velocity gates (baseline)', SHARED_ASSUMPTIONS.noGates);
 
   // Realism scenarios: business costs
-  run('cost_stack', '+ Refunds & CAC (stochastic)', withCostStack());
+  run('cost_stack', '+ Refunds & CAC (stochastic)', SHARED_ASSUMPTIONS.costStack);
   run('cost_pass10', '+ Costs + 10% pass', withCostStack(withPassRate(0.10)));
 
   // Soft attack: realistic adversary (breaker design target)
-  run('soft_attack', 'Adversarial-but-plausible (breaker target)', withSoftAttack());
+  run('soft_attack', 'Adversarial-but-plausible (breaker target)', SHARED_ASSUMPTIONS.softAttack);
 
   // Price sensitivity
-  const priceScenarios: { id: PriceId; name: string; assumptions: MonteCarloAssumptions; result: MonteCarloResult }[] = [];
+  const priceScenarios: PriceRow[] = [];
   const runPrice = (id: PriceId, name: string, assumptions: MonteCarloAssumptions) => {
     priceScenarios.push({ id, name, assumptions, result: runMonteCarlo(CONFIG, assumptions) });
   };
@@ -255,11 +270,11 @@ function runStressBattery(): StressBatteryResult {
   // Steady-state 90-day panel — reduced set for performance (15mo × 500 iter each)
   const ddScenarios: { id: ScenarioId; name: string; assumptions: MonteCarloAssumptions; isAttack: boolean }[] = [
     { id: 'baseline', name: 'Baseline', assumptions: DEFAULT_ASSUMPTIONS, isAttack: false },
-    { id: 'clustering', name: 'Payout clustering', assumptions: withPayoutClustering(), isAttack: false },
-    { id: 'soft_attack', name: 'Adversarial-but-plausible', assumptions: withSoftAttack(), isAttack: false },
-    { id: 'cost_stack', name: '+ Refunds & CAC', assumptions: withCostStack(), isAttack: false },
-    { id: 'attack_combined', name: '10% + clustering + attack', assumptions: withAttack(1.5, withPayoutClustering(withPassRate(0.10))), isAttack: true },
-    { id: 'no_gates', name: 'No velocity gates', assumptions: withNoVelocityGates(), isAttack: false },
+    { id: 'clustering', name: 'Payout clustering', assumptions: SHARED_ASSUMPTIONS.clustering, isAttack: false },
+    { id: 'soft_attack', name: 'Adversarial-but-plausible', assumptions: SHARED_ASSUMPTIONS.softAttack, isAttack: false },
+    { id: 'cost_stack', name: '+ Refunds & CAC', assumptions: SHARED_ASSUMPTIONS.costStack, isAttack: false },
+    { id: 'attack_combined', name: '10% + clustering + attack', assumptions: SHARED_ASSUMPTIONS.attackCombined, isAttack: true },
+    { id: 'no_gates', name: 'No velocity gates', assumptions: SHARED_ASSUMPTIONS.noGates, isAttack: false },
   ];
 
   const drawdown: DrawdownRow[] = ddScenarios.map(s => {
@@ -281,7 +296,6 @@ function runStressBattery(): StressBatteryResult {
       const cumProfits = windowSamples.map(iter => iter.reduce((a, b) => a + b, 0));
       cumMean = cumProfits.reduce((a, b) => a + b, 0) / cumProfits.length;
       cumProfits.sort((a, b) => a - b);
-      const safeIdx = (p: number, len: number) => Math.min(len - 1, Math.max(0, Math.floor(len * p)));
       cumP5 = cumProfits[safeIdx(0.05, cumProfits.length)];
 
       // Min monthly profit in window
@@ -319,9 +333,8 @@ function runStressBattery(): StressBatteryResult {
         }
         ratios.sort((a, b) => a - b);
         const n = ratios.length;
-        const pIdx = (p: number) => Math.min(n - 1, Math.max(0, Math.floor(n * p)));
-        payRevP95 = n > 0 ? ratios[pIdx(0.95)] : 0;
-        payRevP99 = n > 0 ? ratios[pIdx(0.99)] : 0;
+        payRevP95 = n > 0 ? ratios[safeIdx(0.95, n)] : 0;
+        payRevP99 = n > 0 ? ratios[safeIdx(0.99, n)] : 0;
         pctAbove45 = n > 0 ? ratios.filter(r => r > 0.45).length / n : 0;
       }
     } else {
@@ -392,6 +405,14 @@ function runStressBattery(): StressBatteryResult {
     { label: 'Breaker target: Cum P5 (90d) > $0', pass: (softAttackDD?.cumP5 ?? 0) > 0 },
     { label: 'Breaker target: Loss prob < 30%', pass: (softAttackScenario?.result.risk.probabilityOfLoss ?? 0) < 0.30 },
   ];
+
+  // Dev-mode sanity: catch duplicate IDs early
+  if (import.meta.env.DEV) {
+    const sids = new Set(scenarios.map(s => s.id));
+    if (sids.size !== scenarios.length) console.warn('[StressBattery] Duplicate ScenarioId detected in scenarios');
+    const pids = new Set(priceScenarios.map(s => s.id));
+    if (pids.size !== priceScenarios.length) console.warn('[StressBattery] Duplicate PriceId detected in priceScenarios');
+  }
 
   return {
     scenarios,
