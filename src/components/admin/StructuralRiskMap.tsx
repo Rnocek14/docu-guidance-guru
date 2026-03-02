@@ -5,6 +5,9 @@
  * 
  * v2: Extended axes into danger zone (pass 5–15%, request 20–60%)
  *     + clustering toggle to surface the real insolvency frontier.
+ * 
+ * Perf: gridMap lookup (O(1) per cell), dedicated iteration count,
+ *       canonical clustering overlay from stress battery.
  */
 
 import { useState, useCallback, useMemo } from 'react';
@@ -21,15 +24,11 @@ import {
 import { PAY_REV_GUARDRAIL_V1 } from '@/lib/breaker-policy';
 
 // ============================================================================
-// CONFIG
+// GRID AXES — extended into danger zone to find the real frontier
 // ============================================================================
 
-// Extended axes: push into danger zone to find the real frontier
 const PASS_RATES = [0.05, 0.07, 0.09, 0.10, 0.12, 0.15];
 const REQUEST_RATES = [0.20, 0.25, 0.30, 0.35, 0.45, 0.60];
-
-const CONFIG: MonteCarloConfig = { iterations: 250, monthsPerIteration: 12, seed: 42 };
-const CONFIG_WITH_BREAKER: MonteCarloConfig = { ...CONFIG, breakerPolicy: PAY_REV_GUARDRAIL_V1 };
 
 // ============================================================================
 // TYPES
@@ -38,13 +37,11 @@ const CONFIG_WITH_BREAKER: MonteCarloConfig = { ...CONFIG, breakerPolicy: PAY_RE
 interface GridCell {
   passRate: number;
   requestRate: number;
-  // Without breakers
   margin: number;
   lossProb: number;
   profitMean: number;
   maxDD: number;
   payRevRatio: number;
-  // With breakers
   breakerMargin: number;
   breakerLossProb: number;
   breakerProfitMean: number;
@@ -59,13 +56,20 @@ interface RiskMapResult {
 }
 
 // ============================================================================
-// HELPERS
+// HELPERS — canonical, consistent with stress battery
 // ============================================================================
 
 function deepClone(base: MonteCarloAssumptions): MonteCarloAssumptions {
   return JSON.parse(JSON.stringify(base));
 }
 
+/**
+ * Build assumptions for a grid cell.
+ * Clustering overlay matches the stress battery's withPayoutClustering():
+ *   - payoutsPerPaidAccountPerMonth: { min: 0.8, mode: 1.4, max: 2.0 }
+ *   - avgPayoutAmount scaled 1.15×
+ * But does NOT override payoutRequestRate (that's the grid axis).
+ */
 function buildAssumptions(
   passMode: number,
   requestMode: number,
@@ -89,15 +93,29 @@ function buildAssumptions(
   return a;
 }
 
+/** Stable key for grid lookup — avoids float-equality fragility */
+function gridKey(pr: number, rr: number): string {
+  return `${pr.toFixed(4)}|${rr.toFixed(4)}`;
+}
+
+// ============================================================================
+// GRID RUNNER
+// ============================================================================
+
 function runGrid(clustering: boolean): RiskMapResult {
   const start = Date.now();
   const grid: GridCell[] = [];
 
+  // Dedicated grid config: smaller iterations for speed, tuned per mode
+  const iterations = clustering ? 350 : 250;
+  const baseConfig: MonteCarloConfig = { iterations, monthsPerIteration: 12, seed: 42 };
+  const breakerConfig: MonteCarloConfig = { ...baseConfig, breakerPolicy: PAY_REV_GUARDRAIL_V1 };
+
   for (const pr of PASS_RATES) {
     for (const rr of REQUEST_RATES) {
       const assumptions = buildAssumptions(pr, rr, clustering);
-      const rNo = runMonteCarlo(CONFIG, assumptions);
-      const rWith = runMonteCarlo(CONFIG_WITH_BREAKER, assumptions);
+      const rNo = runMonteCarlo(baseConfig, assumptions);
+      const rWith = runMonteCarlo(breakerConfig, assumptions);
 
       grid.push({
         passRate: pr,
@@ -173,20 +191,29 @@ export function StructuralRiskMap() {
 
   const totalSims = PASS_RATES.length * REQUEST_RATES.length * 2;
 
+  // O(1) cell lookup — avoids O(cells²) .find() in render
+  const gridMap = useMemo(() => {
+    if (!result) return new Map<string, GridCell>();
+    const m = new Map<string, GridCell>();
+    for (const c of result.grid) m.set(gridKey(c.passRate, c.requestRate), c);
+    return m;
+  }, [result]);
+
   // Summary stats
   const summary = useMemo(() => {
     if (!result) return null;
-    const noBreaker = result.grid;
-    const greenNo = noBreaker.filter(c => c.lossProb < 0.05).length;
-    const yellowNo = noBreaker.filter(c => c.lossProb >= 0.05 && c.lossProb < 0.15).length;
-    const redNo = noBreaker.filter(c => c.lossProb >= 0.15).length;
-    const rescued = noBreaker.filter(c => c.lossProb >= 0.15 && c.breakerLossProb < 0.15).length;
-    const breakerDependent = noBreaker.filter(c => c.lossProb >= 0.05 && c.breakerLossProb < 0.05).length;
-    const highL2 = noBreaker.filter(c => c.breakerL2Pct > 0.10).length;
+    const cells = result.grid;
+    const greenNo = cells.filter(c => c.lossProb < 0.05).length;
+    const yellowNo = cells.filter(c => c.lossProb >= 0.05 && c.lossProb < 0.15).length;
+    const redNo = cells.filter(c => c.lossProb >= 0.15).length;
+    // Rescued: danger (≥15%) → below danger (<15%) with breakers
+    const rescued = cells.filter(c => c.lossProb >= 0.15 && c.breakerLossProb < 0.15).length;
+    // Breaker-dependent: caution (5–15%) → safe (<5%) only with breakers
+    const breakerDependent = cells.filter(c => c.lossProb >= 0.05 && c.lossProb < 0.15 && c.breakerLossProb < 0.05).length;
+    const highL2 = cells.filter(c => c.breakerL2Pct > 0.10).length;
 
-    // Find insolvency frontier (lowest pass rate with a red cell)
-    const redPasses = [...new Set(noBreaker.filter(c => c.lossProb >= 0.15).map(c => c.passRate))].sort((a, b) => a - b);
-    const yellowPasses = [...new Set(noBreaker.filter(c => c.lossProb >= 0.05).map(c => c.passRate))].sort((a, b) => a - b);
+    const redPasses = [...new Set(cells.filter(c => c.lossProb >= 0.15).map(c => c.passRate))].sort((a, b) => a - b);
+    const yellowPasses = [...new Set(cells.filter(c => c.lossProb >= 0.05).map(c => c.passRate))].sort((a, b) => a - b);
 
     return {
       greenNo, yellowNo, redNo, rescued, breakerDependent, highL2,
@@ -195,9 +222,9 @@ export function StructuralRiskMap() {
     };
   }, [result]);
 
-  // Find current config position
   const currentPass = DEFAULT_ASSUMPTIONS.passRate.mode;
   const currentRequest = DEFAULT_ASSUMPTIONS.payoutRequestRate.mode;
+  const showBreakers = viewMode === 'with-breaker';
 
   if (!result) {
     return (
@@ -211,7 +238,6 @@ export function StructuralRiskMap() {
             Each cell runs with and without breakers.
           </p>
 
-          {/* Clustering toggle */}
           <div className="flex items-center gap-3 mb-4">
             <Button
               variant={clustering ? 'outline' : 'default'}
@@ -231,7 +257,7 @@ export function StructuralRiskMap() {
           </div>
 
           <p className="text-xs text-muted-foreground mb-4">
-            {totalSims} simulations × {CONFIG.iterations} iterations.
+            {totalSims} sims × {clustering ? '350' : '250'} iter.
             {clustering ? ' Clustering ON: correlated payout timing overlay.' : ''}
             {' '}~60–180s.
           </p>
@@ -243,8 +269,6 @@ export function StructuralRiskMap() {
       </Card>
     );
   }
-
-  const showBreakers = viewMode === 'with-breaker';
 
   return (
     <div className="space-y-4">
@@ -282,7 +306,7 @@ export function StructuralRiskMap() {
               With Breakers
             </Button>
             <Badge variant="secondary" className="ml-auto">
-              {(result.elapsed / 1000).toFixed(1)}s · {PASS_RATES.length}×{REQUEST_RATES.length} · {CONFIG.iterations} iter
+              {(result.elapsed / 1000).toFixed(1)}s · {PASS_RATES.length}×{REQUEST_RATES.length}
             </Badge>
           </div>
         </CardHeader>
@@ -311,9 +335,7 @@ export function StructuralRiskMap() {
                     {pct(pr)}
                   </td>
                   {REQUEST_RATES.map(rr => {
-                    const cell = result.grid.find(
-                      c => c.passRate === pr && c.requestRate === rr
-                    );
+                    const cell = gridMap.get(gridKey(pr, rr));
                     if (!cell) return <td key={rr} />;
 
                     const lp = showBreakers ? cell.breakerLossProb : cell.lossProb;
@@ -324,8 +346,10 @@ export function StructuralRiskMap() {
                       Math.abs(pr - currentPass) < 0.005 &&
                       Math.abs(rr - currentRequest) < 0.005;
 
-                    // Show if breakers rescue this cell
+                    // Rescued: danger → below danger with breakers
                     const isRescued = cell.lossProb >= 0.15 && cell.breakerLossProb < 0.15;
+                    // Breaker-dependent: caution → safe only with breakers
+                    const isBreakerDep = cell.lossProb >= 0.05 && cell.lossProb < 0.15 && cell.breakerLossProb < 0.05;
 
                     return (
                       <td
@@ -348,6 +372,9 @@ export function StructuralRiskMap() {
                         )}
                         {showBreakers && isRescued && (
                           <div className="text-[10px] text-primary font-semibold">rescued</div>
+                        )}
+                        {showBreakers && isBreakerDep && !isRescued && (
+                          <div className="text-[10px] text-warning font-semibold">dep</div>
                         )}
                       </td>
                     );
@@ -383,10 +410,10 @@ export function StructuralRiskMap() {
             </div>
 
             {/* Stats row */}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <div className="rounded-lg bg-success/10 p-2.5 text-center">
                 <div className="text-lg font-bold text-success">{summary.greenNo}</div>
-                <div className="text-xs text-muted-foreground">Safe (loss &lt;5%)</div>
+                <div className="text-xs text-muted-foreground">Safe (&lt;5%)</div>
               </div>
               <div className="rounded-lg bg-warning/10 p-2.5 text-center">
                 <div className="text-lg font-bold text-warning">{summary.yellowNo}</div>
@@ -398,17 +425,26 @@ export function StructuralRiskMap() {
               </div>
               <div className="rounded-lg bg-primary/10 p-2.5 text-center">
                 <div className="text-lg font-bold text-primary">{summary.rescued}</div>
-                <div className="text-xs text-muted-foreground">Rescued by breakers</div>
+                <div className="text-xs text-muted-foreground">Rescued</div>
+              </div>
+              <div className="rounded-lg bg-warning/10 p-2.5 text-center">
+                <div className="text-lg font-bold text-warning">{summary.breakerDependent}</div>
+                <div className="text-xs text-muted-foreground">Breaker-dep</div>
               </div>
             </div>
 
             {/* Breaker dependency insight */}
-            {summary.breakerDependent > 0 && (
+            {(summary.breakerDependent > 0 || summary.rescued > 0) && (
               <div className="rounded-lg bg-warning/10 border border-warning/30 p-3 text-sm">
-                <strong>Breaker dependency:</strong>{' '}
-                {summary.breakerDependent} cell{summary.breakerDependent > 1 ? 's' : ''} shift from caution → safe only with breakers.
+                <strong>Breaker analysis:</strong>{' '}
+                {summary.rescued > 0 && (
+                  <>{summary.rescued} cell{summary.rescued > 1 ? 's' : ''} rescued from danger → below danger. </>
+                )}
+                {summary.breakerDependent > 0 && (
+                  <>{summary.breakerDependent} cell{summary.breakerDependent > 1 ? 's are' : ' is'} safe <em>only</em> with breakers (caution → safe). </>
+                )}
                 {summary.highL2 > 0 && (
-                  <> ⚠ {summary.highL2} cell{summary.highL2 > 1 ? 's have' : ' has'} L2 &gt; 10% — breakers are doing life support, not safety-netting.</>
+                  <>⚠ {summary.highL2} cell{summary.highL2 > 1 ? 's have' : ' has'} L2 &gt;10% — breakers doing life support, not safety-netting.</>
                 )}
               </div>
             )}
@@ -420,11 +456,11 @@ export function StructuralRiskMap() {
                 <div className="space-y-1 text-xs">
                   <div className="flex items-center gap-2">
                     <span className="inline-block w-3 h-3 rounded bg-success/20" />
-                    <span>Loss prob &lt; 5% — structurally safe</span>
+                    <span>Loss &lt;5% — structurally safe</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="inline-block w-3 h-3 rounded bg-warning/20" />
-                    <span>5–15% — caution zone</span>
+                    <span>5–15% — caution</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="inline-block w-3 h-3 rounded bg-destructive/20" />
@@ -434,17 +470,25 @@ export function StructuralRiskMap() {
                     <span className="inline-block w-3 h-3 rounded bg-destructive/30" />
                     <span>&gt;30% — structurally broken</span>
                   </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-primary font-semibold text-[10px]">rescued</span>
+                    <span>= danger → below danger with breakers</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-warning font-semibold text-[10px]">dep</span>
+                    <span>= caution → safe only with breakers</span>
+                  </div>
                 </div>
               </div>
               <div>
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">How To Read</p>
                 <ul className="space-y-1 text-xs text-muted-foreground list-disc pl-4">
-                  <li>Top = monthly loss probability (how often revenue &lt; costs)</li>
+                  <li>Top = monthly loss probability</li>
                   <li>Middle = effective margin</li>
-                  <li>Bottom = avg monthly profit ($)</li>
+                  <li>Bottom = avg profit/mo ($)</li>
                   <li><span className="text-primary font-medium">Ringed</span> = your current config</li>
-                  <li>"rescued" = breakers move cell from danger → safe</li>
-                  <li>L2% = breaker freeze engagement (high = life support)</li>
+                  <li>L2% = breaker freeze engagement</li>
+                  <li>Run Normal → Clustering to see timing-correlated risk</li>
                 </ul>
               </div>
             </div>
@@ -453,8 +497,8 @@ export function StructuralRiskMap() {
             <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
               <strong>Executive takeaway:</strong>{' '}
               {result.clustering
-                ? 'With payout clustering, correlated timing creates tail risk that simple pass/request drift cannot. If red cells appear only with clustering ON, your risk is timing-structural, not parameter-structural. Breakers should target this regime specifically.'
-                : 'Without clustering, pass/request drift degrades margins smoothly. If no red cells appear, your insolvency risk comes from correlated payout timing — run this grid with Clustering ON to surface it.'}
+                ? 'With payout clustering, correlated timing creates tail risk that parameter drift alone cannot. Red cells here identify your true insolvency boundary. If breakers rescue those cells but L2% is high, your product experience degrades under sustained stress — that\'s a structural design problem, not a safety net.'
+                : 'Without clustering, margins degrade smoothly — no hidden cliff. If the grid is all green, your insolvency risk comes from correlated payout timing, not pass/request drift. Run with Clustering ON to surface the real frontier.'}
             </div>
           </CardContent>
         </Card>
@@ -465,10 +509,7 @@ export function StructuralRiskMap() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => {
-            setClustering(!result.clustering);
-            // Signal that re-run is needed
-          }}
+          onClick={() => setClustering(!result.clustering)}
         >
           {result.clustering ? 'Switch to Normal' : 'Switch to Clustering'}
         </Button>
