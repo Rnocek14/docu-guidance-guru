@@ -20,8 +20,7 @@ import {
   type BreakerState,
   type BreakerDiagnostics,
   createBreakerState,
-  updateHysteresisCounters,
-  computeRollingPayRevAvg3,
+  computeRollingPayRevAvg3Prev,
   aggregateBreakerDiagnostics,
 } from './breaker-policy';
 
@@ -69,6 +68,9 @@ export interface SimulationKnobs {
   // Verification cohort (liability-maturity brake)
   verificationMonths: number;           // 0 = disabled. Months in verification phase before payout eligibility
   verificationFailRate: number;         // 0-1. Fraction that fail/churn during verification (monthly hazard)
+  
+  // Breaker: explicit payout freeze (set by engine when L2 is active)
+  freezePayouts?: boolean;              // true = skip all payout processing this month (revenue/costs still computed)
 }
 
 export interface MonteCarloConfig {
@@ -615,6 +617,11 @@ function simulateMonth(
     }
   });
   
+  // ── FREEZE PAYOUTS: if freezePayouts is set, skip all payout processing ──
+  // Revenue, costs, resets, and lifecycle events still run normally.
+  const payoutsFrozen = knobs.freezePayouts === true;
+  
+  if (!payoutsFrozen) {
   // Each eligible account has payoutRequestRate chance of requesting this month
   for (const account of eligibleAccounts) {
     if (random() > payoutRequestRate) {
@@ -736,6 +743,7 @@ function simulateMonth(
       account.winningDaysSinceLastPayout = 0;
     }
   }
+  } // end if (!payoutsFrozen)
   
   // Count cohort sizes at end of month
   let activeCohortSize = 0;
@@ -889,14 +897,13 @@ export function runMonteCarlo(
       let breakerApplied = false;
       
       if (breakerPolicy && breakerState) {
-        const rollingPayRevAvg3 = computeRollingPayRevAvg3(payRevHistory, payRevHistory.length - 1);
+        // Rolling avg uses only COMPLETED months (reactive policy)
+        const rollingPayRevAvg3Prev = computeRollingPayRevAvg3Prev(payRevHistory);
         
-        // Update hysteresis counters BEFORE evaluation
-        updateHysteresisCounters(breakerState, rollingPayRevAvg3);
-        
+        // Hysteresis counters are updated INSIDE evaluate() (policy-owned)
         const evaluation = breakerPolicy.evaluate({
           monthIndex: month,
-          rollingPayRevAvg3,
+          rollingPayRevAvg3Prev,
           currentLevel: breakerState.level,
           state: breakerState,
         });
@@ -915,22 +922,23 @@ export function runMonteCarlo(
         breakerState.level = evaluation.nextLevel;
         breakerState.levelByMonth.push(evaluation.nextLevel);
         
+        // breakerApplied = true whenever level != 0 (L1 or L2)
+        breakerApplied = evaluation.nextLevel !== 0;
+        
         // Apply knob overrides for L1
         if (evaluation.knobOverrides && evaluation.nextLevel === 1) {
           monthAssumptions = {
             ...effectiveAssumptions,
             knobs: { ...effectiveAssumptions.knobs, ...evaluation.knobOverrides },
           };
-          breakerApplied = true;
         }
         
-        // L2 = freeze: set payout request rate to 0 effectively
+        // L2 = freeze: pass explicit freezePayouts flag (not zeroing request rate)
         if (evaluation.nextLevel === 2) {
           monthAssumptions = {
             ...effectiveAssumptions,
-            payoutRequestRate: { min: 0, mode: 0, max: 0 },
+            knobs: { ...effectiveAssumptions.knobs, freezePayouts: true },
           };
-          breakerApplied = true;
         }
       }
       
@@ -941,14 +949,20 @@ export function runMonteCarlo(
         result.breakerLevel = breakerState.level;
         result.breakerApplied = breakerApplied;
         
-        // Count suppressed payouts at L2
+        // Count suppressed requests and estimate suppressed dollars at L2
         if (breakerState.level === 2) {
-          // At L2, all eligible accounts that would have requested are "suppressed"
-          // We approximate: eligible cohort × baseline request rate mode
-          const suppressedEstimate = result.eligibleCohortSize *
-            effectiveAssumptions.payoutRequestRate.mode;
-          result.payoutsSuppressedByBreaker = Math.round(suppressedEstimate);
-          breakerState.payoutsSuppressedByBreaker += result.payoutsSuppressedByBreaker;
+          // Requests suppressed: eligible cohort × baseline request rate mode
+          const suppressedRequests = Math.round(
+            result.eligibleCohortSize * effectiveAssumptions.payoutRequestRate.mode
+          );
+          result.payoutsSuppressedByBreaker = suppressedRequests;
+          breakerState.requestsSuppressedByBreaker += suppressedRequests;
+          
+          // Shadow-mode dollar estimate: suppressed requests × expected payout size
+          const expectedPayoutSize = effectiveAssumptions.avgPayoutAmount.mean *
+            effectiveAssumptions.knobs.payoutSplitPercent;
+          const suppressedDollars = suppressedRequests * expectedPayoutSize;
+          breakerState.dollarsSuppressedByBreaker += suppressedDollars;
         }
       }
       
