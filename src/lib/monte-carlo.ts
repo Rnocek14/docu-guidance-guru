@@ -964,8 +964,11 @@ export function runMonteCarlo(
           
           // Shadow-mode dollar estimate: suppressed requests × expected payout size × split
           // Clip factors are named constants, not magic numbers — visible in diagnostics.
-          const SUPPRESSED_CLIP_FIRST_CAP = 0.75;  // when first-payout cap is set
+          const SUPPRESSED_CLIP_FIRST_CAP = 0.75;  // conservative: first-payout cap + lifetime cap clipping
           const SUPPRESSED_CLIP_NO_FIRST_CAP = 0.90; // no first-payout cap
+          if (import.meta.env.DEV && month === 0 && iter === 0) {
+            console.info(`[Breaker] Suppressed $ clip factor: ${effectiveAssumptions.knobs.firstPayoutCap !== null ? SUPPRESSED_CLIP_FIRST_CAP : SUPPRESSED_CLIP_NO_FIRST_CAP} (firstPayoutCap: ${effectiveAssumptions.knobs.firstPayoutCap})`);
+          }
           const expectedPayoutSize = effectiveAssumptions.avgPayoutAmount.mean *
             effectiveAssumptions.knobs.payoutSplitPercent;
           const capClipFactor = effectiveAssumptions.knobs.firstPayoutCap !== null
