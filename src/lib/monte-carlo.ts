@@ -699,7 +699,6 @@ function simulateMonth(
       
       // Apply first-N payout cap (e.g., Apex: first 5 payouts capped at $2k)
       if (isCapEligible) {
-        const beforeCap = traderPayout;
         if (traderPayout > knobs.firstPayoutCap!) {
           traderPayout = knobs.firstPayoutCap!;
           firstPayoutCapHits++;
