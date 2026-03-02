@@ -15,10 +15,10 @@ import {
 // CONFIG
 // ============================================================================
 const CONFIG: MonteCarloConfig = { iterations: 500, monthsPerIteration: 12, seed: 42 };
-// 6 months total: 3-month warm-up + 3-month measurement window
-// This ensures the cohort is mature when we measure DD, fixing the "DD=0 due to ramp-up" issue
-const CONFIG_90DAY: MonteCarloConfig = { iterations: 1000, monthsPerIteration: 6, seed: 42 };
-const DD_WARMUP_MONTHS = 3; // skip first 3 months for DD/P5 measurement
+// Mature 90-day: run 15 months, discard first 12 (full ramp-up), measure months 12–14
+// This gives a true steady-state 3-month window where the cohort is fully mature
+const CONFIG_MATURE_90DAY: MonteCarloConfig = { iterations: 1000, monthsPerIteration: 15, seed: 42 };
+const DD_WARMUP_MONTHS = 12; // skip first 12 months — measure only steady-state
 
 // ============================================================================
 // SCENARIO BUILDERS (deep clone, never drops caps)
@@ -125,8 +125,10 @@ interface DrawdownRow {
   minMonth: number;
   cumMean: number;
   cumP5: number;
-  payRevP95: number;  // 95th percentile of monthly payout/revenue ratio (liquidity stress)
-  monthMeansWindow: number[]; // per-month means in measurement window
+  payRevP95: number;
+  payRevP99: number;
+  pctAbove45: number;   // % of months with Pay/Rev > 45%
+  monthMeansWindow: number[];
   isAttack?: boolean;
 }
 
@@ -168,6 +170,11 @@ interface StressBatteryResult {
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+/** Total revenue for a month (unified denominator for Pay/Rev everywhere) */
+function totalRevenue(month: { revenue: number; resetRevenue: number }) {
+  return month.revenue + month.resetRevenue;
+}
 
 /** Compute per-month mean profit across iterations */
 function monthMeans(rawSamples: number[][]): number[] {
@@ -246,12 +253,14 @@ function runStressBattery(): StressBatteryResult {
   ];
 
   const drawdown: DrawdownRow[] = ddScenarios.map(s => {
-    const r = runMonteCarlo(CONFIG_90DAY, s.assumptions);
+    const r = runMonteCarlo(CONFIG_MATURE_90DAY, s.assumptions);
     let cumP5: number;
     let cumMean: number;
     let maxDD = 0;
     let minMonth = 0;
     let payRevP95 = 0;
+    let payRevP99 = 0;
+    let pctAbove45 = 0;
     let monthMeansWindow: number[] = [];
 
     if (r.rawSamples && r.rawSamples.length > 0) {
@@ -286,17 +295,20 @@ function runStressBattery(): StressBatteryResult {
         }
       }
 
-      // Pay/Rev P95: compute per-month payout/revenue ratios from rawMonthResults (mature window)
+      // Pay/Rev P95, P99, and % above 45% from rawMonthResults (mature window)
       if (r.rawMonthResults && r.rawMonthResults.length > 0) {
         const matureRatios: number[] = [];
         for (const iter of r.rawMonthResults) {
           for (let m = DD_WARMUP_MONTHS; m < iter.length; m++) {
-            const rev = iter[m].revenue + iter[m].resetRevenue;
+            const rev = totalRevenue(iter[m]);
             if (rev > 0) matureRatios.push(iter[m].payouts / rev);
           }
         }
         matureRatios.sort((a, b) => a - b);
-        payRevP95 = matureRatios.length > 0 ? matureRatios[Math.floor(matureRatios.length * 0.95)] : 0;
+        const n = matureRatios.length;
+        payRevP95 = n > 0 ? matureRatios[Math.floor(n * 0.95)] : 0;
+        payRevP99 = n > 0 ? matureRatios[Math.floor(n * 0.99)] : 0;
+        pctAbove45 = n > 0 ? matureRatios.filter(r => r > 0.45).length / n : 0;
       }
     } else {
       cumMean = r.profit.mean * 3;
@@ -304,7 +316,7 @@ function runStressBattery(): StressBatteryResult {
       maxDD = r.risk.maxDrawdown;
       minMonth = r.risk.worstMonth;
     }
-    return { name: s.name, maxDD, minMonth, cumMean, cumP5, payRevP95, monthMeansWindow, isAttack: s.isAttack };
+    return { name: s.name, maxDD, minMonth, cumMean, cumP5, payRevP95, payRevP99, pctAbove45, monthMeansWindow, isAttack: s.isAttack };
   });
 
   // Baseline diagnostics — compute from rawSamples
@@ -342,6 +354,10 @@ function runStressBattery(): StressBatteryResult {
     1
   );
 
+  // Soft attack (breaker target) scenario checks
+  const softAttackScenario = scenarios.find(s => s.name.includes('Adversarial-but-plausible'));
+  const softAttackDD = drawdown.find(d => d.name.includes('Adversarial-but-plausible'));
+
   const verdict = [
     { label: 'Baseline margin > 0%', pass: baselineResult.diagnostics.effectiveMargin > 0 },
     { label: 'Baseline profit > $0/mo', pass: baselineResult.profit.mean > 0 },
@@ -357,6 +373,10 @@ function runStressBattery(): StressBatteryResult {
       if (!withGates || !noGates) return true;
       return withGates.result.diagnostics.payoutToRevenueRatio <= noGates.result.diagnostics.payoutToRevenueRatio;
     })() },
+    // Breaker target: soft attack must be survivable with breakers
+    { label: 'Breaker target: Pay/Rev P95 < 45%', pass: (softAttackDD?.payRevP95 ?? 0) < 0.45 },
+    { label: 'Breaker target: Cum P5 (90d) > $0', pass: (softAttackDD?.cumP5 ?? 0) > 0 },
+    { label: 'Breaker target: Loss prob < 30%', pass: (softAttackScenario?.result.risk.probabilityOfLoss ?? 0) < 0.30 },
   ];
 
   return {
@@ -697,10 +717,10 @@ export function V1StressBattery() {
       {/* 90-Day Drawdown */}
       <Card>
         <CardHeader>
-          <CardTitle>90-Day Drawdown — Mature Cohort (1000 iter × 6mo, skip 3mo warm-up)</CardTitle>
+          <CardTitle>Steady-State 90-Day Window (1000 iter × 15mo, measure M12–M14)</CardTitle>
           <CardDescription>
-            Runs 6-month sim, discards first 3 months (ramp-up), measures DD/P5 on months 3–5 only.
-            This ensures the cohort is mature and payouts are flowing when drawdown is measured.
+            Runs 15-month sim, discards first 12 months (full ramp-up), measures DD/P5/Pay-Rev on months 12–14.
+            Cohort is fully mature — all eligibility gates and velocity throttles are active.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -709,10 +729,11 @@ export function V1StressBattery() {
               <tr className="border-b text-left text-muted-foreground">
                 <th className="pb-2 pr-4">Scenario</th>
                 <th className="pb-2 pr-4 text-right">90d Max DD</th>
-                <th className="pb-2 pr-4 text-right">Min Profit Month</th>
-                <th className="pb-2 pr-4 text-right">Pay/Rev P95</th>
-                <th className="pb-2 pr-4 text-right">Cum Mean (90d)</th>
-                <th className="pb-2 pr-4 text-right">Cum P5 (90d)</th>
+                <th className="pb-2 pr-4 text-right">Min Month</th>
+                <th className="pb-2 pr-4 text-right">P/R P95</th>
+                <th className="pb-2 pr-4 text-right">P/R P99</th>
+                <th className="pb-2 pr-4 text-right">&gt;45%</th>
+                <th className="pb-2 pr-4 text-right">Cum P5</th>
                 <th className="pb-2 text-right">Month Means</th>
               </tr>
             </thead>
@@ -725,16 +746,20 @@ export function V1StressBattery() {
                   </td>
                   <td className={`py-2 pr-4 text-right font-mono ${d.maxDD > 0 ? 'text-destructive' : ''}`}>
                     {fmt(d.maxDD)}
-                    {d.maxDD === 0 && <span className="ml-1 text-xs text-muted-foreground" title="All months profitable — no peak-to-trough decline exists">≡0</span>}
+                    {d.maxDD === 0 && <span className="ml-1 text-xs text-muted-foreground" title="All months profitable — no peak-to-trough decline">≡0</span>}
                   </td>
                   <td className={`py-2 pr-4 text-right font-mono ${d.minMonth < 0 ? 'text-destructive' : ''}`}>{fmt(d.minMonth)}</td>
                   <td className={`py-2 pr-4 text-right font-mono ${d.payRevP95 > 0.5 ? 'text-destructive font-bold' : d.payRevP95 > 0.35 ? 'text-warning' : ''}`}>
                     {pct(d.payRevP95)}
                   </td>
-                  <td className="py-2 pr-4 text-right font-mono">{fmt(d.cumMean)}</td>
-                  <td className={`py-2 pr-4 text-right font-mono ${d.cumP5 < 0 ? 'text-destructive' : d.cumP5 > d.cumMean ? 'text-warning' : ''}`}>
+                  <td className={`py-2 pr-4 text-right font-mono ${d.payRevP99 > 0.6 ? 'text-destructive font-bold' : d.payRevP99 > 0.45 ? 'text-warning' : ''}`}>
+                    {pct(d.payRevP99)}
+                  </td>
+                  <td className={`py-2 pr-4 text-right font-mono ${d.pctAbove45 > 0.1 ? 'text-destructive' : d.pctAbove45 > 0.01 ? 'text-warning' : ''}`}>
+                    {pct(d.pctAbove45)}
+                  </td>
+                  <td className={`py-2 pr-4 text-right font-mono ${d.cumP5 < 0 ? 'text-destructive' : ''}`}>
                     {fmt(d.cumP5)}
-                    {d.cumP5 > d.cumMean && <span className="ml-1 text-xs" title="P5 > Mean indicates very low variance">⚠</span>}
                   </td>
                   <td className="py-2 text-right font-mono text-xs text-muted-foreground">
                     {d.monthMeansWindow.map((m, mi) => `M${mi + DD_WARMUP_MONTHS}:${Math.round(m / 1000)}k`).join(' ')}
