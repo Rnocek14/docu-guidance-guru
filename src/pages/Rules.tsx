@@ -24,12 +24,13 @@ const verificationRules = [
 ];
 
 const performanceRules = [
-  { label: 'Payout Cooldown', description: 'After each payout, you must wait the cooldown period (30 days) before requesting another.' },
+  { label: 'Payout Cooldown', description: 'After each payout, you must wait the cooldown period (14 days) before requesting another.' },
   { label: 'First Payout Cap', description: 'Your first payout request is capped at a fixed dollar amount, which varies by tier.' },
   { label: 'Payout Split', description: 'You receive a percentage of your eligible simulated profit as a performance-based reward.' },
   { label: 'Lifetime Cap', description: 'Each account has a maximum total payout amount (a multiple of your entry fee). Once reached, the account is closed.' },
   { label: 'Winning Days Requirement', description: 'A minimum number of profitable trading days is required between payout requests.' },
   { label: 'Profit Buffer', description: 'Accounts must maintain a minimum profit buffer above the payout amount to remain eligible.' },
+  { label: 'Eligibility Delay', description: 'Your first payout becomes eligible 7 days after entering Performance. Subsequent payouts follow the 14-day cooldown with minimum trading and winning day requirements plus profit buffer.' },
   { label: 'Human Review', description: 'Every payout request and account breach is reviewed by a human risk officer. AI does not auto-deny.' },
 ];
 
@@ -145,6 +146,7 @@ export default function Rules() {
                     { label: 'First Payout Cap', render: (t: typeof TIERS[0]) => `$${t.firstPayoutCap}` },
                     { label: 'Lifetime Cap', render: (t: typeof TIERS[0]) => `$${t.lifetimeCapAmount.toLocaleString()}` },
                     { label: 'Cooldown', render: (t: typeof TIERS[0]) => `${t.payoutCooldown} days` },
+                    { label: 'Eligibility Delay', render: () => '7 days' },
                     { label: 'Reset Fee', render: (t: typeof TIERS[0]) => `$${t.resetFee}` },
                   ].map((row) => (
                     <tr key={row.label} className="border-b border-border last:border-0">
