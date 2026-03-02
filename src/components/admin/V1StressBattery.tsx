@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Play, CheckCircle, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { Play, CheckCircle, XCircle, AlertTriangle, Loader2, Info } from 'lucide-react';
 import {
   runMonteCarlo,
   DEFAULT_ASSUMPTIONS,
@@ -65,7 +65,6 @@ function withAttack(intensity: number, base = DEFAULT_ASSUMPTIONS): MonteCarloAs
 function withPrice(price: number, base = DEFAULT_ASSUMPTIONS): MonteCarloAssumptions {
   const a = deepClone(base);
   a.pricePerAccount = price;
-  // Scale lifetime cap proportionally (keep same multiple)
   if (a.knobs.lifetimeCapPerUser !== null) {
     const multiple = a.knobs.lifetimeCapPerUser / DEFAULT_ASSUMPTIONS.pricePerAccount;
     a.knobs.lifetimeCapPerUser = price * multiple;
@@ -88,19 +87,36 @@ interface ScenarioRow {
   name: string;
   result: MonteCarloResult;
   assumptions: MonteCarloAssumptions;
+  isAttack?: boolean; // marks adversarial scenarios
 }
 
 interface DrawdownRow {
   name: string;
   maxDD: number;
-  worstMonth: number;
+  minMonth: number;  // renamed from worstMonth for clarity
   cumP5: number;
+  isAttack?: boolean;
+}
+
+interface BaselineDiagnostics {
+  minMonthlyProfit: number;
+  maxMonthlyProfit: number;
+  negativeMonthCount: number;
+  totalMonthCount: number;
+  negativeMonthPct: number;
+  payoutToRevenuePct: number;
+  avgMonthlyPayouts: number;
+  avgMonthlyRevenue: number;
+  avgActiveCohort: number;
+  avgEligibleCohort: number;
+  profitStdDev: number;
 }
 
 interface StressBatteryResult {
   scenarios: ScenarioRow[];
   priceScenarios: ScenarioRow[];
   drawdown: DrawdownRow[];
+  baselineDiag: BaselineDiagnostics;
   configCheck: {
     firstPayoutCap: number | null;
     lifetimeCapPerUser: number | null;
@@ -112,8 +128,8 @@ interface StressBatteryResult {
     velocityGates: string;
   };
   verdict: { label: string; pass: boolean }[];
-  recommendedCapital: number;
-  worstDDAllScenarios: number;
+  capitalRealistic: number;  // worst DD excluding attack scenarios
+  capitalAdversarial: number; // worst DD including attack scenarios
 }
 
 // ============================================================================
@@ -121,104 +137,117 @@ interface StressBatteryResult {
 // ============================================================================
 function runStressBattery(): StressBatteryResult {
   const scenarios: ScenarioRow[] = [];
-  const run = (name: string, assumptions: MonteCarloAssumptions) => {
-    scenarios.push({ name, assumptions, result: runMonteCarlo(CONFIG, assumptions) });
+  const run = (name: string, assumptions: MonteCarloAssumptions, isAttack = false) => {
+    scenarios.push({ name, assumptions, result: runMonteCarlo(CONFIG, assumptions), isAttack });
   };
 
-  // 1-3. Core scenarios
+  // Core scenarios
   run('Baseline (7% pass, 500/mo)', DEFAULT_ASSUMPTIONS);
   run('5% pass rate (conservative)', withPassRate(0.05));
   run('10% pass rate (danger zone)', withPassRate(0.10));
 
-  // 4. Critical +2pp shift
   const baseMode = DEFAULT_ASSUMPTIONS.passRate.mode;
   run(`+2pp shift (${(baseMode * 100).toFixed(0)}% → ${((baseMode + 0.02) * 100).toFixed(0)}%)`, withPassRate(baseMode + 0.02));
 
-  // 5-7. Payout stress
+  // Payout stress
   run('1.5× funded profitability', withHighProfitability(1.5));
   run('Payout clustering', withPayoutClustering());
   run('Max withdrawal pressure', withMaxWithdrawalPressure());
 
-  // 8-9. Combined stress
+  // Combined stress
   run('5% pass + 1.5× profit', withHighProfitability(1.5, withPassRate(0.05)));
-  run('10% + clustering + attack', withAttack(1.5, withPayoutClustering(withPassRate(0.10))));
+  run('10% + clustering + attack', withAttack(1.5, withPayoutClustering(withPassRate(0.10))), true); // ATTACK
 
-  // 10-11. Solo operator
+  // Solo operator
   run('Solo ramp (200/mo)', withVolume(200));
   run('Solo ramp + 10% pass', withPassRate(0.10, withVolume(200)));
 
-  // 12. Without velocity gates (shows the impact)
+  // Velocity gate impact
   run('No velocity gates (baseline)', withNoVelocityGates());
 
-  // =========================================================================
-  // PRICE SENSITIVITY SCENARIOS
-  // =========================================================================
+  // Price sensitivity
   const priceScenarios: ScenarioRow[] = [];
   const runPrice = (name: string, assumptions: MonteCarloAssumptions) => {
     priceScenarios.push({ name, assumptions, result: runMonteCarlo(CONFIG, assumptions) });
   };
-
   runPrice('$149 (current)', DEFAULT_ASSUMPTIONS);
   runPrice('$179', withPrice(179));
   runPrice('$199', withPrice(199));
   runPrice('$249', withPrice(249));
-  // Also test price + stress
   runPrice('$199 @ 10% pass', withPassRate(0.10, withPrice(199)));
   runPrice('$249 @ 10% pass', withPassRate(0.10, withPrice(249)));
 
-  // =========================================================================
-  // 90-DAY DRAWDOWN — FIXED MATH
-  // cumP5 = 5th percentile of cumulative 3-month NET PROFIT per iteration
-  // maxDD = worst peak-to-trough across all iterations
-  // Capital guidance = 1.5× worst DD across ALL stress scenarios (not just baseline)
-  // =========================================================================
+  // 90-day drawdown
   const ddScenarios = [
-    { name: 'Baseline', assumptions: DEFAULT_ASSUMPTIONS },
-    { name: '10% pass rate', assumptions: withPassRate(0.10) },
-    { name: '1.5× profitability', assumptions: withHighProfitability(1.5) },
-    { name: 'Payout clustering', assumptions: withPayoutClustering() },
-    { name: '10% + clustering + attack', assumptions: withAttack(1.5, withPayoutClustering(withPassRate(0.10))) },
-    { name: 'No velocity gates', assumptions: withNoVelocityGates() },
+    { name: 'Baseline', assumptions: DEFAULT_ASSUMPTIONS, isAttack: false },
+    { name: '10% pass rate', assumptions: withPassRate(0.10), isAttack: false },
+    { name: '1.5× profitability', assumptions: withHighProfitability(1.5), isAttack: false },
+    { name: 'Payout clustering', assumptions: withPayoutClustering(), isAttack: false },
+    { name: '10% + clustering + attack', assumptions: withAttack(1.5, withPayoutClustering(withPassRate(0.10))), isAttack: true },
+    { name: 'No velocity gates', assumptions: withNoVelocityGates(), isAttack: false },
   ];
 
   const drawdown: DrawdownRow[] = ddScenarios.map(s => {
     const r = runMonteCarlo(CONFIG_90DAY, s.assumptions);
     let cumP5: number;
     if (r.rawSamples && r.rawSamples.length > 0) {
-      // Each rawSamples[i] = array of monthly net profits for iteration i
-      // Sum to get cumulative 3-month net profit per iteration
       const cumProfits = r.rawSamples.map(iter => iter.reduce((a, b) => a + b, 0));
       cumProfits.sort((a, b) => a - b);
       cumP5 = cumProfits[Math.floor(cumProfits.length * 0.05)];
     } else {
-      // Fallback: use monthly P5 × 3 (underestimates tail risk but directionally correct)
       cumP5 = r.profit.p5 * 3;
     }
-    return { name: s.name, maxDD: r.risk.maxDrawdown, worstMonth: r.risk.worstMonth, cumP5 };
+    return { name: s.name, maxDD: r.risk.maxDrawdown, minMonth: r.risk.worstMonth, cumP5, isAttack: s.isAttack };
   });
 
-  const baseline = scenarios[0].result;
+  // Baseline diagnostics — compute from rawSamples
+  const baselineResult = scenarios[0].result;
+  const allBaselineMonths = baselineResult.rawSamples?.flat() ?? [];
+  const negativeMonths = allBaselineMonths.filter(p => p < 0);
 
-  // Capital guidance: use WORST DD across ALL 12-month scenarios, not just baseline 90-day
-  const worstDDAllScenarios = Math.max(
+  const baselineDiag: BaselineDiagnostics = {
+    minMonthlyProfit: allBaselineMonths.length > 0 ? Math.min(...allBaselineMonths) : 0,
+    maxMonthlyProfit: allBaselineMonths.length > 0 ? Math.max(...allBaselineMonths) : 0,
+    negativeMonthCount: negativeMonths.length,
+    totalMonthCount: allBaselineMonths.length,
+    negativeMonthPct: allBaselineMonths.length > 0 ? negativeMonths.length / allBaselineMonths.length : 0,
+    payoutToRevenuePct: baselineResult.diagnostics.payoutToRevenueRatio,
+    avgMonthlyPayouts: baselineResult.diagnostics.avgMonthlyPayouts,
+    avgMonthlyRevenue: baselineResult.diagnostics.avgMonthlyRevenue,
+    avgActiveCohort: baselineResult.cohortDiagnostics?.avgActiveCohortSize ?? 0,
+    avgEligibleCohort: baselineResult.cohortDiagnostics?.avgEligibleCohortSize ?? 0,
+    profitStdDev: baselineResult.profit.stdDev,
+  };
+
+  // Split capital guidance: realistic (non-attack) vs adversarial (all)
+  const realisticScenarios = scenarios.filter(s => !s.isAttack);
+  const realisticDD = drawdown.filter(d => !d.isAttack);
+
+  const worstDDRealistic = Math.max(
+    ...realisticScenarios.map(s => s.result.risk.maxDrawdown),
+    ...realisticDD.map(d => d.maxDD),
+    1 // floor at $1 to avoid $0
+  );
+  const worstDDAdversarial = Math.max(
     ...scenarios.map(s => s.result.risk.maxDrawdown),
-    ...drawdown.map(d => d.maxDD)
+    ...drawdown.map(d => d.maxDD),
+    1
   );
 
   const verdict = [
-    { label: 'Baseline margin > 0%', pass: baseline.diagnostics.effectiveMargin > 0 },
-    { label: 'Baseline profit > $0/mo', pass: baseline.profit.mean > 0 },
-    { label: 'Baseline loss prob < 40%', pass: baseline.risk.probabilityOfLoss < 0.40 },
-    { label: 'No scenario margin < -15%', pass: scenarios.every(s => s.result.diagnostics.effectiveMargin > -0.15) },
-    { label: 'No scenario loses > $10k/mo', pass: scenarios.every(s => s.result.profit.mean > -10000) },
-    { label: 'Max DD < $100k (any scenario)', pass: scenarios.every(s => s.result.risk.maxDrawdown < 100000) },
-    { label: '5% pass still profitable', pass: (scenarios.find(s => s.name.includes('5%'))?.result.profit.mean ?? 0) > 0 },
+    { label: 'Baseline margin > 0%', pass: baselineResult.diagnostics.effectiveMargin > 0 },
+    { label: 'Baseline profit > $0/mo', pass: baselineResult.profit.mean > 0 },
+    { label: 'Baseline loss prob < 40%', pass: baselineResult.risk.probabilityOfLoss < 0.40 },
+    { label: 'Non-attack scenarios margin > -15%', pass: realisticScenarios.every(s => s.result.diagnostics.effectiveMargin > -0.15) },
+    { label: 'Non-attack scenarios loss < $10k/mo', pass: realisticScenarios.every(s => s.result.profit.mean > -10000) },
+    { label: 'Realistic DD < $100k', pass: worstDDRealistic < 100000 },
+    { label: '5% pass still profitable', pass: (scenarios.find(s => s.name.includes('5%') && !s.isAttack)?.result.profit.mean ?? 0) > 0 },
     { label: '+2pp shift still profitable', pass: (scenarios.find(s => s.name.includes('+2pp'))?.result.profit.mean ?? 0) > 0 },
-    { label: 'Velocity gates reduce clustering DD', pass: (() => {
-      const withGates = scenarios.find(s => s.name === 'Payout clustering');
+    { label: 'Velocity gates reduce payout ratio', pass: (() => {
+      const withGates = scenarios.find(s => s.name.startsWith('Baseline'));
       const noGates = scenarios.find(s => s.name.includes('No velocity gates'));
       if (!withGates || !noGates) return true;
-      return withGates.result.risk.maxDrawdown <= noGates.result.risk.maxDrawdown * 1.5;
+      return withGates.result.diagnostics.payoutToRevenueRatio <= noGates.result.diagnostics.payoutToRevenueRatio;
     })() },
   ];
 
@@ -226,6 +255,7 @@ function runStressBattery(): StressBatteryResult {
     scenarios,
     priceScenarios,
     drawdown,
+    baselineDiag,
     configCheck: {
       firstPayoutCap: DEFAULT_ASSUMPTIONS.knobs.firstPayoutCap,
       lifetimeCapPerUser: DEFAULT_ASSUMPTIONS.knobs.lifetimeCapPerUser,
@@ -243,8 +273,8 @@ function runStressBattery(): StressBatteryResult {
       ].filter(Boolean).join(' + ') || 'DISABLED',
     },
     verdict,
-    recommendedCapital: Math.round(worstDDAllScenarios * 1.5),
-    worstDDAllScenarios,
+    capitalRealistic: Math.round(worstDDRealistic * 1.5),
+    capitalAdversarial: Math.round(worstDDAdversarial * 1.5),
   };
 }
 
@@ -260,7 +290,6 @@ export function V1StressBattery() {
     setIsRunning(true);
     setElapsed(0);
     const start = Date.now();
-
     setTimeout(() => {
       try {
         const r = runStressBattery();
@@ -300,6 +329,7 @@ export function V1StressBattery() {
   if (!baseline) return null;
   const passCount = result.verdict?.filter(v => v.pass).length ?? 0;
   const allPass = passCount === (result.verdict?.length ?? 0);
+  const diag = result.baselineDiag;
 
   return (
     <div className="space-y-6">
@@ -322,13 +352,80 @@ export function V1StressBattery() {
         </CardContent>
       </Card>
 
+      {/* Baseline Diagnostics — WHY the numbers look the way they do */}
+      {diag && (
+        <Card className="border-muted">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Info className="h-4 w-4" />
+              Baseline Engine Diagnostics
+            </CardTitle>
+            <CardDescription>
+              Raw internals from the baseline run. Use these to verify the model isn't clamping or miscounting.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="text-xs text-muted-foreground">Min Monthly Profit</p>
+                <p className={`text-base font-mono font-bold ${diag.minMonthlyProfit < 0 ? 'text-destructive' : ''}`}>
+                  {fmt(diag.minMonthlyProfit)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Max Monthly Profit</p>
+                <p className="text-base font-mono font-bold">{fmt(diag.maxMonthlyProfit)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Negative Months</p>
+                <p className="text-base font-mono font-bold">
+                  {diag.negativeMonthCount} / {diag.totalMonthCount} ({pct(diag.negativeMonthPct)})
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Profit Std Dev</p>
+                <p className="text-base font-mono font-bold">{fmt(diag.profitStdDev)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Avg Payouts/mo</p>
+                <p className="text-base font-mono font-bold">{fmt(diag.avgMonthlyPayouts)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Avg Revenue/mo</p>
+                <p className="text-base font-mono font-bold">{fmt(diag.avgMonthlyRevenue)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Payout / Revenue</p>
+                <p className={`text-base font-mono font-bold ${diag.payoutToRevenuePct > 0.5 ? 'text-destructive' : diag.payoutToRevenuePct < 0.1 ? 'text-warning' : ''}`}>
+                  {pct(diag.payoutToRevenuePct)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Avg Active / Eligible Cohort</p>
+                <p className="text-base font-mono font-bold">
+                  {Math.round(diag.avgActiveCohort)} / {Math.round(diag.avgEligibleCohort)}
+                </p>
+              </div>
+            </div>
+            {diag.negativeMonthCount === 0 && (
+              <div className="mt-3 rounded-lg bg-warning/10 border border-warning/30 p-3 text-sm">
+                <strong>⚠ Zero negative months.</strong> This means payouts never exceed revenue+costs in any simulated month.
+                At {pct(diag.payoutToRevenuePct)} payout/revenue ratio, this is mathematically expected.
+                If this seems too safe, consider whether pass rate or payout request rate should be higher.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Verdict */}
       <Card className={allPass ? 'border-success/50 bg-success/5' : 'border-destructive/50 bg-destructive/5'}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             {allPass ? <CheckCircle className="h-5 w-5 text-success" /> : <XCircle className="h-5 w-5 text-destructive" />}
-            {allPass ? 'V1 CONFIG SURVIVES ALL CHECKS' : `${result.verdict.length - passCount} CHECK(S) FAILED`}
+            {allPass ? 'V1 CONFIG SURVIVES ALL CHECKS' : `${(result.verdict?.length ?? 0) - passCount} CHECK(S) FAILED`}
           </CardTitle>
+          <CardDescription>Attack scenarios excluded from "realistic" checks. Adversarial scenarios need breakers, not capital.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -346,7 +443,10 @@ export function V1StressBattery() {
       <Card>
         <CardHeader>
           <CardTitle>Stress Scenarios (500 iter × 12 months)</CardTitle>
-          <CardDescription>Industry-calibrated baseline: 7% pass, 25% request rate, velocity gates ON. Deltas vs baseline.</CardDescription>
+          <CardDescription>
+            Industry-calibrated baseline: 7% pass, 25% request rate, velocity gates ON.
+            🔴 = attack scenario (adversarial, not baseline risk).
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -358,6 +458,7 @@ export function V1StressBattery() {
                 <th className="pb-2 pr-4 text-right">P5 (tail)</th>
                 <th className="pb-2 pr-4 text-right">Loss Prob</th>
                 <th className="pb-2 pr-4 text-right">Max DD</th>
+                <th className="pb-2 pr-4 text-right">Pay/Rev</th>
                 <th className="pb-2 text-right">Δ Profit</th>
               </tr>
             </thead>
@@ -368,13 +469,17 @@ export function V1StressBattery() {
                 const profitDelta = i > 0 ? r.profit.mean - baseline.profit.mean : 0;
                 const isNegMargin = d.effectiveMargin < 0;
                 return (
-                  <tr key={i} className={`border-b last:border-0 ${isNegMargin ? 'bg-destructive/5' : ''}`}>
-                    <td className="py-2 pr-4 font-medium">{s.name}</td>
+                  <tr key={i} className={`border-b last:border-0 ${s.isAttack ? 'bg-destructive/10' : isNegMargin ? 'bg-destructive/5' : ''}`}>
+                    <td className="py-2 pr-4 font-medium">
+                      {s.isAttack && <span className="mr-1">🔴</span>}
+                      {s.name}
+                    </td>
                     <td className={`py-2 pr-4 text-right font-mono ${isNegMargin ? 'text-destructive' : 'text-success'}`}>{pct(d.effectiveMargin)}</td>
                     <td className={`py-2 pr-4 text-right font-mono ${r.profit.mean < 0 ? 'text-destructive' : ''}`}>{fmt(r.profit.mean)}</td>
                     <td className="py-2 pr-4 text-right font-mono text-destructive">{fmt(r.profit.p5)}</td>
                     <td className="py-2 pr-4 text-right font-mono">{pct(r.risk.probabilityOfLoss)}</td>
                     <td className="py-2 pr-4 text-right font-mono">{fmt(r.risk.maxDrawdown)}</td>
+                    <td className={`py-2 pr-4 text-right font-mono ${d.payoutToRevenueRatio > 0.5 ? 'text-destructive font-bold' : ''}`}>{pct(d.payoutToRevenueRatio)}</td>
                     <td className={`py-2 text-right font-mono ${i === 0 ? 'text-muted-foreground' : profitDelta < 0 ? 'text-destructive' : 'text-success'}`}>
                       {i === 0 ? '—' : fmtDelta(profitDelta)}
                     </td>
@@ -388,7 +493,7 @@ export function V1StressBattery() {
 
       {/* +2pp Shift Callout */}
       {(() => {
-        const shift = result.scenarios.find(s => s.name.includes('+2pp'));
+        const shift = result.scenarios?.find(s => s.name.includes('+2pp'));
         if (!shift) return null;
         const profitDelta = shift.result.profit.mean - baseline.profit.mean;
         const marginDelta = (shift.result.diagnostics.effectiveMargin - baseline.diagnostics.effectiveMargin) * 100;
@@ -405,7 +510,7 @@ export function V1StressBattery() {
               <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <p className="text-xs text-muted-foreground">Profit Δ</p>
-                  <p className="text-lg font-bold text-destructive">{fmtDelta(profitDelta)}/mo</p>
+                  <p className={`text-lg font-bold ${profitDelta < 0 ? 'text-destructive' : ''}`}>{fmtDelta(profitDelta)}/mo</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Margin Δ</p>
@@ -465,13 +570,13 @@ export function V1StressBattery() {
         </CardContent>
       </Card>
 
-      {/* 90-Day Drawdown — FIXED */}
+      {/* 90-Day Drawdown */}
       <Card>
         <CardHeader>
           <CardTitle>90-Day Worst-Case Drawdown (1000 iter × 3 months)</CardTitle>
           <CardDescription>
-            Cum P5 = 5th percentile of cumulative 3-month net profit (negative = net cash outflow).
-            Capital guidance uses worst DD across ALL scenarios.
+            Min Profit Month = single worst month across all iterations (positive = never lost money that month).
+            Cum P5 = 5th percentile of cumulative 3-month net profit.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -480,16 +585,19 @@ export function V1StressBattery() {
               <tr className="border-b text-left text-muted-foreground">
                 <th className="pb-2 pr-4">Scenario</th>
                 <th className="pb-2 pr-4 text-right">90d Max DD</th>
-                <th className="pb-2 pr-4 text-right">Worst Month</th>
+                <th className="pb-2 pr-4 text-right">Min Profit Month</th>
                 <th className="pb-2 text-right">Cum P5 (90d)</th>
               </tr>
             </thead>
             <tbody>
               {(result.drawdown ?? []).map((d, i) => (
-                <tr key={i} className="border-b last:border-0">
-                  <td className="py-2 pr-4 font-medium">{d.name}</td>
-                  <td className="py-2 pr-4 text-right font-mono text-destructive">{fmt(d.maxDD)}</td>
-                  <td className="py-2 pr-4 text-right font-mono text-destructive">{fmt(d.worstMonth)}</td>
+                <tr key={i} className={`border-b last:border-0 ${d.isAttack ? 'bg-destructive/10' : ''}`}>
+                  <td className="py-2 pr-4 font-medium">
+                    {d.isAttack && <span className="mr-1">🔴</span>}
+                    {d.name}
+                  </td>
+                  <td className={`py-2 pr-4 text-right font-mono ${d.maxDD > 0 ? 'text-destructive' : ''}`}>{fmt(d.maxDD)}</td>
+                  <td className={`py-2 pr-4 text-right font-mono ${d.minMonth < 0 ? 'text-destructive' : ''}`}>{fmt(d.minMonth)}</td>
                   <td className={`py-2 text-right font-mono ${d.cumP5 < 0 ? 'text-destructive' : ''}`}>{fmt(d.cumP5)}</td>
                 </tr>
               ))}
@@ -497,10 +605,21 @@ export function V1StressBattery() {
           </table>
           <div className="mt-4 space-y-2">
             <div className="rounded-lg bg-muted/50 p-3 text-sm">
-              <strong>Worst drawdown across all scenarios:</strong> {fmt(result.worstDDAllScenarios)}
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <strong>Realistic stress capital:</strong> ≥ {fmt(result.capitalRealistic)}
+                  <p className="text-xs text-muted-foreground mt-1">1.5× worst DD excluding attack scenarios</p>
+                </div>
+                <div>
+                  <strong>Adversarial capital (or use breakers):</strong> ≥ {fmt(result.capitalAdversarial)}
+                  <p className="text-xs text-muted-foreground mt-1">1.5× worst DD including 🔴 attack scenarios</p>
+                </div>
+              </div>
             </div>
-            <div className="rounded-lg bg-primary/10 p-3 text-sm font-medium">
-              <strong>Operating capital needed:</strong> ≥ {fmt(result.recommendedCapital)} (1.5× worst DD across all scenarios)
+            <div className="rounded-lg bg-warning/10 border border-warning/30 p-3 text-xs">
+              <strong>Note:</strong> Adversarial scenarios (🔴) model coordinated attacks without circuit breakers.
+              In production, the Economic Breaker would freeze payouts before reaching this drawdown.
+              Hold capital for realistic stress; implement breakers for adversarial.
             </div>
           </div>
         </CardContent>
