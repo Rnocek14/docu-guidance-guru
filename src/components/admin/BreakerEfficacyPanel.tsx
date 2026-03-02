@@ -17,6 +17,7 @@ export interface BreakerComparisonRow {
     payRevP99: number;
     margin: number;
     lossProb: number;
+    meanProfit: number;
   };
   withBreaker: {
     maxDD: number;
@@ -25,6 +26,7 @@ export interface BreakerComparisonRow {
     payRevP99: number;
     margin: number;
     lossProb: number;
+    meanProfit: number;
     diagnostics: BreakerDiagnostics;
   };
 }
@@ -135,17 +137,25 @@ export function BreakerEfficacyPanel({ comparisons }: Props) {
           </table>
         </div>
 
-        {/* Summary badges */}
-        <div className="flex flex-wrap gap-2">
+        {/* Stabilize vs Buy Time: per-scenario verdict */}
+        <div className="space-y-2">
           {comparisons.map((c, i) => {
             const diag = c.withBreaker.diagnostics;
+            const profitDelta = c.withBreaker.meanProfit - c.noBreaker.meanProfit;
+            const isStabilizer = diag.timeInL2Pct < 0.05 && (c.withBreaker.cumP5 >= c.noBreaker.cumP5 || c.withBreaker.maxDD <= c.noBreaker.maxDD);
             return (
-              <div key={i} className="flex items-center gap-1.5 text-xs">
-                <Badge variant="outline">{c.scenarioName}</Badge>
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <Badge variant={isStabilizer ? 'default' : 'outline'}>{c.scenarioName}</Badge>
+                <span className="font-mono">
+                  ΔProfit: <span className={profitDelta >= 0 ? 'text-success' : 'text-destructive'}>
+                    {profitDelta >= 0 ? '+' : ''}{fmt(profitDelta)}/mo
+                  </span>
+                </span>
+                <span className="text-muted-foreground">·</span>
                 <span className="text-muted-foreground">
                   L1: {pct(diag.timeInL1Pct)} · L2: {pct(diag.timeInL2Pct)} · 
                   Max consec L2: {diag.maxConsecutiveL2Months}mo · 
-                  Iters w/ breaker: {diag.iterationsWithAnyBreaker}
+                  Supp: ${Math.round(diag.avgDollarsSuppressedPerIteration).toLocaleString()}/iter
                 </span>
               </div>
             );
@@ -154,8 +164,9 @@ export function BreakerEfficacyPanel({ comparisons }: Props) {
 
         <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
           <strong>Reading this table:</strong> If DD and P5 improve with breakers AND L2% is low (&lt;5%), 
-          breakers are a real stabilizer. If L2% is high (&gt;20%) or payouts suppressed are large, 
+          breakers are a real stabilizer. If L2% is high (&gt;20%) or suppressed $ is large, 
           breakers are "buying time" — the product experience degrades under sustained stress.
+          ΔProfit shows the net profit impact of breaker engagement (positive = breakers help margin).
         </div>
       </CardContent>
     </Card>

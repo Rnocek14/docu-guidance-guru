@@ -958,10 +958,13 @@ export function runMonteCarlo(
           result.payoutsSuppressedByBreaker = suppressedRequests;
           breakerState.requestsSuppressedByBreaker += suppressedRequests;
           
-          // Shadow-mode dollar estimate: suppressed requests × expected payout size
+          // Shadow-mode dollar estimate: suppressed requests × expected payout size × split
+          // Apply conservative cap clip factor (0.75) to account for first-payout caps
+          // and lifetime cap clipping that would reduce actual payouts
           const expectedPayoutSize = effectiveAssumptions.avgPayoutAmount.mean *
             effectiveAssumptions.knobs.payoutSplitPercent;
-          const suppressedDollars = suppressedRequests * expectedPayoutSize;
+          const capClipFactor = effectiveAssumptions.knobs.firstPayoutCap !== null ? 0.75 : 0.90;
+          const suppressedDollars = suppressedRequests * expectedPayoutSize * capClipFactor;
           breakerState.dollarsSuppressedByBreaker += suppressedDollars;
         }
       }
