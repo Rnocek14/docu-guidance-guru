@@ -60,6 +60,10 @@ function buildProfile(overrides: {
   minWinningDaysPerPayout: number;
   /** If true, price is adjusted for refund model: price × (1 − passMode) */
   refundModel?: boolean;
+  /** Override payout size distribution (log-normal params) */
+  avgPayoutAmount?: { mean: number; stdDev: number };
+  /** Override payout cadence (triangular) */
+  payoutsPerPaidAccountPerMonth?: { min: number; mode: number; max: number };
 }): MonteCarloAssumptions {
   const a = clone(DEFAULT_ASSUMPTIONS);
 
@@ -79,6 +83,14 @@ function buildProfile(overrides: {
     mode: overrides.requestMode,
     max: Math.min(0.95, overrides.requestMode + 0.10),
   };
+
+  // Payout sizing & cadence — firm-specific overrides
+  if (overrides.avgPayoutAmount) {
+    a.avgPayoutAmount = overrides.avgPayoutAmount;
+  }
+  if (overrides.payoutsPerPaidAccountPerMonth) {
+    a.payoutsPerPaidAccountPerMonth = overrides.payoutsPerPaidAccountPerMonth;
+  }
 
   a.knobs = {
     ...a.knobs,
@@ -106,6 +118,9 @@ const APEX_BASE_KNOBS = {
   lifetimeCapMultiple: null,       // no explicit lifetime cap
   minMonthsBetweenPayouts: 0,      // 8-day cycles ≈ sub-monthly
   minWinningDaysPerPayout: 3,      // 30% consistency rule ≈ ~3 winning days
+  // Apex traders on 50k accounts withdraw $3k–$5k typically; 8-day cycles ≈ 2.5 payouts/month
+  avgPayoutAmount: { mean: 4000, stdDev: 2000 },
+  payoutsPerPaidAccountPerMonth: { min: 1.5, mode: 2.5, max: 3.5 },
 };
 
 export const APEX_CONSERVATIVE: CompetitorScenario = {
@@ -173,6 +188,9 @@ const FTMO_BASE_KNOBS = {
   minMonthsBetweenPayouts: 1,       // ~14-day cycle ≈ 1 month minimum
   minWinningDaysPerPayout: 10,      // strict consistency rule
   refundModel: true,                // refund on first payout → revenue = price × (1 − passRate)
+  // FTMO 100k accounts; institutional-size withdrawals, ~1 payout/month
+  avgPayoutAmount: { mean: 5000, stdDev: 3000 },
+  payoutsPerPaidAccountPerMonth: { min: 0.5, mode: 1.0, max: 1.5 },
 };
 
 export const FTMO_CONSERVATIVE: CompetitorScenario = {
