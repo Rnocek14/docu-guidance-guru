@@ -7,9 +7,11 @@
  *   Entry fee:        $149
  *   First payout cap: $500
  *   Lifetime cap:     10× ($1,490)
- *   Cooldown:         14 days (~0.5 months)
- *   Eligibility delay: 7 days
+ *   Cooldown:         1 month (velocity gate)
+ *   Min winning days: 10 per payout
  *   Split:            80%
+ *   Pass rate:        7% (industry-calibrated)
+ *   Payout request:   25% of funded
  * 
  * ASSERTION PHILOSOPHY:
  *   - Baseline MUST be profitable (hard fail if not)
@@ -174,24 +176,29 @@ function printReport(scenarios: ScenarioRow[]) {
 
 describe('V1 Survivability Stress Test', () => {
 
-  it('verifies config propagation — caps are what we expect', () => {
+  it('verifies config propagation — caps and gates are what we expect', () => {
     // Verify DEFAULT_ASSUMPTIONS has V1 values
     expect(DEFAULT_ASSUMPTIONS.knobs.firstPayoutCap).toBe(500);
     expect(DEFAULT_ASSUMPTIONS.knobs.lifetimeCapPerUser).toBe(149 * 10);
     expect(DEFAULT_ASSUMPTIONS.knobs.payoutSplitPercent).toBe(0.80);
     expect(DEFAULT_ASSUMPTIONS.pricePerAccount).toBe(149);
+    // Verify velocity gates are ON
+    expect(DEFAULT_ASSUMPTIONS.knobs.minWinningDaysPerPayout).toBe(10);
+    expect(DEFAULT_ASSUMPTIONS.knobs.minMonthsBetweenPayouts).toBe(1);
+    // Verify industry-calibrated rates
+    expect(DEFAULT_ASSUMPTIONS.passRate.mode).toBeCloseTo(0.07);
+    expect(DEFAULT_ASSUMPTIONS.payoutRequestRate.mode).toBeCloseTo(0.25);
 
     // Verify helpers don't drop caps
-    const stress = withAttack(1.5, withPayoutClustering(withPassRate(0.14)));
+    const stress = withAttack(1.5, withPayoutClustering(withPassRate(0.10)));
     expect(stress.knobs.firstPayoutCap).toBe(500);
     expect(stress.knobs.lifetimeCapPerUser).toBe(149 * 10);
     expect(stress.knobs.payoutSplitPercent).toBe(0.80);
     expect(stress.knobs.attackIntensity).toBe(1.5);
-    expect(stress.passRate.mode).toBeCloseTo(0.14);
-    expect(stress.payoutRequestRate.mode).toBeCloseTo(0.85);
+    expect(stress.passRate.mode).toBeCloseTo(0.10);
 
     printConfigDiagnostic('DEFAULT_ASSUMPTIONS', DEFAULT_ASSUMPTIONS);
-    printConfigDiagnostic('Combined stress (14% + clustering + attack)', stress);
+    printConfigDiagnostic('Combined stress (10% + clustering + attack)', stress);
   });
 
   it('runs full stress battery', { timeout: 180_000 }, () => {
@@ -202,11 +209,11 @@ describe('V1 Survivability Stress Test', () => {
     };
 
     // 1. Baseline
-    run('Baseline (12% pass, 500/mo)', DEFAULT_ASSUMPTIONS);
+    run('Baseline (7% pass, 500/mo)', DEFAULT_ASSUMPTIONS);
 
     // 2-3. Pass rate sensitivity
-    run('10% pass rate', withPassRate(0.10));
-    run('14% pass rate (danger zone)', withPassRate(0.14));
+    run('5% pass rate', withPassRate(0.05));
+    run('10% pass rate (danger zone)', withPassRate(0.10));
 
     // 4. The critical +2% shift test
     const baselineMode = DEFAULT_ASSUMPTIONS.passRate.mode;
@@ -220,12 +227,12 @@ describe('V1 Survivability Stress Test', () => {
     run('Max withdrawal pressure', withMaxWithdrawalPressure());
 
     // 8-9. Combined stress
-    run('10% pass + 1.5× profit', withHighProfitability(1.5, withPassRate(0.10)));
-    run('14% + clustering + attack', withAttack(1.5, withPayoutClustering(withPassRate(0.14))));
+    run('5% pass + 1.5× profit', withHighProfitability(1.5, withPassRate(0.05)));
+    run('10% + clustering + attack', withAttack(1.5, withPayoutClustering(withPassRate(0.10))));
 
     // 10-11. Solo operator
     run('Solo ramp (200/mo)', withVolume(200));
-    run('Solo ramp + 14% pass', withPassRate(0.14, withVolume(200)));
+    run('Solo ramp + 10% pass', withPassRate(0.10, withVolume(200)));
 
     // Print config diagnostic for baseline to prove caps are correct
     printConfigDiagnostic('Baseline (actual engine input)', scenarios[0].assumptions);
@@ -274,10 +281,10 @@ describe('V1 Survivability Stress Test', () => {
 
     const scenarios: { name: string; assumptions: MonteCarloAssumptions }[] = [
       { name: 'Baseline', assumptions: DEFAULT_ASSUMPTIONS },
-      { name: '14% pass rate', assumptions: withPassRate(0.14) },
+      { name: '10% pass rate', assumptions: withPassRate(0.10) },
       { name: '1.5× profitability', assumptions: withHighProfitability(1.5) },
       { name: 'Payout clustering', assumptions: withPayoutClustering() },
-      { name: '14% + clustering + attack', assumptions: withAttack(1.5, withPayoutClustering(withPassRate(0.14))) },
+      { name: '10% + clustering + attack', assumptions: withAttack(1.5, withPayoutClustering(withPassRate(0.10))) },
     ];
 
     console.log('\n  Scenario                           │ 90d Max DD   │ Worst Month │ Cum P5 (90d)');

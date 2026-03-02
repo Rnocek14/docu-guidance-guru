@@ -1157,14 +1157,17 @@ export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
   accountsPerMonth: 500,
   pricePerAccount: 149, // Starter tier
 
-  // Trading funnel
-  passRate: { min: 0.08, mode: 0.12, max: 0.18 },
-  payoutRequestRate: { min: 0.55, mode: 0.65, max: 0.75 },
-  avgDaysToFirstPayout: 18,
+  // Trading funnel — CALIBRATED TO INDUSTRY REALITY (2026-03-02)
+  // Industry pass rates: 5-10% (QuantVPS, Tradeify, Topstep benchmarks)
+  // Payout request: only 20-30% of funded traders ever withdraw
+  // Repeat withdrawal: even fewer request again after first payout
+  passRate: { min: 0.04, mode: 0.07, max: 0.12 },
+  payoutRequestRate: { min: 0.15, mode: 0.25, max: 0.40 },
+  avgDaysToFirstPayout: 25,
 
-  // Payout behavior
-  avgPayoutAmount: { mean: 420, stdDev: 150 },
-  payoutsPerPaidAccountPerMonth: { min: 0.8, mode: 1.2, max: 1.8 },
+  // Payout behavior — conservative; most funded traders withdraw small
+  avgPayoutAmount: { mean: 350, stdDev: 120 },
+  payoutsPerPaidAccountPerMonth: { min: 0.4, mode: 0.7, max: 1.2 },
 
   // Abuse & friction
   fraudAttemptRate: { min: 0.04, mode: 0.07, max: 0.12 },
@@ -1178,6 +1181,7 @@ export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
 
   // V1 BALANCED CONFIG (frozen 2026-03-02)
   // $500 first payout cap, 10× lifetime cap, 14-day cooldown, 7-day eligibility delay
+  // Velocity gates ENABLED: min 10 winning days + 1 month between payouts
   knobs: {
     firstPayoutCap: 500,            // $500 first payout cap (trader receives)
     payoutSplitPercent: 0.80,       // 80% to trader
@@ -1185,9 +1189,9 @@ export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
     resetPrice: 99,                 // $99 reset
     lifetimeCapPerUser: 149 * 10,   // 10× entry fee = $1,490 (V1 balanced)
     attackIntensity: 0,             // no attack scenario
-    minWinningDaysPerPayout: 0,     // disabled by default
-    minProfitSinceLastPayout: 0,    // disabled by default
-    minMonthsBetweenPayouts: 0,     // disabled by default
+    minWinningDaysPerPayout: 10,    // min 10 winning days between payouts (industry norm)
+    minProfitSinceLastPayout: 0,    // disabled — winning days gate is sufficient
+    minMonthsBetweenPayouts: 1,     // min 1 month between payouts (payout window)
     verificationMonths: 0,          // disabled by default (no verification phase)
     verificationFailRate: 0,        // no verification failures
   },
