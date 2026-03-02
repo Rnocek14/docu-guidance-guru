@@ -98,7 +98,7 @@ export function BreakerEfficacyPanel({ comparisons }: Props) {
                 <th className="pb-2 pr-3 text-right">P/R 99</th>
                 <th className="pb-2 pr-3 text-right">L1%</th>
                 <th className="pb-2 pr-3 text-right">L2%</th>
-                <th className="pb-2 text-right">Supp.</th>
+                <th className="pb-2 text-right">Supp. $</th>
               </tr>
             </thead>
             <tbody>
@@ -126,7 +126,7 @@ export function BreakerEfficacyPanel({ comparisons }: Props) {
                       {pct(diag.timeInL2Pct)}
                     </td>
                     <td className="py-2 text-right font-mono">
-                      {Math.round(diag.avgPayoutsSuppressedPerIteration)}
+                      ${Math.round(diag.avgDollarsSuppressedPerIteration).toLocaleString()}
                     </td>
                   </tr>
                 );
