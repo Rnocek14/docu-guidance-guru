@@ -619,6 +619,10 @@ function simulateMonth(
   
   // ── FREEZE PAYOUTS: if freezePayouts is set, skip all payout processing ──
   // Revenue, costs, resets, and lifecycle events still run normally.
+  // NOTE: A/B runs are DISTRIBUTIONAL comparisons, not path-coupled counterfactuals.
+  // Same seed ⇒ reproducible within a config, but breakers alter control flow and
+  // RNG draw count (freeze skips payout RNG), so the two configs produce independent
+  // distributions from the same seed — not "same world with/without breaker."
   const payoutsFrozen = knobs.freezePayouts === true;
   
   if (!payoutsFrozen) {
@@ -959,11 +963,13 @@ export function runMonteCarlo(
           breakerState.requestsSuppressedByBreaker += suppressedRequests;
           
           // Shadow-mode dollar estimate: suppressed requests × expected payout size × split
-          // Apply conservative cap clip factor (0.75) to account for first-payout caps
-          // and lifetime cap clipping that would reduce actual payouts
+          // Clip factors are named constants, not magic numbers — visible in diagnostics.
+          const SUPPRESSED_CLIP_FIRST_CAP = 0.75;  // when first-payout cap is set
+          const SUPPRESSED_CLIP_NO_FIRST_CAP = 0.90; // no first-payout cap
           const expectedPayoutSize = effectiveAssumptions.avgPayoutAmount.mean *
             effectiveAssumptions.knobs.payoutSplitPercent;
-          const capClipFactor = effectiveAssumptions.knobs.firstPayoutCap !== null ? 0.75 : 0.90;
+          const capClipFactor = effectiveAssumptions.knobs.firstPayoutCap !== null
+            ? SUPPRESSED_CLIP_FIRST_CAP : SUPPRESSED_CLIP_NO_FIRST_CAP;
           const suppressedDollars = suppressedRequests * expectedPayoutSize * capClipFactor;
           breakerState.dollarsSuppressedByBreaker += suppressedDollars;
         }

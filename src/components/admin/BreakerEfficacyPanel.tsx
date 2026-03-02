@@ -142,12 +142,23 @@ export function BreakerEfficacyPanel({ comparisons }: Props) {
           {comparisons.map((c, i) => {
             const diag = c.withBreaker.diagnostics;
             const profitDelta = c.withBreaker.meanProfit - c.noBreaker.meanProfit;
-            const isStabilizer = diag.timeInL2Pct < 0.05 && (c.withBreaker.cumP5 >= c.noBreaker.cumP5 || c.withBreaker.maxDD <= c.noBreaker.maxDD);
+            // Stabilizer = improves one metric without worsening the other + low L2
+            // "Mixed" = P5 up but DD worse (or vice versa) — pain may be concentrating
+            const ddNotWorse = c.withBreaker.maxDD <= c.noBreaker.maxDD;
+            const p5NotWorse = c.withBreaker.cumP5 >= c.noBreaker.cumP5;
+            const ddImproves = c.withBreaker.maxDD < c.noBreaker.maxDD;
+            const p5Improves = c.withBreaker.cumP5 > c.noBreaker.cumP5;
+            const lowL2 = diag.timeInL2Pct < 0.05;
+            const isStabilizer = lowL2 && ((p5Improves && ddNotWorse) || (ddImproves && p5NotWorse));
+            const isMixed = lowL2 && ((p5Improves && !ddNotWorse) || (ddImproves && !p5NotWorse));
+            const verdictLabel = isStabilizer ? 'stabilizer' : isMixed ? 'mixed' : 'buy-time';
             return (
               <div key={i} className="flex items-center gap-2 text-xs">
-                <Badge variant={isStabilizer ? 'default' : 'outline'}>{c.scenarioName}</Badge>
+                <Badge variant={isStabilizer ? 'default' : isMixed ? 'secondary' : 'outline'}>
+                  {c.scenarioName} — {verdictLabel}
+                </Badge>
                 <span className="font-mono">
-                  ΔProfit: <span className={profitDelta >= 0 ? 'text-success' : 'text-destructive'}>
+                  ΔProfit (avg/mo, full sim): <span className={profitDelta >= 0 ? 'text-success' : 'text-destructive'}>
                     {profitDelta >= 0 ? '+' : ''}{fmt(profitDelta)}/mo
                   </span>
                 </span>
