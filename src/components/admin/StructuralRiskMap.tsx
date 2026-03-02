@@ -83,12 +83,14 @@ function buildAssumptions(
     max: Math.min(0.95, requestMode + 0.10),
   };
   if (clustering) {
-    // Overlay clustering: higher payout frequency + larger payouts (correlated timing)
+    // Pure timing/size overlay — does NOT touch payoutRequestRate (grid axis).
+    // Matches stress battery's clustering knobs: higher frequency + larger payouts.
     a.payoutsPerPaidAccountPerMonth = { min: 0.8, mode: 1.4, max: 2.0 };
     a.avgPayoutAmount = {
       mean: a.avgPayoutAmount.mean * 1.15,
       stdDev: a.avgPayoutAmount.stdDev * 1.15,
     };
+    // payoutRequestRate is intentionally preserved — it's the x-axis.
   }
   return a;
 }
@@ -509,7 +511,10 @@ export function StructuralRiskMap() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setClustering(!result.clustering)}
+          onClick={() => {
+            setResult(null);
+            setClustering(prev => !prev);
+          }}
         >
           {result.clustering ? 'Switch to Normal' : 'Switch to Clustering'}
         </Button>
