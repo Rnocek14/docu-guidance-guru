@@ -296,9 +296,10 @@ export function V1StressBattery() {
     );
   }
 
-  const baseline = result.scenarios[0].result;
-  const passCount = result.verdict.filter(v => v.pass).length;
-  const allPass = passCount === result.verdict.length;
+  const baseline = result.scenarios?.[0]?.result;
+  if (!baseline) return null;
+  const passCount = result.verdict?.filter(v => v.pass).length ?? 0;
+  const allPass = passCount === (result.verdict?.length ?? 0);
 
   return (
     <div className="space-y-6">
@@ -331,7 +332,7 @@ export function V1StressBattery() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {result.verdict.map((v, i) => (
+            {(result.verdict ?? []).map((v, i) => (
               <div key={i} className="flex items-center gap-2 text-sm">
                 {v.pass ? <CheckCircle className="h-4 w-4 text-success shrink-0" /> : <XCircle className="h-4 w-4 text-destructive shrink-0" />}
                 {v.label}
@@ -361,7 +362,7 @@ export function V1StressBattery() {
               </tr>
             </thead>
             <tbody>
-              {result.scenarios.map((s, i) => {
+              {(result.scenarios ?? []).map((s, i) => {
                 const r = s.result;
                 const d = r.diagnostics;
                 const profitDelta = i > 0 ? r.profit.mean - baseline.profit.mean : 0;
@@ -441,7 +442,7 @@ export function V1StressBattery() {
               </tr>
             </thead>
             <tbody>
-              {result.priceScenarios.map((s, i) => {
+              {(result.priceScenarios ?? []).map((s, i) => {
                 const r = s.result;
                 const d = r.diagnostics;
                 const isNegMargin = d.effectiveMargin < 0;
@@ -484,7 +485,7 @@ export function V1StressBattery() {
               </tr>
             </thead>
             <tbody>
-              {result.drawdown.map((d, i) => (
+              {(result.drawdown ?? []).map((d, i) => (
                 <tr key={i} className="border-b last:border-0">
                   <td className="py-2 pr-4 font-medium">{d.name}</td>
                   <td className="py-2 pr-4 text-right font-mono text-destructive">{fmt(d.maxDD)}</td>
