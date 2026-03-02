@@ -15,7 +15,10 @@ import {
 // CONFIG
 // ============================================================================
 const CONFIG: MonteCarloConfig = { iterations: 500, monthsPerIteration: 12, seed: 42 };
-const CONFIG_90DAY: MonteCarloConfig = { iterations: 1000, monthsPerIteration: 3, seed: 42 };
+// 6 months total: 3-month warm-up + 3-month measurement window
+// This ensures the cohort is mature when we measure DD, fixing the "DD=0 due to ramp-up" issue
+const CONFIG_90DAY: MonteCarloConfig = { iterations: 1000, monthsPerIteration: 6, seed: 42 };
+const DD_WARMUP_MONTHS = 3; // skip first 3 months for DD/P5 measurement
 
 // ============================================================================
 // SCENARIO BUILDERS (deep clone, never drops caps)
@@ -130,6 +133,7 @@ interface BaselineDiagnostics {
   avgActiveCohort: number;
   avgEligibleCohort: number;
   profitStdDev: number;
+  monthProfitMeans: number[]; // per-month mean profit (shows ramp-up effect)
 }
 
 interface StressBatteryResult {
@@ -150,6 +154,22 @@ interface StressBatteryResult {
   verdict: { label: string; pass: boolean }[];
   capitalRealistic: number;  // worst DD excluding attack scenarios
   capitalAdversarial: number; // worst DD including attack scenarios
+}
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+/** Compute per-month mean profit across iterations */
+function monthMeans(rawSamples: number[][]): number[] {
+  const months = rawSamples[0]?.length ?? 0;
+  const means: number[] = [];
+  for (let m = 0; m < months; m++) {
+    let s = 0;
+    for (let i = 0; i < rawSamples.length; i++) s += rawSamples[i][m];
+    means.push(s / rawSamples.length);
+  }
+  return means;
 }
 
 // ============================================================================
@@ -220,16 +240,41 @@ function runStressBattery(): StressBatteryResult {
     const r = runMonteCarlo(CONFIG_90DAY, s.assumptions);
     let cumP5: number;
     let cumMean: number;
+    let maxDD = 0;
+    let minMonth = 0;
+
     if (r.rawSamples && r.rawSamples.length > 0) {
-      const cumProfits = r.rawSamples.map(iter => iter.reduce((a, b) => a + b, 0));
+      // Use only post-warmup months (months DD_WARMUP_MONTHS..end) for measurement
+      // This gives a "mature cohort" 90-day window, fixing DD=0 from ramp-up
+      const matureSamples = r.rawSamples.map(iter => iter.slice(DD_WARMUP_MONTHS));
+
+      // Cumulative 3-month profit (post warm-up)
+      const cumProfits = matureSamples.map(iter => iter.reduce((a, b) => a + b, 0));
       cumMean = cumProfits.reduce((a, b) => a + b, 0) / cumProfits.length;
       cumProfits.sort((a, b) => a - b);
       cumP5 = cumProfits[Math.floor(cumProfits.length * 0.05)];
+
+      // Min monthly profit (post warm-up)
+      const allMatureMonths = matureSamples.flat();
+      minMonth = allMatureMonths.length > 0 ? Math.min(...allMatureMonths) : 0;
+
+      // Recompute DD on mature window (peak-to-trough on cumulative)
+      for (const iter of matureSamples) {
+        let cum = 0;
+        let peak = 0;
+        for (const p of iter) {
+          cum += p;
+          peak = Math.max(peak, cum);
+          maxDD = Math.max(maxDD, peak - cum);
+        }
+      }
     } else {
       cumMean = r.profit.mean * 3;
       cumP5 = r.profit.p5 * 3;
+      maxDD = r.risk.maxDrawdown;
+      minMonth = r.risk.worstMonth;
     }
-    return { name: s.name, maxDD: r.risk.maxDrawdown, minMonth: r.risk.worstMonth, cumMean, cumP5, isAttack: s.isAttack };
+    return { name: s.name, maxDD, minMonth, cumMean, cumP5, isAttack: s.isAttack };
   });
 
   // Baseline diagnostics — compute from rawSamples
@@ -249,6 +294,7 @@ function runStressBattery(): StressBatteryResult {
     avgActiveCohort: baselineResult.cohortDiagnostics?.avgActiveCohortSize ?? 0,
     avgEligibleCohort: baselineResult.cohortDiagnostics?.avgEligibleCohortSize ?? 0,
     profitStdDev: baselineResult.profit.stdDev,
+    monthProfitMeans: baselineResult.rawSamples ? monthMeans(baselineResult.rawSamples) : [],
   };
 
   // Split capital guidance: realistic (non-attack) vs adversarial (all)
@@ -439,6 +485,22 @@ export function V1StressBattery() {
                 </p>
               </div>
             </div>
+            {/* Month-indexed profit means — shows cohort ramp-up effect */}
+            {diag.monthProfitMeans.length > 0 && (
+              <div className="mt-3 rounded-lg bg-muted/50 p-3 text-sm">
+                <p className="font-medium mb-1">Monthly Profit Means (ramp-up visibility):</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs">
+                  {diag.monthProfitMeans.map((m, i) => (
+                    <span key={i} className={i < 3 ? 'text-muted-foreground' : ''}>
+                      M{i}: {fmt(m)}{i < 3 ? ' ↑' : ''}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Early months (M0–M2 ↑) show inflated profit because cohort hasn't matured — few accounts are eligible for payouts yet.
+                </p>
+              </div>
+            )}
             {diag.negativeMonthCount === 0 && (
               <div className="mt-3 rounded-lg bg-warning/10 border border-warning/30 p-3 text-sm">
                 <strong>⚠ Zero negative months.</strong> This means payouts never exceed revenue+costs in any simulated month.
@@ -605,10 +667,10 @@ export function V1StressBattery() {
       {/* 90-Day Drawdown */}
       <Card>
         <CardHeader>
-          <CardTitle>90-Day Worst-Case Drawdown (1000 iter × 3 months)</CardTitle>
+          <CardTitle>90-Day Drawdown — Mature Cohort (1000 iter × 6mo, skip 3mo warm-up)</CardTitle>
           <CardDescription>
-            Cum Mean/P5 = cumulative 3-month net profit (mean and 5th percentile).
-            Note: 90-day profits are higher than 12-month monthly mean because early months have minimal payouts (cohort ramp-up).
+            Runs 6-month sim, discards first 3 months (ramp-up), measures DD/P5 on months 3–5 only.
+            This ensures the cohort is mature and payouts are flowing when drawdown is measured.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
