@@ -12,6 +12,7 @@ import {
 } from '@/lib/monte-carlo';
 import { PAY_REV_GUARDRAIL_V1 } from '@/lib/breaker-policy';
 import { BreakerEfficacyPanel, type BreakerComparisonRow } from './BreakerEfficacyPanel';
+import { StructuralRiskMap } from './StructuralRiskMap';
 
 // ============================================================================
 // CONFIG
@@ -926,6 +927,9 @@ export function V1StressBattery() {
       {result.breakerComparisons.length > 0 && (
         <BreakerEfficacyPanel comparisons={result.breakerComparisons} />
       )}
+
+      {/* Structural Risk Map */}
+      <StructuralRiskMap />
 
       {/* Re-run button */}
       <div className="flex justify-end">
