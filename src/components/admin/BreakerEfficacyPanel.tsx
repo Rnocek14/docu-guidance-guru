@@ -152,11 +152,13 @@ export function BreakerEfficacyPanel({ comparisons }: Props) {
             const isStabilizer = lowL2 && ((p5Improves && ddNotWorse) || (ddImproves && p5NotWorse));
             const isMixed = lowL2 && ((p5Improves && !ddNotWorse) || (ddImproves && !p5NotWorse));
             const verdictLabel = isStabilizer ? 'stabilizer' : isMixed ? 'mixed' : 'buy-time';
+            const verdictColor = isStabilizer ? 'text-success' : isMixed ? 'text-warning' : 'text-destructive';
             return (
               <div key={i} className="flex items-center gap-2 text-xs">
-                <Badge variant={isStabilizer ? 'default' : isMixed ? 'secondary' : 'outline'}>
-                  {c.scenarioName} — {verdictLabel}
+                <Badge variant={isStabilizer ? 'default' : isMixed ? 'secondary' : 'destructive'}>
+                  {c.scenarioName}
                 </Badge>
+                <span className={`font-semibold ${verdictColor}`}>{verdictLabel}</span>
                 <span className="font-mono">
                   ΔProfit (avg/mo, full sim): <span className={profitDelta >= 0 ? 'text-success' : 'text-destructive'}>
                     {profitDelta >= 0 ? '+' : ''}{fmt(profitDelta)}/mo
