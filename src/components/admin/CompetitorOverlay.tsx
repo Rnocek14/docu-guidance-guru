@@ -36,11 +36,18 @@ export interface CompetitorResult {
   breakerProfitMean: number;
   breakerL2Pct: number;
   payRevRatio: number;
+  capCount: number;
+  capHits: number;
+  capEligiblePayouts: number;
+  avgGrossInCapRegime: number;
+  avgNetInCapRegime: number;
 }
 
 export interface CompetitorOverlayState {
   results: CompetitorResult[];
   elapsed: number;
+  runId: number;
+  seed: number;
 }
 
 // ============================================================================
@@ -66,10 +73,11 @@ function applyClusteringToAssumptions(
   return a;
 }
 
-function runCompetitorOverlay(clustering: boolean): CompetitorOverlayState {
+function runCompetitorOverlay(clustering: boolean, runId: number): CompetitorOverlayState {
   const start = Date.now();
   const results: CompetitorResult[] = [];
   const iterations = clustering ? 350 : 250;
+  const seed = 42;
 
   for (const scenario of ALL_COMPETITOR_SCENARIOS) {
     let assumptions = scenario.assumptions;
@@ -81,7 +89,7 @@ function runCompetitorOverlay(clustering: boolean): CompetitorOverlayState {
       );
     }
 
-    const baseConfig: MonteCarloConfig = { iterations, monthsPerIteration: 12, seed: 42 };
+    const baseConfig: MonteCarloConfig = { iterations, monthsPerIteration: 12, seed };
     const breakerConfig: MonteCarloConfig = { ...baseConfig, breakerPolicy: PAY_REV_GUARDRAIL_V1 };
 
     const rNo = runMonteCarlo(baseConfig, assumptions);
@@ -97,10 +105,15 @@ function runCompetitorOverlay(clustering: boolean): CompetitorOverlayState {
       breakerProfitMean: rWith.profit.mean,
       breakerL2Pct: rWith.breakerDiagnostics?.timeInL2Pct ?? 0,
       payRevRatio: rNo.diagnostics.payoutToRevenueRatio,
+      capCount: rNo.payoutDiagnostics.firstPayoutCapConfiguredCount,
+      capHits: rNo.payoutDiagnostics.capHits,
+      capEligiblePayouts: rNo.payoutDiagnostics.capEligiblePayouts,
+      avgGrossInCapRegime: rNo.payoutDiagnostics.avgGrossInCapRegime,
+      avgNetInCapRegime: rNo.payoutDiagnostics.avgNetInCapRegime,
     });
   }
 
-  return { results, elapsed: Date.now() - start };
+  return { results, elapsed: Date.now() - start, runId, seed };
 }
 
 // ============================================================================
@@ -169,17 +182,20 @@ export function CompetitorOverlayPanel({
   const [state, setState] = useState<CompetitorOverlayState | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [showDetails, setShowDetails] = useState(true);
+  const [runIdCounter, setRunIdCounter] = useState(0);
 
   const handleRun = useCallback(() => {
     setIsRunning(true);
+    const nextRunId = runIdCounter + 1;
+    setRunIdCounter(nextRunId);
     setTimeout(() => {
       try {
-        setState(runCompetitorOverlay(clustering));
+        setState(runCompetitorOverlay(clustering, nextRunId));
       } finally {
         setIsRunning(false);
       }
     }, 50);
-  }, [clustering]);
+  }, [clustering, runIdCounter]);
 
   // Group by firm
   const grouped = useMemo(() => {
@@ -220,7 +236,13 @@ export function CompetitorOverlayPanel({
             <Building2 className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">Competitor Overlay</span>
             <Badge variant="secondary" className="text-[10px]">
+              Run #{state.runId}
+            </Badge>
+            <Badge variant="secondary" className="text-[10px]">
               {(state.elapsed / 1000).toFixed(1)}s
+            </Badge>
+            <Badge variant="outline" className="text-[10px]">
+              seed {state.seed}
             </Badge>
             {clustering && (
               <Badge variant="outline" className="text-[10px]">
@@ -260,6 +282,8 @@ export function CompetitorOverlayPanel({
               results={grouped.ftmo}
             />
 
+            <ApexCapDiagnostics results={grouped.apex} />
+
             {/* Executive insight */}
             <CompetitorInsight results={state.results} clustering={clustering} />
           </>
@@ -288,6 +312,10 @@ function FirmTable({
           <thead>
             <tr className="border-b border-border">
               <th className="text-left py-1.5 pr-2 text-muted-foreground font-medium">Scenario</th>
+              <th className="text-center py-1.5 px-2 text-muted-foreground font-medium">Cap</th>
+              <th className="text-center py-1.5 px-2 text-muted-foreground font-medium">Cap N</th>
+              <th className="text-center py-1.5 px-2 text-muted-foreground font-medium">Split</th>
+              <th className="text-center py-1.5 px-2 text-muted-foreground font-medium">Life Cap</th>
               <th className="text-center py-1.5 px-2 text-muted-foreground font-medium">Pass</th>
               <th className="text-center py-1.5 px-2 text-muted-foreground font-medium">Req</th>
               <th className="text-center py-1.5 px-2 text-muted-foreground font-medium">Loss%</th>
@@ -306,6 +334,14 @@ function FirmTable({
               return (
                 <tr key={r.scenario.label} className="border-b border-border/50">
                   <td className="py-1.5 pr-2 font-medium">{r.scenario.variant}</td>
+                  <td className="text-center py-1.5 px-2 font-mono">
+                    {r.scenario.assumptions.knobs.firstPayoutCap == null ? '—' : fmt(r.scenario.assumptions.knobs.firstPayoutCap)}
+                  </td>
+                  <td className="text-center py-1.5 px-2 font-mono">{r.scenario.assumptions.knobs.firstPayoutCapCount ?? 0}</td>
+                  <td className="text-center py-1.5 px-2 font-mono">{pct(r.scenario.assumptions.knobs.payoutSplitPercent)}</td>
+                  <td className="text-center py-1.5 px-2 font-mono">
+                    {r.scenario.assumptions.knobs.lifetimeCapPerUser == null ? '∞' : fmt(r.scenario.assumptions.knobs.lifetimeCapPerUser)}
+                  </td>
                   <td className="text-center py-1.5 px-2">{pct(r.scenario.passRate)}</td>
                   <td className="text-center py-1.5 px-2">{pct(r.scenario.requestRate)}</td>
                   <td className={`text-center py-1.5 px-2 font-bold ${zone.className}`}>
@@ -332,6 +368,44 @@ function FirmTable({
                 </tr>
               );
             })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ApexCapDiagnostics({
+  results,
+}: {
+  results: CompetitorResult[];
+}) {
+  return (
+    <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground space-y-2">
+      <p className="font-semibold text-foreground">Apex Cap Binding Check</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="border-b border-border/60">
+              <th className="text-left py-1.5 pr-2 font-medium">Scenario</th>
+              <th className="text-center py-1.5 px-2 font-medium">Cap N</th>
+              <th className="text-center py-1.5 px-2 font-medium">Cap Hits</th>
+              <th className="text-center py-1.5 px-2 font-medium">Cap Eligible</th>
+              <th className="text-center py-1.5 px-2 font-medium">Avg Gross (cap)</th>
+              <th className="text-center py-1.5 px-2 font-medium">Avg Net (cap)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {results.map((r) => (
+              <tr key={`apex-cap-${r.scenario.label}`} className="border-b border-border/40">
+                <td className="py-1.5 pr-2 font-medium">{r.scenario.variant}</td>
+                <td className="text-center py-1.5 px-2 font-mono">{r.capCount}</td>
+                <td className="text-center py-1.5 px-2 font-mono">{r.capHits}</td>
+                <td className="text-center py-1.5 px-2 font-mono">{r.capEligiblePayouts}</td>
+                <td className="text-center py-1.5 px-2 font-mono">{fmt(r.avgGrossInCapRegime)}</td>
+                <td className="text-center py-1.5 px-2 font-mono">{fmt(r.avgNetInCapRegime)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

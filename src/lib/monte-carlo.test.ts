@@ -259,9 +259,46 @@ describe('Monte Carlo Simulation - Mechanical Invariants', () => {
   describe('First Payout Cap Enforcement', () => {
     it('first payout never exceeds cap when cap is set', () => {
       const result = runMonteCarlo(FULL_CONFIG, SCENARIO_PRESETS.withFirstPayoutCap);
-      
+
       // avgFirstPayoutAfterCap should be <= firstPayoutCap
       expect(result.payoutDiagnostics.avgFirstPayoutAfterCap).toBeLessThanOrEqual(300);
+    });
+
+    it('clips deterministic extreme payouts across first-N regime', () => {
+      const deterministicCapStress = {
+        ...DEFAULT_ASSUMPTIONS,
+        accountsPerMonth: 1,
+        passRate: { min: 0.98, mode: 0.99, max: 1 },
+        payoutRequestRate: { min: 0.98, mode: 0.99, max: 1 },
+        avgDaysToFirstPayout: 0,
+        avgPayoutAmount: { mean: 100000, stdDev: 10 },
+        payoutsPerPaidAccountPerMonth: { min: 0.98, mode: 0.99, max: 1 },
+        fraudAttemptRate: { min: 0, mode: 0, max: 0 },
+        fraudSuccessRate: { min: 0, mode: 0, max: 0 },
+        chargebackRate: { min: 0, mode: 0, max: 0 },
+        resetRate: 0,
+        knobs: {
+          ...DEFAULT_ASSUMPTIONS.knobs,
+          firstPayoutCap: 2000,
+          firstPayoutCapCount: 5,
+          payoutSplitPercent: 1,
+          lifetimeCapPerUser: null,
+          minWinningDaysPerPayout: 0,
+          minProfitSinceLastPayout: 0,
+          minMonthsBetweenPayouts: 0,
+        },
+      };
+
+      const result = runMonteCarlo(
+        { iterations: 1, monthsPerIteration: 6, seed: 42 },
+        deterministicCapStress,
+      );
+
+      expect(result.payoutDiagnostics.firstPayoutCapConfiguredCount).toBe(5);
+      expect(result.payoutDiagnostics.capEligiblePayouts).toBeGreaterThan(0);
+      expect(result.payoutDiagnostics.capHits).toBe(result.payoutDiagnostics.capEligiblePayouts);
+      expect(result.payoutDiagnostics.avgGrossInCapRegime).toBeGreaterThan(90000);
+      expect(result.payoutDiagnostics.avgNetInCapRegime).toBeCloseTo(2000, 6);
     });
   });
 
