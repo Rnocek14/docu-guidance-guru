@@ -1155,7 +1155,7 @@ export function runMonteCarlo(
 export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
   // Acquisition
   accountsPerMonth: 500,
-  pricePerAccount: 149, // Updated to match pricing decision
+  pricePerAccount: 149, // Starter tier
 
   // Trading funnel
   passRate: { min: 0.08, mode: 0.12, max: 0.18 },
@@ -1176,13 +1176,14 @@ export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
   variableCostPerAccount: 8,
   fixedMonthlyCosts: 18000,
 
-  // Default knobs (with $300 first payout cap)
+  // V1 BALANCED CONFIG (frozen 2026-03-02)
+  // $500 first payout cap, 10× lifetime cap, 14-day cooldown, 7-day eligibility delay
   knobs: {
-    firstPayoutCap: 300,            // $300 first payout cap (trader receives)
+    firstPayoutCap: 500,            // $500 first payout cap (trader receives)
     payoutSplitPercent: 0.80,       // 80% to trader
     maxPayoutPercent: 0.80,         // max 80% of profits
     resetPrice: 99,                 // $99 reset
-    lifetimeCapPerUser: 149 * 7,    // 7× entry fee = $1,043 (matches prod cohort default)
+    lifetimeCapPerUser: 149 * 10,   // 10× entry fee = $1,490 (V1 balanced)
     attackIntensity: 0,             // no attack scenario
     minWinningDaysPerPayout: 0,     // disabled by default
     minProfitSinceLastPayout: 0,    // disabled by default
@@ -1272,17 +1273,16 @@ export const SCENARIO_PRESETS = {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
-      lifetimeCapPerUser: 149 * 10, // 10× entry = $1,490
+      lifetimeCapPerUser: 149 * 10, // 10× entry = $1,490 (V1 default)
     },
   },
   
-  // Velocity gate scenarios (Tradeify/Topstep/Alpha Futures style)
+  // Velocity gate scenarios
   withVelocityGate5d: {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
-      lifetimeCapPerUser: 149 * 7,
-      minWinningDaysPerPayout: 15,  // ~12/month at 55% rate, so 15 = needs ~1.3 months
+      minWinningDaysPerPayout: 15,
     },
   },
   
@@ -1290,8 +1290,7 @@ export const SCENARIO_PRESETS = {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
-      lifetimeCapPerUser: 149 * 7,
-      minProfitSinceLastPayout: 300,  // must accumulate $300 profit since last payout
+      minProfitSinceLastPayout: 300,
     },
   },
   
@@ -1299,9 +1298,8 @@ export const SCENARIO_PRESETS = {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
-      lifetimeCapPerUser: 149 * 7,
       minProfitSinceLastPayout: 300,
-      minMonthsBetweenPayouts: 2,    // bimonthly payout windows
+      minMonthsBetweenPayouts: 2,
     },
   },
   
@@ -1309,9 +1307,8 @@ export const SCENARIO_PRESETS = {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
-      lifetimeCapPerUser: 149 * 7,
       verificationMonths: 1,
-      verificationFailRate: 0.15,     // 15% monthly churn during verification
+      verificationFailRate: 0.15,
     },
   },
   
@@ -1319,7 +1316,6 @@ export const SCENARIO_PRESETS = {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
-      lifetimeCapPerUser: 149 * 7,
       verificationMonths: 2,
       verificationFailRate: 0.15,
     },
@@ -1329,7 +1325,6 @@ export const SCENARIO_PRESETS = {
     ...DEFAULT_ASSUMPTIONS,
     knobs: {
       ...DEFAULT_ASSUMPTIONS.knobs,
-      lifetimeCapPerUser: 149 * 7,
       minProfitSinceLastPayout: 300,
       minMonthsBetweenPayouts: 2,
       verificationMonths: 1,
