@@ -54,6 +54,7 @@ function buildProfile(overrides: {
   requestMode: number;
   payoutSplit: number;
   firstPayoutCap: number | null;
+  firstPayoutCapCount?: number;
   lifetimeCapMultiple: number | null;
   minMonthsBetweenPayouts: number;
   minWinningDaysPerPayout: number;
@@ -83,6 +84,7 @@ function buildProfile(overrides: {
     ...a.knobs,
     payoutSplitPercent: overrides.payoutSplit,
     firstPayoutCap: overrides.firstPayoutCap,
+    firstPayoutCapCount: overrides.firstPayoutCapCount ?? 1,
     lifetimeCapPerUser: overrides.lifetimeCapMultiple != null
       ? overrides.price * overrides.lifetimeCapMultiple
       : null,
@@ -100,6 +102,7 @@ function buildProfile(overrides: {
 const APEX_BASE_KNOBS = {
   payoutSplit: 1.00,              // 100% to trader (after 5th payout)
   firstPayoutCap: 2000,           // $2,000 cap first 5 payouts (structural throttle)
+  firstPayoutCapCount: 5,         // cap applies to first 5 payouts, not just first 1
   lifetimeCapMultiple: null,       // no explicit lifetime cap
   minMonthsBetweenPayouts: 0,      // 8-day cycles ≈ sub-monthly
   minWinningDaysPerPayout: 3,      // 30% consistency rule ≈ ~3 winning days

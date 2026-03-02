@@ -39,6 +39,7 @@ const SLOW_GROWTH_ASSUMPTIONS: MonteCarloAssumptions = {
   // Your production knobs
   knobs: {
     firstPayoutCap: 300,
+    firstPayoutCapCount: 1,
     payoutSplitPercent: 0.80,
     maxPayoutPercent: 0.80,
     resetPrice: 99,

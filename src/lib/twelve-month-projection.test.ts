@@ -25,6 +25,7 @@ const BASE_ASSUMPTIONS: MonteCarloAssumptions = {
   fixedMonthlyCosts: 1500,
   knobs: {
     firstPayoutCap: 300,
+    firstPayoutCapCount: 1,
     payoutSplitPercent: 0.80,
     maxPayoutPercent: 0.80,
     resetPrice: 99,
