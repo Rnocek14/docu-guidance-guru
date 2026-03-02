@@ -282,12 +282,23 @@ function runStressBattery(): StressBatteryResult {
     { id: 'no_gates', name: 'No velocity gates', assumptions: SHARED_ASSUMPTIONS.noGates, isAttack: false },
   ];
 
+  let warnedMatureLen = false;
   const drawdown: DrawdownRow[] = ddScenarios.map(s => {
     const r = runMonteCarlo(CONFIG_MATURE_90DAY, s.assumptions);
-    if (import.meta.env.DEV) {
-      const months = r.rawSamples?.[0]?.length ?? 0;
-      if (months && months < MEASURE_START + MEASURE_LEN) {
-        console.warn(`[StressBattery] Mature sim "${s.id}" returned ${months} months; need ${MEASURE_START + MEASURE_LEN}`);
+    if (import.meta.env.DEV && !warnedMatureLen) {
+      const months = r.rawSamples?.[0]?.length;
+      if (months == null) {
+        console.warn(`[StressBattery] [${s.id}] Mature sim did not return rawSamples; cannot validate measurement window.`);
+        warnedMatureLen = true;
+      } else if (months < MEASURE_START + MEASURE_LEN) {
+        console.warn(`[StressBattery] [${s.id}] Mature sim returned ${months} months; need ${MEASURE_START + MEASURE_LEN}`);
+        warnedMatureLen = true;
+      } else {
+        const win = r.rawSamples![0].slice(MEASURE_START, MEASURE_START + MEASURE_LEN);
+        if (win.length !== MEASURE_LEN) {
+          console.warn(`[StressBattery] [${s.id}] Window slice is ${win.length} months; expected ${MEASURE_LEN}`);
+          warnedMatureLen = true;
+        }
       }
     }
     let cumP5: number;
