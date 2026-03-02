@@ -125,26 +125,33 @@ export interface MonteCarloResult {
     avgPayoutsPerAccount: number;
     payoutRequestsTotal: number;
     payoutsApprovedTotal: number;
-    
-    // First payout cap metrics
-    firstPayoutCapBindingRate: number;  // % of first payouts that hit the cap
+
+    // First-N payout cap metrics
+    firstPayoutCapConfiguredCount: number;
+    capEligiblePayouts: number;
+    capHits: number;
+    firstPayoutCapBindingRate: number;  // capHits / capEligiblePayouts
+    avgGrossInCapRegime: number;
+    avgNetInCapRegime: number;
+
+    // Backward-compatible aliases (same source as cap-regime metrics)
     avgFirstPayoutBeforeCap: number;
     avgFirstPayoutAfterCap: number;
-    
+
     // Lifetime cap metrics (aggregated from real iteration data)
     lifetimeCapBindingRate: number;     // % of accounts that hit lifetime cap
     avgLifetimePaidPerAccount: number;
     avgLifetimeHeadroomAtEnd: number;
     payoutsRejectedDueToLifetimeCap: number;
     accountsCompletedByCap: number;
-    
+
     // Distribution data for confidence
     lifetimePaidP50: number;
     lifetimePaidP90: number;
     lifetimePaidP95: number;
     payoutsClippedByLifetimeCap: number;
     avgClippedAmount: number;
-    
+
     // Cap pressure: avgLifetimePaid / cap (only meaningful if cap set)
     // Gives immediate "how close to saturation" signal
     capPressure: number | null;
@@ -210,12 +217,15 @@ export interface MonthResult {
     approvedCount: number;
     totalPaid: number;
     firstPayoutCapHits: number;
+    capEligiblePayoutCount: number;
+    capConfiguredCount: number;
     lifetimeCapHits: number;
     lifetimeCapRejections: number;
     accountsCompletedByCap: number;  // cap-hit completions this month
     zombieAccountsCompleted: number; // zombie completions this month
     payoutSizes: number[];
-    firstPayoutSizes: number[];
+    capEligiblePayoutSizesBefore: number[];
+    capEligiblePayoutSizesAfter: number[];
     lifetimeCapClippedAmounts: number[];
   };
 }
@@ -604,7 +614,8 @@ function simulateMonth(
   let lifetimeCapRejections = 0;
   let accountsCompletedThisMonth = 0;
   const payoutSizes: number[] = [];
-  const firstPayoutSizes: number[] = [];
+  const capEligiblePayoutSizesBefore: number[] = [];
+  const capEligiblePayoutSizesAfter: number[] = [];
   const lifetimeCapClippedAmounts: number[] = [];
   let payoutRequestCount = 0;
   let payoutApprovedCount = 0;
@@ -625,7 +636,9 @@ function simulateMonth(
   // RNG draw count (freeze skips payout RNG), so the two configs produce independent
   // distributions from the same seed — not "same world with/without breaker."
   const payoutsFrozen = knobs.freezePayouts === true;
-  
+  const firstPayoutCap = knobs.firstPayoutCap;
+  const capCount = firstPayoutCap != null ? (knobs.firstPayoutCapCount ?? 1) : 0;
+
   if (!payoutsFrozen) {
   // Each eligible account has payoutRequestRate chance of requesting this month
   for (const account of eligibleAccounts) {
@@ -692,19 +705,21 @@ function simulateMonth(
       // CORRECT ORDER: Split FIRST, then apply caps
       // This means $300 cap = trader RECEIVES $300
       // =====================================================================
-      let traderPayout = rawPayoutAmount * knobs.payoutSplitPercent;
-      
-      const capCount = knobs.firstPayoutCap !== null ? (knobs.firstPayoutCapCount ?? 1) : 0;
+      const traderPayoutGross = rawPayoutAmount * knobs.payoutSplitPercent;
+      let traderPayout = traderPayoutGross;
+
       const isCapEligible = capCount > 0 && account.payoutCount < capCount;
-      
+
       // Apply first-N payout cap (e.g., Apex: first 5 payouts capped at $2k)
-      if (isCapEligible) {
-        if (traderPayout > knobs.firstPayoutCap!) {
-          traderPayout = knobs.firstPayoutCap!;
+      if (isCapEligible && firstPayoutCap != null) {
+        capEligiblePayoutSizesBefore.push(traderPayoutGross);
+
+        if (traderPayout > firstPayoutCap) {
+          traderPayout = firstPayoutCap;
           firstPayoutCapHits++;
         }
-        // Track after-cap size only (single entry per payout, no double-counting)
-        firstPayoutSizes.push(traderPayout);
+
+        capEligiblePayoutSizesAfter.push(traderPayout);
       }
       
       // Apply lifetime cap using lifetimePaidTotal (per-user, never resets)
@@ -827,12 +842,15 @@ function simulateMonth(
       approvedCount: payoutApprovedCount,
       totalPaid: totalPayouts,
       firstPayoutCapHits,
+      capEligiblePayoutCount: capEligiblePayoutSizesAfter.length,
+      capConfiguredCount: capCount,
       lifetimeCapHits,
       lifetimeCapRejections,
       accountsCompletedByCap: accountsCompletedThisMonth,
       zombieAccountsCompleted,
       payoutSizes,
-      firstPayoutSizes,
+      capEligiblePayoutSizesBefore,
+      capEligiblePayoutSizesAfter,
       lifetimeCapClippedAmounts,
     },
   };
@@ -862,15 +880,15 @@ export function runMonteCarlo(
   
   // Aggregate payout diagnostics
   let totalFirstCapHits = 0;
-  let totalFirstPayouts = 0;
+  let totalCapEligiblePayouts = 0;
   let totalLifetimeCapHits = 0;
   let totalLifetimeCapRejections = 0;
   let totalAccountsCompletedByCap = 0;
   let totalPayoutsRequested = 0;
   let totalPayoutsApproved = 0;
   let allPayoutSizes: number[] = [];
-  let allFirstPayoutsBefore: number[] = [];
-  let allFirstPayoutsAfter: number[] = [];
+  let allCapEligiblePayoutsBefore: number[] = [];
+  let allCapEligiblePayoutsAfter: number[] = [];
   let allLifetimeClippedAmounts: number[] = [];
   
   // NEW: Aggregate account stats from REAL iteration data
@@ -989,6 +1007,7 @@ export function runMonteCarlo(
       // Aggregate payout diagnostics
       const pd = result.payoutDetails;
       totalFirstCapHits += pd.firstPayoutCapHits;
+      totalCapEligiblePayouts += pd.capEligiblePayoutCount;
       totalLifetimeCapHits += pd.lifetimeCapHits;
       totalLifetimeCapRejections += pd.lifetimeCapRejections;
       totalAccountsCompletedByCap += pd.accountsCompletedByCap;
@@ -996,15 +1015,8 @@ export function runMonteCarlo(
       totalPayoutsApproved += pd.approvedCount;
       allPayoutSizes.push(...pd.payoutSizes);
       allLifetimeClippedAmounts.push(...pd.lifetimeCapClippedAmounts);
-      
-      // Track first payout sizes (pairs of before/after)
-      for (let i = 0; i < pd.firstPayoutSizes.length; i += 2) {
-        if (i + 1 < pd.firstPayoutSizes.length) {
-          allFirstPayoutsBefore.push(pd.firstPayoutSizes[i]);
-          allFirstPayoutsAfter.push(pd.firstPayoutSizes[i + 1]);
-          totalFirstPayouts++;
-        }
-      }
+      allCapEligiblePayoutsBefore.push(...pd.capEligiblePayoutSizesBefore);
+      allCapEligiblePayoutsAfter.push(...pd.capEligiblePayoutSizesAfter);
     }
     
     if (breakerState) allBreakerStates.push(breakerState);
@@ -1118,11 +1130,11 @@ export function runMonteCarlo(
     ? allPayoutSizes.reduce((a, b) => a + b, 0) / allPayoutSizes.length 
     : 0;
   
-  const avgFirstPayoutBefore = allFirstPayoutsBefore.length > 0
-    ? allFirstPayoutsBefore.reduce((a, b) => a + b, 0) / allFirstPayoutsBefore.length
+  const avgGrossInCapRegime = allCapEligiblePayoutsBefore.length > 0
+    ? allCapEligiblePayoutsBefore.reduce((a, b) => a + b, 0) / allCapEligiblePayoutsBefore.length
     : 0;
-  const avgFirstPayoutAfter = allFirstPayoutsAfter.length > 0
-    ? allFirstPayoutsAfter.reduce((a, b) => a + b, 0) / allFirstPayoutsAfter.length
+  const avgNetInCapRegime = allCapEligiblePayoutsAfter.length > 0
+    ? allCapEligiblePayoutsAfter.reduce((a, b) => a + b, 0) / allCapEligiblePayoutsAfter.length
     : 0;
   
   // =========================================================================
@@ -1231,9 +1243,18 @@ export function runMonteCarlo(
       payoutRequestsTotal: totalPayoutsRequested,
       payoutsApprovedTotal: totalPayoutsApproved,
       
-      firstPayoutCapBindingRate: totalFirstPayouts > 0 ? totalFirstCapHits / totalFirstPayouts : 0,
-      avgFirstPayoutBeforeCap: avgFirstPayoutBefore,
-      avgFirstPayoutAfterCap: avgFirstPayoutAfter,
+      firstPayoutCapConfiguredCount: effectiveAssumptions.knobs.firstPayoutCap != null
+        ? (effectiveAssumptions.knobs.firstPayoutCapCount ?? 1)
+        : 0,
+      capEligiblePayouts: totalCapEligiblePayouts,
+      capHits: totalFirstCapHits,
+      firstPayoutCapBindingRate: totalCapEligiblePayouts > 0 ? totalFirstCapHits / totalCapEligiblePayouts : 0,
+      avgGrossInCapRegime,
+      avgNetInCapRegime,
+
+      // Backward-compatible aliases
+      avgFirstPayoutBeforeCap: avgGrossInCapRegime,
+      avgFirstPayoutAfterCap: avgNetInCapRegime,
       
       lifetimeCapBindingRate,
       avgLifetimePaidPerAccount,
