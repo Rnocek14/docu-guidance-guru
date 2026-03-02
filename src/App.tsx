@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,41 +8,51 @@ import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ScrollToHash } from "@/components/ScrollToHash";
+import { Loader2 } from "lucide-react";
 
-// Public pages
-import Index from "./pages/Index";
-import NotFound from "./pages/NotFound";
-import Login from "./pages/Login";
-import Signup from "./pages/Signup";
-import Dashboard from "./pages/Dashboard";
-import Checkout from "./pages/Checkout";
-import Rules from "./pages/Rules";
+// Lazy-loaded pages
+const Index = lazy(() => import("./pages/Index"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const Login = lazy(() => import("./pages/Login"));
+const Signup = lazy(() => import("./pages/Signup"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Checkout = lazy(() => import("./pages/Checkout"));
+const Rules = lazy(() => import("./pages/Rules"));
 
-// Role-specific dashboards
-import TraderDashboard from "./pages/trader/TraderDashboard";
-import TraderAccounts from "./pages/trader/TraderAccounts";
-import TraderTrades from "./pages/trader/TraderTrades";
-import TraderPayouts from "./pages/trader/TraderPayouts";
-import PayoutRequest from "./pages/trader/PayoutRequest";
-import RiskDashboard from "./pages/risk/RiskDashboard";
-import ReviewQueue from "./pages/risk/ReviewQueue";
-import MissionControl from "./pages/admin/MissionControl";
-import AdminDashboard from "./pages/admin/AdminDashboard";
-import SystemOverview from "./pages/admin/SystemOverview";
-import UsersManagement from "./pages/admin/UsersManagement";
-import CohortsManagement from "./pages/admin/CohortsManagement";
-import AuditLogs from "./pages/admin/AuditLogs";
-import MonteCarloAnalytics from "./pages/admin/MonteCarloAnalytics";
-import LiabilityDashboard from "./pages/admin/LiabilityDashboard";
-import OpsPlaybook from "./pages/admin/OpsPlaybook";
-import OpsMetrics from "./pages/admin/OpsMetrics";
-import TierReadiness from "./pages/admin/TierReadiness";
-import AdminReadiness from "./pages/admin/AdminReadiness";
-import GovernorDashboard from "./pages/admin/GovernorDashboard";
-import QaScanRunner from "./pages/admin/QaScanRunner";
-import SupportEmails from "./pages/admin/SupportEmails";
-import SupportDashboard from "./pages/support/SupportDashboard";
-import AccountDetails from "./pages/trader/AccountDetails";
+const TraderDashboard = lazy(() => import("./pages/trader/TraderDashboard"));
+const TraderAccounts = lazy(() => import("./pages/trader/TraderAccounts"));
+const TraderTrades = lazy(() => import("./pages/trader/TraderTrades"));
+const TraderPayouts = lazy(() => import("./pages/trader/TraderPayouts"));
+const PayoutRequest = lazy(() => import("./pages/trader/PayoutRequest"));
+const AccountDetails = lazy(() => import("./pages/trader/AccountDetails"));
+
+const RiskDashboard = lazy(() => import("./pages/risk/RiskDashboard"));
+const ReviewQueue = lazy(() => import("./pages/risk/ReviewQueue"));
+
+const MissionControl = lazy(() => import("./pages/admin/MissionControl"));
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const SystemOverview = lazy(() => import("./pages/admin/SystemOverview"));
+const UsersManagement = lazy(() => import("./pages/admin/UsersManagement"));
+const CohortsManagement = lazy(() => import("./pages/admin/CohortsManagement"));
+const AuditLogs = lazy(() => import("./pages/admin/AuditLogs"));
+const MonteCarloAnalytics = lazy(() => import("./pages/admin/MonteCarloAnalytics"));
+const LiabilityDashboard = lazy(() => import("./pages/admin/LiabilityDashboard"));
+const OpsPlaybook = lazy(() => import("./pages/admin/OpsPlaybook"));
+const OpsMetrics = lazy(() => import("./pages/admin/OpsMetrics"));
+const TierReadiness = lazy(() => import("./pages/admin/TierReadiness"));
+const AdminReadiness = lazy(() => import("./pages/admin/AdminReadiness"));
+const GovernorDashboard = lazy(() => import("./pages/admin/GovernorDashboard"));
+const QaScanRunner = lazy(() => import("./pages/admin/QaScanRunner"));
+const SupportEmails = lazy(() => import("./pages/admin/SupportEmails"));
+const SupportDashboard = lazy(() => import("./pages/support/SupportDashboard"));
+
+function PageLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  );
+}
 
 const queryClient = new QueryClient();
 
@@ -54,6 +65,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <ScrollToHash />
+          <Suspense fallback={<PageLoader />}>
           <Routes>
             {/* Public routes */}
             <Route path="/" element={<Index />} />
@@ -299,6 +311,7 @@ const App = () => (
             {/* Catch-all */}
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
