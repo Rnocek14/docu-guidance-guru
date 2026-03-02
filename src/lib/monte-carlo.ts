@@ -54,6 +54,7 @@ export interface MonteCarloAssumptions {
 
 export interface SimulationKnobs {
   firstPayoutCap: number | null;        // e.g., 300 = first payout max $300 (trader receives)
+  firstPayoutCapCount: number;          // how many payouts the cap applies to (default 1 = first only; Apex uses 5)
   payoutSplitPercent: number;           // e.g., 0.80 = 80% to trader
   maxPayoutPercent: number;             // e.g., 0.80 = max 80% of profits
   resetPrice: number;                   // price for reset accounts
@@ -693,10 +694,11 @@ function simulateMonth(
       // =====================================================================
       let traderPayout = rawPayoutAmount * knobs.payoutSplitPercent;
       
-      const isFirstPayout = account.payoutCount === 0;
+      const capCount = knobs.firstPayoutCapCount ?? 1;
+      const isCapEligible = account.payoutCount < capCount;
       
-      // Apply first payout cap (only on first payout of each ATTEMPT)
-      if (isFirstPayout && knobs.firstPayoutCap !== null) {
+      // Apply first-N payout cap (e.g., Apex: first 5 payouts capped at $2k)
+      if (isCapEligible && knobs.firstPayoutCap !== null) {
         firstPayoutSizes.push(traderPayout); // track before cap
         if (traderPayout > knobs.firstPayoutCap) {
           traderPayout = knobs.firstPayoutCap;
@@ -1318,6 +1320,7 @@ export const DEFAULT_ASSUMPTIONS: MonteCarloAssumptions = {
   // Velocity gates ENABLED: min 10 winning days + 1 month between payouts
   knobs: {
     firstPayoutCap: 500,            // $500 first payout cap (trader receives)
+    firstPayoutCapCount: 1,         // applies to first payout only
     payoutSplitPercent: 0.80,       // 80% to trader
     maxPayoutPercent: 0.80,         // max 80% of profits
     resetPrice: 99,                 // $99 reset

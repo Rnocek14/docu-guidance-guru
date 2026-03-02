@@ -21,6 +21,7 @@ const BASE_ASSUMPTIONS: Omit<MonteCarloAssumptions, 'accountsPerMonth'> = {
   fixedMonthlyCosts: 1500,
   knobs: {
     firstPayoutCap: 300,
+    firstPayoutCapCount: 1,
     payoutSplitPercent: 0.80,
     maxPayoutPercent: 0.80,
     resetPrice: 99,
