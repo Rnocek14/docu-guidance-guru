@@ -174,6 +174,7 @@ export default function MonteCarloAnalytics() {
                 ...(overrides.firstPayoutCapCount != null && { firstPayoutCapCount: overrides.firstPayoutCapCount }),
                 ...(overrides.minMonthsBetweenPayouts != null && { minMonthsBetweenPayouts: overrides.minMonthsBetweenPayouts }),
                 ...(overrides.targetPayRevSoft !== undefined && { targetPayRevSoft: overrides.targetPayRevSoft }),
+                ...(overrides.payRevEngageThreshold !== undefined && { payRevEngageThreshold: overrides.payRevEngageThreshold }),
               },
             },
           }),

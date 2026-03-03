@@ -53,6 +53,8 @@ interface SimKnobs {
   verificationFailRate: number
   /** Monthly payout budget as fraction of revenue. null = disabled (no soft pacing). */
   targetPayRevSoft: number | null
+  /** Pay/Rev threshold to engage budgeting. null = always-on when targetPayRevSoft set. */
+  payRevEngageThreshold: number | null
 }
 
 interface AccountState {
@@ -235,6 +237,7 @@ function cohortToAssumptions(cohorts: CohortConfig[], overrides?: Partial<SimAss
       verificationMonths: cohorts.some(c => c.cohort_phase === 'verification') ? 1 : 0,
       verificationFailRate: 0.15,
       targetPayRevSoft: null,  // disabled by default — enable via preset/override
+      payRevEngageThreshold: null, // null = always-on when targetPayRevSoft set
     },
   }
 
@@ -407,11 +410,16 @@ function simulateMonthPerAccount(
   let deferredPayoutDollars = 0
   let deferredPayoutRequests = 0
 
-  // Payout budget (soft pacing): limits per-month payout mass to fraction of revenue
+  // Payout budget (conditional pacing): only engages when month is "hot"
   const monthTotalRevenue = revenue + resetRevenue
   const payoutBudget = knobs.targetPayRevSoft != null
     ? monthTotalRevenue * knobs.targetPayRevSoft
     : Infinity
+  // Whether budget is conditional (engage threshold) or always-on
+  const engageThreshold = knobs.payRevEngageThreshold != null
+    ? monthTotalRevenue * knobs.payRevEngageThreshold
+    : 0  // 0 = always engaged when targetPayRevSoft is set
+  let budgetEngaged = knobs.targetPayRevSoft == null ? false : (engageThreshold <= 0)
 
   const eligibleAccounts: AccountState[] = []
   ctx.accountStates.forEach(state => {
@@ -420,14 +428,16 @@ function simulateMonthPerAccount(
     }
   })
 
-  // Fairness shuffle: randomize payout processing order using seeded RNG
-  // Prevents systematic winners/losers when budget ceiling is hit
+  // Priority sort: oldest unpaid first (fairness), with seeded shuffle as tie-breaker
+  // First shuffle for randomness, then stable-sort by priority
   for (let i = eligibleAccounts.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1))
     const tmp = eligibleAccounts[i]
     eligibleAccounts[i] = eligibleAccounts[j]
     eligibleAccounts[j] = tmp
   }
+  // Stable sort: accounts waiting longest get paid first when budget is active
+  eligibleAccounts.sort((a, b) => b.monthsSinceLastPayout - a.monthsSinceLastPayout)
 
   for (const account of eligibleAccounts) {
     if (random() > payoutReqRate) continue
@@ -445,8 +455,9 @@ function simulateMonthPerAccount(
       if (account.monthsSinceLastPayout < knobs.minMonthsBetweenPayouts) continue
     }
 
-    const numPayouts = Math.max(1, Math.round(payoutsPerAcct))
-    for (let j = 0; j < numPayouts; j++) {
+    // Soft throttle: when budget is engaged, cap numPayouts to 1 per account
+    const maxPayoutsThisAccount = budgetEngaged ? 1 : Math.max(1, Math.round(payoutsPerAcct))
+    for (let j = 0; j < maxPayoutsThisAccount; j++) {
       payoutRequests++
 
       const headroom = lifetimeCap !== null ? lifetimeCap - account.lifetimePaidTotal : Infinity
@@ -475,10 +486,13 @@ function simulateMonthPerAccount(
       // Min $50 threshold
       if (traderPayout < 50) continue
 
-      // PAYOUT BUDGET CHECK (soft pacing / tail smoother)
-      // If this payout would exceed the monthly budget, defer it.
-      // The account remains eligible and will naturally retry next month.
-      if (payoutDollars + traderPayout > payoutBudget && knobs.targetPayRevSoft != null) {
+      // CONDITIONAL BUDGET CHECK: engage budget when month crosses threshold
+      if (knobs.targetPayRevSoft != null && !budgetEngaged && (payoutDollars + traderPayout) > engageThreshold) {
+        budgetEngaged = true
+      }
+
+      // PAYOUT BUDGET CHECK (hard ceiling — only when engaged)
+      if (budgetEngaged && payoutDollars + traderPayout > payoutBudget && knobs.targetPayRevSoft != null) {
         deferredPayoutRequests++
         deferredPayoutDollars += traderPayout
         continue  // deferred — account retries next month naturally
@@ -1039,6 +1053,8 @@ function runSimulation(
       // Payout budgeting (soft pacing) diagnostics
       payoutBudgetEnabled: assumptions.knobs.targetPayRevSoft != null,
       targetPayRevSoft: assumptions.knobs.targetPayRevSoft,
+      payRevEngageThreshold: assumptions.knobs.payRevEngageThreshold,
+      conditionalPacing: assumptions.knobs.payRevEngageThreshold != null,
       totalDeferredDollars,
       totalDeferredRequests,
       deferredDollarsPerIteration: totalDeferredDollars / Math.max(1, completedIterations),
