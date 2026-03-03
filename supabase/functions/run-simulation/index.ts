@@ -847,13 +847,14 @@ function runSimulation(
   let totalDeferredDollars = 0
   let totalDeferredRequests = 0
   let completedIterations = 0
-  // Ladder split evidence tracking
+  // Ladder split evidence tracking — discrete counters (splits are only 0.80/0.82/0.85)
   let ladderSplitSum = 0       // sum of all effective splits used
   let ladderSplitCount = 0     // number of executed payouts (for avg)
-  let ladderSplitMax = 0       // highest split observed
-  const ladderSplitAll: number[] = []  // all splits for p95
-  let ladderAccountsPro = 0    // accounts that reached cleanPayoutCount >= 3
-  let ladderAccountsElite = 0  // accounts that reached cleanPayoutCount >= 6
+  let ladderSplit80 = 0        // count of payouts at base 80%
+  let ladderSplit82 = 0        // count of payouts at Pro 82%
+  let ladderSplit85 = 0        // count of payouts at Elite 85%
+  let ladderAccountsPro = 0    // accounts at end-of-iter with cleanPayoutCount >= 3
+  let ladderAccountsElite = 0  // accounts at end-of-iter with cleanPayoutCount >= 6
   let ladderTotalAccounts = 0  // total accounts observed at end of iteration
   let partial = false
   let partialReason: string | null = null
@@ -905,8 +906,10 @@ function runSimulation(
       for (const s of result.ladderSplits) {
         ladderSplitSum += s
         ladderSplitCount++
-        if (s > ladderSplitMax) ladderSplitMax = s
-        ladderSplitAll.push(s)
+        // Discrete bucket counters — exact p95 without storing array
+        if (s >= 0.845) ladderSplit85++
+        else if (s >= 0.81) ladderSplit82++
+        else ladderSplit80++
       }
       // Track per-iteration max-month payout outflow
       if (result.payoutDollars > iterMaxPayoutOutflow) {
@@ -1132,16 +1135,23 @@ function runSimulation(
     },
     // Ladder split evidence: proves splits are actually being applied
     ladderEvidence: (() => {
-      if (ladderSplitCount === 0) return { avgEffectiveSplit: 0, p95EffectiveSplit: 0, maxEffectiveSplit: 0, totalExecutedPayouts: 0, accountsReachedProPct: 0, accountsReachedElitePct: 0 }
-      const sorted = ladderSplitAll.slice().sort((a, b) => a - b)
-      const p95Idx = Math.min(Math.max(Math.ceil(0.95 * sorted.length) - 1, 0), sorted.length - 1)
+      if (ladderSplitCount === 0) return { avgEffectiveSplit: 0, p95EffectiveSplit: 0, maxEffectiveSplit: 0, totalExecutedPayouts: 0, splitDistribution: { at80: 0, at82: 0, at85: 0 }, accountsReachedProPct_endOfIter: 0, accountsReachedElitePct_endOfIter: 0 }
+      // Exact p95 from discrete counters (splits are only 0.80/0.82/0.85)
+      const p95Rank = Math.ceil(0.95 * ladderSplitCount)
+      const p95Split = p95Rank <= ladderSplit80 ? 0.80
+        : p95Rank <= ladderSplit80 + ladderSplit82 ? 0.82
+        : 0.85
+      const maxSplit = ladderSplit85 > 0 ? 0.85 : ladderSplit82 > 0 ? 0.82 : 0.80
       return {
         avgEffectiveSplit: ladderSplitSum / ladderSplitCount,
-        p95EffectiveSplit: sorted[p95Idx],
-        maxEffectiveSplit: ladderSplitMax,
+        p95EffectiveSplit: p95Split,
+        maxEffectiveSplit: maxSplit,
         totalExecutedPayouts: ladderSplitCount,
-        accountsReachedProPct: ladderTotalAccounts > 0 ? ladderAccountsPro / ladderTotalAccounts : 0,
-        accountsReachedElitePct: ladderTotalAccounts > 0 ? ladderAccountsElite / ladderTotalAccounts : 0,
+        splitDistribution: { at80: ladderSplit80, at82: ladderSplit82, at85: ladderSplit85 },
+        // Denominator clarification: fraction of accounts alive at end-of-iteration
+        // that reached Pro/Elite clean payout thresholds. NOT "ever reached".
+        accountsReachedProPct_endOfIter: ladderTotalAccounts > 0 ? ladderAccountsPro / ladderTotalAccounts : 0,
+        accountsReachedElitePct_endOfIter: ladderTotalAccounts > 0 ? ladderAccountsElite / ladderTotalAccounts : 0,
       }
     })(),
     // Aggregate revenue/cost breakdown (averaged per iteration for auditability)
@@ -1331,6 +1341,12 @@ Deno.serve(async (req) => {
       .select('id').single()
 
     if (insertError) console.error('Failed to persist simulation:', insertError)
+
+    // Ladder evidence log — eyeball-checkable in function logs without opening JSON
+    const le = results.ladderEvidence as Record<string, unknown> | undefined
+    if (le) {
+      console.log(`[ladder-evidence] run=${inserted?.id ?? 'unknown'} payouts=${le.totalExecutedPayouts} avgSplit=${typeof le.avgEffectiveSplit === 'number' ? (le.avgEffectiveSplit as number).toFixed(4) : '?'} maxSplit=${le.maxEffectiveSplit} dist=${JSON.stringify(le.splitDistribution)} proPct=${typeof le.accountsReachedProPct_endOfIter === 'number' ? ((le.accountsReachedProPct_endOfIter as number) * 100).toFixed(1) : '?'}% elitePct=${typeof le.accountsReachedElitePct_endOfIter === 'number' ? ((le.accountsReachedElitePct_endOfIter as number) * 100).toFixed(1) : '?'}%`)
+    }
 
     if (inserted?.id) {
       const { data: currentSetting } = await serviceClient
