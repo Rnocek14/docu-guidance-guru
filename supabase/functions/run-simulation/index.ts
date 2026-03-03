@@ -64,6 +64,7 @@ interface AccountState {
   lifetimePaidTotal: number
   attemptPaid: number
   payoutCount: number
+  cleanPayoutCount: number  // tracks clean payouts for ladder split modeling
   resetCount: number
   isCompleted: boolean
   isActive: boolean
@@ -73,6 +74,24 @@ interface AccountState {
   winningDaysSinceLastPayout: number
   phase: 'verification' | 'funded'
   verificationStartMonth: number
+}
+
+// Ladder split tiers — must match ladder-spec.ts
+// At N clean payouts, split upgrades. This models real payout outflow increase.
+const LADDER_SPLITS: Array<{ cleanPayoutsRequired: number; splitPercent: number }> = [
+  { cleanPayoutsRequired: 0, splitPercent: 0.80 },
+  { cleanPayoutsRequired: 3, splitPercent: 0.82 },
+  { cleanPayoutsRequired: 6, splitPercent: 0.85 },
+]
+
+function getLadderSplit(cleanPayoutCount: number, baseSplit: number): number {
+  let split = baseSplit
+  for (const tier of LADDER_SPLITS) {
+    if (cleanPayoutCount >= tier.cleanPayoutsRequired) {
+      split = Math.max(split, tier.splitPercent)
+    }
+  }
+  return split
 }
 
 interface SimulateMonthContext {
@@ -224,11 +243,13 @@ function cohortToAssumptions(cohorts: CohortConfig[], overrides?: Partial<SimAss
       payoutSplitPercent: (perfCohort?.payout_split_percent ?? 80) / 100,
       maxPayoutPercent: (perfCohort?.max_payout_percent ?? 80) / 100,
       resetPrice: 99,
-      // HARD FLOOR: Lifetime cap can never exceed 7× entry fee, even if cohort
-      // config is misconfigured or a "promo" experiment sets it higher.
-      // Lower caps are fine. This prevents marketing-driven insolvency.
+      // HARD FLOOR: Lifetime cap can never exceed the production baseline (10×
+      // entry fee), even if cohort config is misconfigured or a "promo"
+      // experiment sets it higher.  Lower caps are fine.
+      // NOTE: Must match TIERS[].lifetimeCapMultiple in pricing-data.ts.
+      // Previous value (7×) understated tail risk — fixed 2026-03-03.
       lifetimeCapPerUser: perfCohort?.lifetime_cap_multiple != null
-        ? Math.min(entryFee * perfCohort.lifetime_cap_multiple, entryFee * 7)
+        ? Math.min(entryFee * perfCohort.lifetime_cap_multiple, entryFee * 10)
         : null,
       attackIntensity: 0,
       minWinningDaysPerPayout: perfCohort?.min_winning_days_between_payouts ?? 0,
@@ -317,6 +338,7 @@ function simulateMonthPerAccount(
       lifetimePaidTotal: 0,
       attemptPaid: 0,
       payoutCount: 0,
+      cleanPayoutCount: 0,
       resetCount: 0,
       isCompleted: false,
       isActive: true,
@@ -469,7 +491,9 @@ function simulateMonthPerAccount(
 
       // Always draw per-payout lognormal from micro RNG to preserve fat tails
       const rawPayout = logNormalDraw(random, assumptions.avgPayoutAmount.mean, assumptions.avgPayoutAmount.stdDev)
-      let traderPayout = rawPayout * knobs.payoutSplitPercent
+      // Use ladder-aware split: accounts with more clean payouts get higher splits
+      const effectiveSplit = getLadderSplit(account.cleanPayoutCount, knobs.payoutSplitPercent)
+      let traderPayout = rawPayout * effectiveSplit
 
       // First payout cap
       if (account.payoutCount === 0 && knobs.firstPayoutCap !== null) {
@@ -512,6 +536,9 @@ function simulateMonthPerAccount(
       account.lifetimePaidTotal += traderPayout
       account.attemptPaid += traderPayout
       account.payoutCount++
+      // ~80% of payouts are "clean" (no flag, no L2) — conservative estimate
+      // for ladder progression modeling. Actual clean rate depends on flag/breaker frequency.
+      if (random() < 0.80) account.cleanPayoutCount++
 
       // Reset velocity counters
       account.profitSinceLastPayout = 0
