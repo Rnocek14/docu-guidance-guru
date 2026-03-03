@@ -24,6 +24,7 @@ import { SmartGreeting } from '@/components/trader/SmartGreeting';
 import { TierStatusCard } from '@/components/trader/TierStatusCard';
 import { UnlockRoadmap } from '@/components/trader/UnlockRoadmap';
 import { CleanPayoutChecklist } from '@/components/trader/CleanPayoutChecklist';
+import { RecentPayoutsTable } from '@/components/trader/RecentPayoutsTable';
 
 export default function TraderDashboard() {
   const { user } = useAuth();
@@ -183,11 +184,14 @@ export default function TraderDashboard() {
 
                 {/* PA-only: Ladder Progression */}
                 {isPerformanceAccount && (
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    <TierStatusCard progress={ladderProgress} />
-                    <UnlockRoadmap progress={ladderProgress} />
-                    <CleanPayoutChecklist />
-                  </div>
+                  <>
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                      <TierStatusCard progress={ladderProgress} />
+                      <UnlockRoadmap progress={ladderProgress} />
+                      <CleanPayoutChecklist />
+                    </div>
+                    <RecentPayoutsTable accountId={activeAccount.id} />
+                  </>
                 )}
 
                 {/* Primary zone: Equity Curve + Rule Health side-by-side */}
