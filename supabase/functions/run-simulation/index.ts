@@ -856,6 +856,7 @@ function runSimulation(
   let ladderAccountsPro = 0    // accounts at end-of-iter with cleanPayoutCount >= 3
   let ladderAccountsElite = 0  // accounts at end-of-iter with cleanPayoutCount >= 6
   let ladderTotalAccounts = 0  // total accounts observed at end of iteration
+  let ladderCleanPayoutSum = 0 // sum of cleanPayoutCount across all end-of-iter accounts
   let partial = false
   let partialReason: string | null = null
   const perIterMaxPayoutOutflow: number[] = [] // Per-iteration max-month payout outflow for percentile calculation
@@ -906,9 +907,10 @@ function runSimulation(
       for (const s of result.ladderSplits) {
         ladderSplitSum += s
         ladderSplitCount++
-        // Discrete bucket counters — exact p95 without storing array
-        if (s >= 0.845) ladderSplit85++
-        else if (s >= 0.81) ladderSplit82++
+        // Float-safe bucketing: clamp to 2 decimals then exact-match discrete tiers
+        const s2 = Math.round(s * 100) / 100
+        if (s2 === 0.85) ladderSplit85++
+        else if (s2 === 0.82) ladderSplit82++
         else ladderSplit80++
       }
       // Track per-iteration max-month payout outflow
@@ -945,11 +947,14 @@ function runSimulation(
     allIterProfits.push(cumProfit)
     perIterMaxPayoutOutflow.push(iterMaxPayoutOutflow)
     // Count ladder progression at iteration end
+    let iterCleanSum = 0
     ctx.accountStates.forEach(state => {
       ladderTotalAccounts++
+      iterCleanSum += state.cleanPayoutCount
       if (state.cleanPayoutCount >= 3) ladderAccountsPro++
       if (state.cleanPayoutCount >= 6) ladderAccountsElite++
     })
+    ladderCleanPayoutSum += iterCleanSum
     completedIterations++
   }
 
@@ -1135,7 +1140,7 @@ function runSimulation(
     },
     // Ladder split evidence: proves splits are actually being applied
     ladderEvidence: (() => {
-      if (ladderSplitCount === 0) return { avgEffectiveSplit: 0, p95EffectiveSplit: 0, maxEffectiveSplit: 0, totalExecutedPayouts: 0, splitDistribution: { at80: 0, at82: 0, at85: 0 }, accountsReachedProPct_endOfIter: 0, accountsReachedElitePct_endOfIter: 0 }
+      if (ladderSplitCount === 0) return { avgEffectiveSplit: 0, p95EffectiveSplit: 0, maxEffectiveSplit: 0, totalExecutedPayouts: 0, splitDistribution: { at80: 0, at82: 0, at85: 0 }, accountsReachedProPct_endOfIter: 0, accountsReachedElitePct_endOfIter: 0, avgCleanPayoutCount_endOfIter: 0 }
       // Exact p95 from discrete counters (splits are only 0.80/0.82/0.85)
       const p95Rank = Math.ceil(0.95 * ladderSplitCount)
       const p95Split = p95Rank <= ladderSplit80 ? 0.80
@@ -1152,6 +1157,7 @@ function runSimulation(
         // that reached Pro/Elite clean payout thresholds. NOT "ever reached".
         accountsReachedProPct_endOfIter: ladderTotalAccounts > 0 ? ladderAccountsPro / ladderTotalAccounts : 0,
         accountsReachedElitePct_endOfIter: ladderTotalAccounts > 0 ? ladderAccountsElite / ladderTotalAccounts : 0,
+        avgCleanPayoutCount_endOfIter: ladderTotalAccounts > 0 ? ladderCleanPayoutSum / ladderTotalAccounts : 0,
       }
     })(),
     // Aggregate revenue/cost breakdown (averaged per iteration for auditability)
@@ -1345,7 +1351,7 @@ Deno.serve(async (req) => {
     // Ladder evidence log — eyeball-checkable in function logs without opening JSON
     const le = results.ladderEvidence as Record<string, unknown> | undefined
     if (le) {
-      console.log(`[ladder-evidence] run=${inserted?.id ?? 'unknown'} payouts=${le.totalExecutedPayouts} avgSplit=${typeof le.avgEffectiveSplit === 'number' ? (le.avgEffectiveSplit as number).toFixed(4) : '?'} maxSplit=${le.maxEffectiveSplit} dist=${JSON.stringify(le.splitDistribution)} proPct=${typeof le.accountsReachedProPct_endOfIter === 'number' ? ((le.accountsReachedProPct_endOfIter as number) * 100).toFixed(1) : '?'}% elitePct=${typeof le.accountsReachedElitePct_endOfIter === 'number' ? ((le.accountsReachedElitePct_endOfIter as number) * 100).toFixed(1) : '?'}%`)
+      console.log(`[ladder-evidence] run=${inserted?.id ?? 'unknown'} payouts=${le.totalExecutedPayouts} avgSplit=${typeof le.avgEffectiveSplit === 'number' ? (le.avgEffectiveSplit as number).toFixed(4) : '?'} maxSplit=${le.maxEffectiveSplit} dist=${JSON.stringify(le.splitDistribution)} proPct=${typeof le.accountsReachedProPct_endOfIter === 'number' ? ((le.accountsReachedProPct_endOfIter as number) * 100).toFixed(1) : '?'}% elitePct=${typeof le.accountsReachedElitePct_endOfIter === 'number' ? ((le.accountsReachedElitePct_endOfIter as number) * 100).toFixed(1) : '?'}% avgCleanCount=${typeof le.avgCleanPayoutCount_endOfIter === 'number' ? (le.avgCleanPayoutCount_endOfIter as number).toFixed(2) : '?'}`)
     }
 
     if (inserted?.id) {
