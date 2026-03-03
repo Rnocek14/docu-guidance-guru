@@ -8,6 +8,8 @@ import { Play, RefreshCw, TrendingUp, TrendingDown, BarChart3 } from 'lucide-rea
 
 interface SweepSummary {
   n: number;
+  variant_id: string;
+  variant_label: string;
   run_id: string | null;
   profit_mean: number;
   profit_p5: number;
@@ -16,6 +18,14 @@ interface SweepSummary {
   reserve_breach: number;
   worst_month: number;
   duration_ms: number;
+  // Ladder evidence
+  avg_clean_payout_count?: number;
+  clean_p50?: number;
+  clean_p90?: number;
+  ever_reached_pro_pct?: number;
+  ever_reached_elite_pct?: number;
+  cap_binding_rate?: number;
+  avg_payout_size?: number;
 }
 
 interface SweepResult {
@@ -24,7 +34,7 @@ interface SweepResult {
   preset: string;
   run_ids: string[];
   summaries: SweepSummary[];
-  errors?: { n: number; error: string }[];
+  errors?: { n: number; variant_id: string; error: string }[];
   config: {
     seed: number;
     months: number;
@@ -41,14 +51,6 @@ const RAMP_GUARD_CAP = 300;
 const RAMP_GUARD_CAP_COUNT = 3;
 const RAMP_GUARD_N = 200;
 
-interface RampGuardResult {
-  baseline: SweepSummary;
-  guarded: SweepSummary;
-  worstMonthDelta: number;
-  pLossDelta: number;
-  profitMeanDelta: number;
-}
-
 export function SweepPanel() {
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<SweepResult | null>(null);
@@ -57,7 +59,7 @@ export function SweepPanel() {
 
   // Ramp guard A/B state
   const [isRunningRamp, setIsRunningRamp] = useState(false);
-  const [rampResult, setRampResult] = useState<RampGuardResult | null>(null);
+  const [rampResult, setRampResult] = useState<SweepResult | null>(null);
   const [rampError, setRampError] = useState<string | null>(null);
   const [rampProgress, setRampProgress] = useState<string | null>(null);
 
@@ -72,16 +74,15 @@ export function SweepPanel() {
 
   const sweepUrl = `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID}.supabase.co/functions/v1/run-sweep`;
 
+  // ── N-Sweep (single variant, varying N) ──
   const runSweep = useCallback(async () => {
     setIsRunning(true);
     setError(null);
     setResult(null);
-    setProgress('Authenticating...');
+    setProgress(`Running N-sweep: ${DEFAULT_N_LIST.join(', ')} accounts/mo...`);
 
     try {
       const headers = await getAuthHeaders();
-      setProgress(`Running N-sweep: ${DEFAULT_N_LIST.join(', ')} accounts/mo...`);
-
       const response = await fetch(sweepUrl, {
         method: 'POST',
         headers,
@@ -113,17 +114,17 @@ export function SweepPanel() {
     }
   }, [getAuthHeaders, sweepUrl]);
 
+  // ── Ramp Guard A/B (single N, two variants, one sweep call) ──
   const runRampGuard = useCallback(async () => {
     setIsRunningRamp(true);
     setRampError(null);
     setRampResult(null);
-    setRampProgress('Running A/B: N=200 without cap...');
+    setRampProgress(`Running A/B: N=${RAMP_GUARD_N} — baseline vs $${RAMP_GUARD_CAP} cap...`);
 
     try {
       const headers = await getAuthHeaders();
 
-      // A: Baseline (no first payout cap)
-      const baselineResp = await fetch(sweepUrl, {
+      const response = await fetch(sweepUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -134,51 +135,34 @@ export function SweepPanel() {
           reserve_threshold: 16000,
           accountsPerMonthList: [RAMP_GUARD_N],
           sweep_type: 'RAMP_GUARD_AB',
+          // Shared knobs (applied to both variants)
           knobs: {
             targetPayRevSoft: 0.45,
             payRevEngageThreshold: 0.38,
-            firstPayoutCap: null,
           },
+          // Two variants: baseline omits cap fields entirely, guarded sets them
+          variants: [
+            {
+              id: 'baseline',
+              label: 'No Cap',
+              knobs: {},   // no firstPayoutCap — field omitted, not null
+            },
+            {
+              id: 'guarded',
+              label: `$${RAMP_GUARD_CAP} Cap ×${RAMP_GUARD_CAP_COUNT}`,
+              knobs: {
+                firstPayoutCap: RAMP_GUARD_CAP,
+                firstPayoutCapCount: RAMP_GUARD_CAP_COUNT,
+              },
+            },
+          ],
         }),
       });
-      const baselineData = await baselineResp.json();
-      if (!baselineResp.ok) throw new Error(baselineData.error || 'Baseline run failed');
 
-      setRampProgress('Running A/B: N=200 with $300 cap (first 3 payouts)...');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Ramp Guard A/B failed');
 
-      // B: Guarded ($300 cap on first 3 payouts)
-      const guardedResp = await fetch(sweepUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          preset: 'baseline',
-          seed: 42,
-          months: 12,
-          iterations: 2000,
-          reserve_threshold: 16000,
-          accountsPerMonthList: [RAMP_GUARD_N],
-          sweep_type: 'RAMP_GUARD_AB',
-          knobs: {
-            targetPayRevSoft: 0.45,
-            payRevEngageThreshold: 0.38,
-            firstPayoutCap: RAMP_GUARD_CAP,
-            firstPayoutCapCount: RAMP_GUARD_CAP_COUNT,
-          },
-        }),
-      });
-      const guardedData = await guardedResp.json();
-      if (!guardedResp.ok) throw new Error(guardedData.error || 'Guarded run failed');
-
-      const baseline = (baselineData as SweepResult).summaries[0];
-      const guarded = (guardedData as SweepResult).summaries[0];
-
-      setRampResult({
-        baseline,
-        guarded,
-        worstMonthDelta: guarded.worst_month - baseline.worst_month,
-        pLossDelta: guarded.p_loss - baseline.p_loss,
-        profitMeanDelta: guarded.profit_mean - baseline.profit_mean,
-      });
+      setRampResult(data as SweepResult);
       setRampProgress(null);
     } catch (err) {
       setRampError((err as Error).message);
@@ -195,6 +179,15 @@ export function SweepPanel() {
 
   // Find breakeven N
   const breakEvenN = result?.summaries.find(s => s.profit_mean > 0)?.n ?? null;
+
+  // Ramp guard deltas
+  const rampBaseline = rampResult?.summaries.find(s => s.variant_id === 'baseline');
+  const rampGuarded = rampResult?.summaries.find(s => s.variant_id === 'guarded');
+  const rampDeltas = rampBaseline && rampGuarded ? {
+    worstMonth: rampGuarded.worst_month - rampBaseline.worst_month,
+    pLoss: rampGuarded.p_loss - rampBaseline.p_loss,
+    profitMean: rampGuarded.profit_mean - rampBaseline.profit_mean,
+  } : null;
 
   return (
     <Card>
@@ -247,7 +240,7 @@ export function SweepPanel() {
             )}
 
             {/* MES Curve Table */}
-            <div className="rounded-lg border">
+            <div className="rounded-lg border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -263,7 +256,7 @@ export function SweepPanel() {
                 </TableHeader>
                 <TableBody>
                   {result.summaries.map((s) => (
-                    <TableRow key={s.n} className={s.profit_mean > 0 ? '' : 'bg-destructive/5'}>
+                    <TableRow key={`${s.n}-${s.variant_id}`} className={s.profit_mean > 0 ? '' : 'bg-destructive/5'}>
                       <TableCell className="font-medium">{s.n}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
@@ -304,7 +297,7 @@ export function SweepPanel() {
               <div className="rounded-lg border border-warning/50 bg-warning/10 p-3 text-sm space-y-1">
                 <strong>Partial failures:</strong>
                 {result.errors.map((e, i) => (
-                  <div key={i}>N={e.n}: {e.error}</div>
+                  <div key={i}>N={e.n} ({e.variant_id}): {e.error}</div>
                 ))}
               </div>
             )}
@@ -321,13 +314,13 @@ export function SweepPanel() {
         )}
 
         {/* ================================================================ */}
-        {/* RAMP GUARD A/B TEST */}
+        {/* RAMP GUARD A/B TEST — single sweep call, two variants */}
         {/* ================================================================ */}
         <div className="border-t pt-4 mt-4">
           <h3 className="text-sm font-semibold mb-1">Ramp Guard A/B — N={RAMP_GUARD_N}</h3>
           <p className="text-xs text-muted-foreground mb-3">
-            Compares N={RAMP_GUARD_N} with no cap vs ${RAMP_GUARD_CAP} cap on first {RAMP_GUARD_CAP_COUNT} payouts.
-            Same seed, same pacing. Shows how much the cap reduces early variance.
+            Single sweep, two variants: no cap vs ${RAMP_GUARD_CAP} cap on first {RAMP_GUARD_CAP_COUNT} payouts.
+            Same seed, same pacing, shared sweep_id. Shows how the cap changes tail risk + payout mechanics.
           </p>
 
           <div className="flex items-center gap-3">
@@ -338,6 +331,11 @@ export function SweepPanel() {
                 <><Play className="mr-2 h-3 w-3" />Run Ramp Guard A/B</>
               )}
             </Button>
+            {rampResult && (
+              <Badge variant="outline" className="text-xs">
+                Sweep: {rampResult.sweep_id.slice(0, 8)}
+              </Badge>
+            )}
           </div>
 
           {rampError && (
@@ -346,7 +344,7 @@ export function SweepPanel() {
             </div>
           )}
 
-          {rampResult && (
+          {rampResult && rampBaseline && rampGuarded && rampDeltas && (
             <div className="mt-3 space-y-3">
               {/* Delta summary */}
               <div className="rounded-lg border p-3 text-sm space-y-1">
@@ -354,66 +352,78 @@ export function SweepPanel() {
                 <div className="grid grid-cols-3 gap-4 text-center">
                   <div>
                     <div className="text-xs text-muted-foreground">Worst Month Δ</div>
-                    <div className={`text-lg font-bold ${rampResult.worstMonthDelta > 0 ? 'text-success' : 'text-destructive'}`}>
-                      {fmtSigned(rampResult.worstMonthDelta)}
+                    <div className={`text-lg font-bold ${rampDeltas.worstMonth > 0 ? 'text-success' : 'text-destructive'}`}>
+                      {fmtSigned(rampDeltas.worstMonth)}
                     </div>
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">P(Loss) Δ</div>
-                    <div className={`text-lg font-bold ${rampResult.pLossDelta < 0 ? 'text-success' : 'text-destructive'}`}>
-                      {pctSigned(rampResult.pLossDelta)}
+                    <div className={`text-lg font-bold ${rampDeltas.pLoss < 0 ? 'text-success' : 'text-destructive'}`}>
+                      {pctSigned(rampDeltas.pLoss)}
                     </div>
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">Mean Profit Δ</div>
-                    <div className={`text-lg font-bold ${rampResult.profitMeanDelta > 0 ? 'text-success' : 'text-destructive'}`}>
-                      {fmtSigned(rampResult.profitMeanDelta)}
+                    <div className={`text-lg font-bold ${rampDeltas.profitMean > 0 ? 'text-success' : 'text-destructive'}`}>
+                      {fmtSigned(rampDeltas.profitMean)}
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Comparison table */}
-              <div className="rounded-lg border">
+              {/* Full comparison table with ladder evidence */}
+              <div className="rounded-lg border overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[120px]">Scenario</TableHead>
+                      <TableHead className="w-[140px]">Scenario</TableHead>
                       <TableHead>Mean Profit</TableHead>
                       <TableHead>Worst Month</TableHead>
                       <TableHead>P(Loss)</TableHead>
                       <TableHead>Max DD</TableHead>
                       <TableHead>Reserve Breach</TableHead>
+                      <TableHead>Avg Payout</TableHead>
+                      <TableHead>Cap Bind %</TableHead>
+                      <TableHead>Clean P50/P90</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    <TableRow>
-                      <TableCell className="font-medium">No Cap</TableCell>
-                      <TableCell className={rampResult.baseline.profit_mean >= 0 ? 'text-success' : 'text-destructive'}>
-                        {fmt(rampResult.baseline.profit_mean)}
-                      </TableCell>
-                      <TableCell className={rampResult.baseline.worst_month < 0 ? 'text-destructive' : ''}>
-                        {fmt(rampResult.baseline.worst_month)}
-                      </TableCell>
-                      <TableCell>{pct(rampResult.baseline.p_loss)}</TableCell>
-                      <TableCell>{fmt(rampResult.baseline.max_dd)}</TableCell>
-                      <TableCell>{pct(rampResult.baseline.reserve_breach)}</TableCell>
-                    </TableRow>
-                    <TableRow className="bg-success/5">
-                      <TableCell className="font-medium">${RAMP_GUARD_CAP} Cap ×{RAMP_GUARD_CAP_COUNT}</TableCell>
-                      <TableCell className={rampResult.guarded.profit_mean >= 0 ? 'text-success' : 'text-destructive'}>
-                        {fmt(rampResult.guarded.profit_mean)}
-                      </TableCell>
-                      <TableCell className={rampResult.guarded.worst_month < 0 ? 'text-destructive' : ''}>
-                        {fmt(rampResult.guarded.worst_month)}
-                      </TableCell>
-                      <TableCell>{pct(rampResult.guarded.p_loss)}</TableCell>
-                      <TableCell>{fmt(rampResult.guarded.max_dd)}</TableCell>
-                      <TableCell>{pct(rampResult.guarded.reserve_breach)}</TableCell>
-                    </TableRow>
+                    {[rampBaseline, rampGuarded].map((s) => (
+                      <TableRow key={s.variant_id} className={s.variant_id === 'guarded' ? 'bg-success/5' : ''}>
+                        <TableCell className="font-medium">{s.variant_label}</TableCell>
+                        <TableCell className={s.profit_mean >= 0 ? 'text-success font-medium' : 'text-destructive font-medium'}>
+                          {fmt(s.profit_mean)}
+                        </TableCell>
+                        <TableCell className={s.worst_month < 0 ? 'text-destructive font-medium' : ''}>
+                          {fmt(s.worst_month)}
+                        </TableCell>
+                        <TableCell className={s.p_loss > 0.1 ? 'text-destructive font-medium' : ''}>
+                          {pct(s.p_loss)}
+                        </TableCell>
+                        <TableCell>{fmt(s.max_dd)}</TableCell>
+                        <TableCell className={s.reserve_breach > 0.1 ? 'text-destructive font-medium' : ''}>
+                          {pct(s.reserve_breach)}
+                        </TableCell>
+                        <TableCell>{s.avg_payout_size != null ? fmt(s.avg_payout_size) : '—'}</TableCell>
+                        <TableCell>{s.cap_binding_rate != null ? pct(s.cap_binding_rate) : '—'}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {s.clean_p50 != null ? `${s.clean_p50} / ${s.clean_p90 ?? '?'}` : '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </div>
+
+              {/* Errors */}
+              {rampResult.errors && rampResult.errors.length > 0 && (
+                <div className="rounded-lg border border-warning/50 bg-warning/10 p-3 text-sm space-y-1">
+                  <strong>Partial failures:</strong>
+                  {rampResult.errors.map((e, i) => (
+                    <div key={i}>{e.variant_id}: {e.error}</div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
