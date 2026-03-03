@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, Target } from 'lucide-react';
 import type { Account, Cohort, PayoutEligibility } from '@/lib/types';
 import { isTerminalPaid } from '@/lib/types';
+import { calculateLadderProgress } from '@/lib/ladder-spec';
 import { AccountPhaseIndicator } from '@/components/trader/AccountPhaseIndicator';
 import { PayoutReadinessCard } from '@/components/trader/PayoutReadinessCard';
 import { EquityCurveChart } from '@/components/trader/EquityCurveChart';
@@ -20,6 +21,9 @@ import { ConsistencyPreviewCard } from '@/components/trader/ConsistencyPreviewCa
 import { PortfolioOverview } from '@/components/trader/PortfolioOverview';
 import { AccountSwitcher, sortAccounts } from '@/components/trader/AccountSwitcher';
 import { SmartGreeting } from '@/components/trader/SmartGreeting';
+import { TierStatusCard } from '@/components/trader/TierStatusCard';
+import { UnlockRoadmap } from '@/components/trader/UnlockRoadmap';
+import { CleanPayoutChecklist } from '@/components/trader/CleanPayoutChecklist';
 
 export default function TraderDashboard() {
   const { user } = useAuth();
@@ -95,6 +99,38 @@ export default function TraderDashboard() {
     enabled: !!activeAccount?.id && isPerformanceAccount,
   });
 
+  // Fetch clean payout count for ladder progression (per account lineage)
+  const { data: cleanPayoutCount } = useQuery({
+    queryKey: ['clean-payout-count', activeAccount?.id, activeAccount?.root_account_id],
+    queryFn: async () => {
+      // Get all accounts in the lineage (same root_account_id or the account itself)
+      const lineageRoot = activeAccount!.root_account_id ?? activeAccount!.id;
+      const { data: lineageAccounts } = await supabase
+        .from('accounts')
+        .select('id')
+        .or(`root_account_id.eq.${lineageRoot},id.eq.${lineageRoot}`)
+        .eq('user_id', user!.id);
+
+      if (!lineageAccounts?.length) return 0;
+
+      const { count, error } = await supabase
+        .from('payouts')
+        .select('id', { count: 'exact', head: true })
+        .in('account_id', lineageAccounts.map((a) => a.id))
+        .eq('is_clean_payout', true)
+        .in('status', ['paid', 'paid_confirmed']);
+
+      if (error) throw error;
+      return count ?? 0;
+    },
+    enabled: !!activeAccount?.id && !!isPerformanceAccount,
+  });
+
+  const ladderProgress = useMemo(
+    () => calculateLadderProgress(cleanPayoutCount ?? 0),
+    [cleanPayoutCount],
+  );
+
   return (
     <DashboardLayout title="Trader Dashboard" navItems={traderNavItems}>
       <div className="space-y-6">
@@ -143,6 +179,15 @@ export default function TraderDashboard() {
                     eligibility={eligibility}
                     accountId={activeAccount.id}
                   />
+                )}
+
+                {/* PA-only: Ladder Progression */}
+                {isPerformanceAccount && (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    <TierStatusCard progress={ladderProgress} />
+                    <UnlockRoadmap progress={ladderProgress} />
+                    <CleanPayoutChecklist />
+                  </div>
                 )}
 
                 {/* Primary zone: Equity Curve + Rule Health side-by-side */}

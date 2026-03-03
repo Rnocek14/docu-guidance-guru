@@ -1740,10 +1740,12 @@ export type Database = {
           approved_at: string | null
           approved_by: string | null
           calculated_eligible_amount: number | null
+          clean_disqualify_reason: string | null
           destination_name_match: boolean | null
           device_fingerprint_id: string | null
           fraud_review_id: string | null
           id: string
+          is_clean_payout: boolean | null
           kyc_name_verified: boolean
           paid_at: string | null
           paid_by: string | null
@@ -1766,10 +1768,12 @@ export type Database = {
           approved_at?: string | null
           approved_by?: string | null
           calculated_eligible_amount?: number | null
+          clean_disqualify_reason?: string | null
           destination_name_match?: boolean | null
           device_fingerprint_id?: string | null
           fraud_review_id?: string | null
           id?: string
+          is_clean_payout?: boolean | null
           kyc_name_verified?: boolean
           paid_at?: string | null
           paid_by?: string | null
@@ -1792,10 +1796,12 @@ export type Database = {
           approved_at?: string | null
           approved_by?: string | null
           calculated_eligible_amount?: number | null
+          clean_disqualify_reason?: string | null
           destination_name_match?: boolean | null
           device_fingerprint_id?: string | null
           fraud_review_id?: string | null
           id?: string
+          is_clean_payout?: boolean | null
           kyc_name_verified?: boolean
           paid_at?: string | null
           paid_by?: string | null
