@@ -420,6 +420,15 @@ function simulateMonthPerAccount(
     }
   })
 
+  // Fairness shuffle: randomize payout processing order using seeded RNG
+  // Prevents systematic winners/losers when budget ceiling is hit
+  for (let i = eligibleAccounts.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1))
+    const tmp = eligibleAccounts[i]
+    eligibleAccounts[i] = eligibleAccounts[j]
+    eligibleAccounts[j] = tmp
+  }
+
   for (const account of eligibleAccounts) {
     if (random() > payoutReqRate) continue
 
@@ -1034,8 +1043,13 @@ function runSimulation(
       totalDeferredRequests,
       deferredDollarsPerIteration: totalDeferredDollars / Math.max(1, completedIterations),
       deferredRequestsPerIteration: totalDeferredRequests / Math.max(1, completedIterations),
+      // deferralRate = deferred / total requests (deferred are a SUBSET of requests, not double-counted)
       deferralRate: totalPayoutRequests > 0
-        ? totalDeferredRequests / (totalPayoutRequests + totalDeferredRequests)
+        ? totalDeferredRequests / totalPayoutRequests
+        : 0,
+      // deferralDollarRate = deferred$ / (deferred$ + paid$) — how much $ mass is queued
+      deferralDollarRate: (totalDeferredDollars + totalPayoutDollars) > 0
+        ? totalDeferredDollars / (totalDeferredDollars + totalPayoutDollars)
         : 0,
       // Guardrail: structurally tied to the data series it validates (not completedIterations)
       ...(perIterMaxPayoutOutflow.length >= 500 && totalPayoutRequests > 0 && payoutOutflow.p95 === 0
