@@ -109,6 +109,11 @@ export function UnlockRoadmap({ progress }: UnlockRoadmapProps) {
               </div>
             );
           })}
+          {LADDER_TIERS.length > 1 && (
+            <p className="text-[11px] text-muted-foreground mt-2 pt-2 border-t">
+              Clean payouts are credited when paid. Stability pacing deferrals don't affect progress.
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
