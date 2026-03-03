@@ -251,7 +251,65 @@ export const FTMO_AGGRESSIVE: CompetitorScenario = {
 // COLLECTIONS
 // ============================================================================
 
+// Lower pass-rate scenarios — finding the true survival boundary
+export const APEX_SURVIVAL_3PCT: CompetitorScenario = {
+  label: 'Apex 3% Pass',
+  firmId: 'apex',
+  firmLabel: 'Apex',
+  variant: '3% pass',
+  color: 'text-orange-300',
+  passRate: 0.03,
+  requestRate: 0.25,
+  clusteringIntensity: 1.0,
+  notes: '$50 effective, 3% pass, 25% request. Deep filtration test.',
+  assumptions: buildProfile({
+    price: 50,
+    passMode: 0.03,
+    requestMode: 0.25,
+    ...APEX_BASE_KNOBS,
+  }),
+};
+
+export const APEX_SURVIVAL_4PCT: CompetitorScenario = {
+  label: 'Apex 4% Pass',
+  firmId: 'apex',
+  firmLabel: 'Apex',
+  variant: '4% pass',
+  color: 'text-orange-300',
+  passRate: 0.04,
+  requestRate: 0.25,
+  clusteringIntensity: 1.0,
+  notes: '$50 effective, 4% pass, 25% request. Mid filtration test.',
+  assumptions: buildProfile({
+    price: 50,
+    passMode: 0.04,
+    requestMode: 0.25,
+    ...APEX_BASE_KNOBS,
+  }),
+};
+
+export const APEX_SURVIVAL_5PCT: CompetitorScenario = {
+  label: 'Apex 5% Pass',
+  firmId: 'apex',
+  firmLabel: 'Apex',
+  variant: '5% pass',
+  color: 'text-orange-300',
+  passRate: 0.05,
+  requestRate: 0.25,
+  clusteringIntensity: 1.0,
+  notes: '$50 effective, 5% pass, 25% request. Upper filtration boundary.',
+  assumptions: buildProfile({
+    price: 50,
+    passMode: 0.05,
+    requestMode: 0.25,
+    ...APEX_BASE_KNOBS,
+  }),
+};
+
 export const APEX_SCENARIOS: CompetitorScenario[] = [
+  APEX_SURVIVAL_3PCT,
+  APEX_SURVIVAL_4PCT,
+  APEX_SURVIVAL_5PCT,
   APEX_CONSERVATIVE,
   APEX_BASE,
   APEX_AGGRESSIVE,
