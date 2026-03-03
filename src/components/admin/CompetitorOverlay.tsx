@@ -286,6 +286,11 @@ export function CompetitorOverlayPanel({
 
             {/* Executive insight */}
             <CompetitorInsight results={state.results} clustering={clustering} />
+
+            {/* Disclaimer */}
+            <p className="text-[10px] text-muted-foreground italic px-1">
+              Public-terms approximation. Excludes firm-specific internal throttles, reset economics, manual reviews, and capital hedging. Directional only.
+            </p>
           </>
         )}
       </CardContent>
