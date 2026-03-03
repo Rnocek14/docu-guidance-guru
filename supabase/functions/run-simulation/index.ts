@@ -785,7 +785,7 @@ function runShadowCrossCheck(
 // MAIN SIMULATION (per-account with runtime budget)
 // ============================================================================
 
-const RUNTIME_BUDGET_MS = 20_000
+const RUNTIME_BUDGET_MS = 15_000
 
 function runSimulation(
   iterations: number, months: number, seed: number,
@@ -1100,21 +1100,21 @@ interface ScalingResult {
 
 function autoScaleIterations(
   requested: number, months: number, accountsPerMonth: number, forceIterations: boolean,
+  attackIntensity: number = 0,
 ): ScalingResult {
   if (forceIterations) return { iterations: requested, scaled: false, reason: null }
 
-  // Estimate peak active accounts: passRate ~12%, accumulates up to 12 months, 1.2× safety margin
-  // for resets/longer tails keeping accounts alive. Tune if partial runs persist at high volume.
-  const estimatedPeakActive = Math.round(accountsPerMonth * 0.12 * Math.min(months, 12) * 1.2)
+  // Estimate peak active accounts: base passRate ~12%, but attack intensity pushes it to 40%+.
+  const basePassRate = 0.12
+  const effectivePassRate = Math.min(0.50, basePassRate * (1 + 0.5 * attackIntensity))
+  const estimatedPeakActive = Math.round(accountsPerMonth * effectivePassRate * Math.min(months, 12) * 1.2)
 
-  // Real compute cost: RNG + branching + per-account payout loops.
-  // Tune with telemetry; 15 is conservative estimate.
-  const OPS_PER_ACCOUNT_MONTH = 15
+  // Real compute cost: RNG + branching + per-account payout loops + sort/shuffle.
+  const OPS_PER_ACCOUNT_MONTH = 25
 
-  // Target CPU budget — keep conservative (200M) until telemetry proves headroom
-  const MAX_WORK = 200_000_000
+  // Target CPU budget — reduced for edge function CPU time safety
+  const MAX_WORK = 120_000_000
 
-  // Use a single `denom` for both score and cap to prevent drift; floor at 1 to avoid div-by-zero
   const denom = Math.max(1, months * Math.max(estimatedPeakActive, 10) * OPS_PER_ACCOUNT_MONTH)
   const workScore = requested * denom
 
@@ -1203,7 +1203,7 @@ Deno.serve(async (req) => {
     const assumptions = cohortToAssumptions(cohortConfigs, body.overrides)
     const effectiveAssumptions = applyAttackIntensity(assumptions)
 
-    const scaling = autoScaleIterations(rawIterations, months, effectiveAssumptions.accountsPerMonth, forceIterations)
+    const scaling = autoScaleIterations(rawIterations, months, effectiveAssumptions.accountsPerMonth, forceIterations, effectiveAssumptions.knobs.attackIntensity)
     const iterations = scaling.iterations
 
     const results = runSimulation(iterations, months, seed, effectiveAssumptions, reserveThreshold, startTime)
@@ -1215,9 +1215,10 @@ Deno.serve(async (req) => {
     const remainingBudget = RUNTIME_BUDGET_MS - elapsed
     const remainingPct = remainingBudget / RUNTIME_BUDGET_MS
     const shadowSafe =
-      remainingPct >= 0.65 &&
-      remainingBudget >= 10_000 &&
-      effectiveAssumptions.accountsPerMonth <= 400
+      remainingPct >= 0.70 &&
+      remainingBudget >= 8_000 &&
+      effectiveAssumptions.accountsPerMonth <= 300 &&
+      effectiveAssumptions.knobs.attackIntensity <= 0.3
     if (shadowSafe) {
       try {
         crossCheck = runShadowCrossCheck(
