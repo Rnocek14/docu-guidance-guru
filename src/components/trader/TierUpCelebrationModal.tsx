@@ -51,7 +51,7 @@ const BENEFIT_ICONS = {
   lifetime: Trophy,
 };
 
-const TIER_COPY: Record<LadderTier['id'], { body: string }> = {
+const TIER_COPY: Partial<Record<LadderTier['id'], { body: string }>> = {
   pro: {
     body: 'Clean payouts mean no flags, no freezes, and disciplined performance. Keep stacking them.',
   },
