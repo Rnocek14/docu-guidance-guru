@@ -1,4 +1,36 @@
 
+# Launch Configuration — Locked v1.5
+
+## Payout Pacing Knobs (v1.5 — validated 2026-03-03)
+
+| Knob | Value | Rationale |
+|------|-------|-----------|
+| `targetPayRevSoft` | **0.45** | Lowest budget that clears deferral < 15% while keeping margin > 20% |
+| `payRevEngageThreshold` | **0.38** | Ratio-based engagement; only clamps months trending hot |
+
+### Validation Results (seed 42, 15-month horizon, 200 accts/mo)
+
+| Scenario | Pay/Rev P95 | Deferral | Margin | Reserve Breach | Worst Month |
+|----------|-------------|----------|--------|----------------|-------------|
+| Baseline (attack=0) | 45.0% | 14.0% | 20.7% | 0% | $1,604 |
+| Clustered (attack=0.5) | 45.0% | 37.4% (info) | 16.0% | 0% | $1,060 |
+
+### Acceptance Criteria (all met ✅)
+- Baseline: Pay/Rev P95 ≤ 45%, Deferral ≤ 15%, Margin ≥ 20%
+- Clustered: Margin ≥ 15%, Reserve breach < 15%, Worst month > -$15k
+
+### Architecture
+- **Layer 1 (Soft Pacing)**: Monthly budget at 45% pay/rev, engages at 0.38 ratio, defers excess to next cycle
+- **Layer 2 (Hard Breaker)**: Emergency freeze for adversarial events (unchanged)
+- Engagement uses running pay/rev ratio (not absolute dollars) — prevents premature triggering
+
+### What NOT to change at launch
+- Do not raise baseline split to 85% (kills upgrade incentive)
+- Do not remove first payout cap (structural defense against fraud)
+- Do not lower engage threshold below 0.38 (causes always-on pacing → high deferrals)
+
+---
+
 
 # Multi-Account Trader Dashboard Redesign
 
