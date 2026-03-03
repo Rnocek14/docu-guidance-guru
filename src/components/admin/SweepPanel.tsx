@@ -26,6 +26,10 @@ interface SweepSummary {
   ever_reached_elite_pct?: number;
   cap_binding_rate?: number;
   avg_payout_size?: number;
+  // Cap audit
+  avg_payout_pre_cap?: number;
+  avg_payout_post_cap?: number;
+  cap_dollars_saved?: number;
 }
 
 interface SweepResult {
@@ -46,10 +50,10 @@ interface SweepResult {
 
 const DEFAULT_N_LIST = [100, 150, 200, 300, 500];
 
-// Ramp guard A/B: N=200, no cap vs $300 cap (first 3 payouts)
+// Ramp guard A/B config
 const RAMP_GUARD_CAP = 300;
 const RAMP_GUARD_CAP_COUNT = 3;
-const RAMP_GUARD_N = 200;
+const RAMP_GUARD_N_LIST = [150, 200]; // test both sub-MES points
 
 export function SweepPanel() {
   const [isRunning, setIsRunning] = useState(false);
@@ -114,12 +118,12 @@ export function SweepPanel() {
     }
   }, [getAuthHeaders, sweepUrl]);
 
-  // ── Ramp Guard A/B (single N, two variants, one sweep call) ──
+  // ── Ramp Guard A/B (N=150+200, two variants, one sweep call) ──
   const runRampGuard = useCallback(async () => {
     setIsRunningRamp(true);
     setRampError(null);
     setRampResult(null);
-    setRampProgress(`Running A/B: N=${RAMP_GUARD_N} — baseline vs $${RAMP_GUARD_CAP} cap...`);
+    setRampProgress(`Running A/B: N=${RAMP_GUARD_N_LIST.join(',')} — baseline vs $${RAMP_GUARD_CAP} cap...`);
 
     try {
       const headers = await getAuthHeaders();
@@ -133,19 +137,17 @@ export function SweepPanel() {
           months: 12,
           iterations: 2000,
           reserve_threshold: 16000,
-          accountsPerMonthList: [RAMP_GUARD_N],
+          accountsPerMonthList: RAMP_GUARD_N_LIST,
           sweep_type: 'RAMP_GUARD_AB',
-          // Shared knobs (applied to both variants)
           knobs: {
             targetPayRevSoft: 0.45,
             payRevEngageThreshold: 0.38,
           },
-          // Two variants: baseline omits cap fields entirely, guarded sets them
           variants: [
             {
               id: 'baseline',
               label: 'No Cap',
-              knobs: {},   // no firstPayoutCap — field omitted, not null
+              knobs: {},
             },
             {
               id: 'guarded',
@@ -180,14 +182,12 @@ export function SweepPanel() {
   // Find breakeven N
   const breakEvenN = result?.summaries.find(s => s.profit_mean > 0)?.n ?? null;
 
-  // Ramp guard deltas
-  const rampBaseline = rampResult?.summaries.find(s => s.variant_id === 'baseline');
-  const rampGuarded = rampResult?.summaries.find(s => s.variant_id === 'guarded');
-  const rampDeltas = rampBaseline && rampGuarded ? {
-    worstMonth: rampGuarded.worst_month - rampBaseline.worst_month,
-    pLoss: rampGuarded.p_loss - rampBaseline.p_loss,
-    profitMean: rampGuarded.profit_mean - rampBaseline.profit_mean,
-  } : null;
+  // Ramp guard: group summaries by N for side-by-side comparison
+  const rampByN = rampResult ? RAMP_GUARD_N_LIST.map(n => ({
+    n,
+    baseline: rampResult.summaries.find(s => s.n === n && s.variant_id === 'baseline'),
+    guarded: rampResult.summaries.find(s => s.n === n && s.variant_id === 'guarded'),
+  })).filter(r => r.baseline && r.guarded) : [];
 
   return (
     <Card>
@@ -225,7 +225,6 @@ export function SweepPanel() {
 
         {result && (
           <>
-            {/* Breakeven indicator */}
             {breakEvenN && (
               <div className="rounded-lg border border-success/50 bg-success/10 p-3 text-sm">
                 <strong>MES Estimate:</strong> Breakeven at <strong>N ≈ {breakEvenN}</strong> accounts/month
@@ -239,7 +238,6 @@ export function SweepPanel() {
               </div>
             )}
 
-            {/* MES Curve Table */}
             <div className="rounded-lg border overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -292,7 +290,6 @@ export function SweepPanel() {
               </Table>
             </div>
 
-            {/* Errors */}
             {result.errors && result.errors.length > 0 && (
               <div className="rounded-lg border border-warning/50 bg-warning/10 p-3 text-sm space-y-1">
                 <strong>Partial failures:</strong>
@@ -302,7 +299,6 @@ export function SweepPanel() {
               </div>
             )}
 
-            {/* Config summary */}
             <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
               <Badge variant="outline">Seed: {result.config.seed}</Badge>
               <Badge variant="outline">Months: {result.config.months}</Badge>
@@ -314,13 +310,13 @@ export function SweepPanel() {
         )}
 
         {/* ================================================================ */}
-        {/* RAMP GUARD A/B TEST — single sweep call, two variants */}
+        {/* RAMP GUARD A/B — N=150 + N=200, two variants per N */}
         {/* ================================================================ */}
         <div className="border-t pt-4 mt-4">
-          <h3 className="text-sm font-semibold mb-1">Ramp Guard A/B — N={RAMP_GUARD_N}</h3>
+          <h3 className="text-sm font-semibold mb-1">Ramp Guard A/B — N={RAMP_GUARD_N_LIST.join(' & ')}</h3>
           <p className="text-xs text-muted-foreground mb-3">
-            Single sweep, two variants: no cap vs ${RAMP_GUARD_CAP} cap on first {RAMP_GUARD_CAP_COUNT} payouts.
-            Same seed, same pacing, shared sweep_id. Shows how the cap changes tail risk + payout mechanics.
+            Single sweep, two variants per N: no cap vs ${RAMP_GUARD_CAP} cap on first {RAMP_GUARD_CAP_COUNT} payouts.
+            Shows if the cap makes sub-MES volumes survivable and how much cash it saves.
           </p>
 
           <div className="flex items-center gap-3">
@@ -328,7 +324,7 @@ export function SweepPanel() {
               {isRunningRamp ? (
                 <><RefreshCw className="mr-2 h-3 w-3 animate-spin" />{rampProgress || 'Running...'}</>
               ) : (
-                <><Play className="mr-2 h-3 w-3" />Run Ramp Guard A/B</>
+                <><Play className="mr-2 h-3 w-3" />Run Ramp Guard A/B ({RAMP_GUARD_N_LIST.length * 2} runs)</>
               )}
             </Button>
             {rampResult && (
@@ -344,83 +340,90 @@ export function SweepPanel() {
             </div>
           )}
 
-          {rampResult && rampBaseline && rampGuarded && rampDeltas && (
-            <div className="mt-3 space-y-3">
-              {/* Delta summary */}
-              <div className="rounded-lg border p-3 text-sm space-y-1">
-                <div className="font-semibold text-sm mb-2">Impact of ${RAMP_GUARD_CAP} cap (first {RAMP_GUARD_CAP_COUNT} payouts) at N={RAMP_GUARD_N}:</div>
-                <div className="grid grid-cols-3 gap-4 text-center">
-                  <div>
-                    <div className="text-xs text-muted-foreground">Worst Month Δ</div>
-                    <div className={`text-lg font-bold ${rampDeltas.worstMonth > 0 ? 'text-success' : 'text-destructive'}`}>
-                      {fmtSigned(rampDeltas.worstMonth)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">P(Loss) Δ</div>
-                    <div className={`text-lg font-bold ${rampDeltas.pLoss < 0 ? 'text-success' : 'text-destructive'}`}>
-                      {pctSigned(rampDeltas.pLoss)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">Mean Profit Δ</div>
-                    <div className={`text-lg font-bold ${rampDeltas.profitMean > 0 ? 'text-success' : 'text-destructive'}`}>
-                      {fmtSigned(rampDeltas.profitMean)}
-                    </div>
-                  </div>
-                </div>
-              </div>
+          {rampByN.length > 0 && (
+            <div className="mt-3 space-y-4">
+              {/* Per-N comparison cards */}
+              {rampByN.map(({ n, baseline, guarded }) => {
+                if (!baseline || !guarded) return null;
+                const worstDelta = guarded.worst_month - baseline.worst_month;
+                const pLossDelta = guarded.p_loss - baseline.p_loss;
+                const profitDelta = guarded.profit_mean - baseline.profit_mean;
 
-              {/* Full comparison table with ladder evidence */}
-              <div className="rounded-lg border overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[140px]">Scenario</TableHead>
-                      <TableHead>Mean Profit</TableHead>
-                      <TableHead>Worst Month</TableHead>
-                      <TableHead>P(Loss)</TableHead>
-                      <TableHead>Max DD</TableHead>
-                      <TableHead>Reserve Breach</TableHead>
-                      <TableHead>Avg Payout</TableHead>
-                      <TableHead>Cap Bind %</TableHead>
-                      <TableHead>Clean P50/P90</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {[rampBaseline, rampGuarded].map((s) => (
-                      <TableRow key={s.variant_id} className={s.variant_id === 'guarded' ? 'bg-success/5' : ''}>
-                        <TableCell className="font-medium">{s.variant_label}</TableCell>
-                        <TableCell className={s.profit_mean >= 0 ? 'text-success font-medium' : 'text-destructive font-medium'}>
-                          {fmt(s.profit_mean)}
-                        </TableCell>
-                        <TableCell className={s.worst_month < 0 ? 'text-destructive font-medium' : ''}>
-                          {fmt(s.worst_month)}
-                        </TableCell>
-                        <TableCell className={s.p_loss > 0.1 ? 'text-destructive font-medium' : ''}>
-                          {pct(s.p_loss)}
-                        </TableCell>
-                        <TableCell>{fmt(s.max_dd)}</TableCell>
-                        <TableCell className={s.reserve_breach > 0.1 ? 'text-destructive font-medium' : ''}>
-                          {pct(s.reserve_breach)}
-                        </TableCell>
-                        <TableCell>{s.avg_payout_size != null ? fmt(s.avg_payout_size) : '—'}</TableCell>
-                        <TableCell>{s.cap_binding_rate != null ? pct(s.cap_binding_rate) : '—'}</TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {s.clean_p50 != null ? `${s.clean_p50} / ${s.clean_p90 ?? '?'}` : '—'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                return (
+                  <div key={n} className="rounded-lg border p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-sm">N = {n} accounts/mo</span>
+                      <div className="flex gap-3 text-xs">
+                        <span className={worstDelta > 0 ? 'text-success' : 'text-destructive'}>
+                          Worst Mo Δ: {fmtSigned(worstDelta)}
+                        </span>
+                        <span className={pLossDelta < 0 ? 'text-success' : 'text-destructive'}>
+                          P(Loss) Δ: {pctSigned(pLossDelta)}
+                        </span>
+                        <span className={profitDelta > 0 ? 'text-success' : 'text-destructive'}>
+                          Profit Δ: {fmtSigned(profitDelta)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[140px]">Scenario</TableHead>
+                            <TableHead>Mean Profit</TableHead>
+                            <TableHead>Worst Month</TableHead>
+                            <TableHead>P(Loss)</TableHead>
+                            <TableHead>Max DD</TableHead>
+                            <TableHead>Res Breach</TableHead>
+                            <TableHead>Avg Payout</TableHead>
+                            <TableHead>Cap Bind%</TableHead>
+                            <TableHead>Pre/Post Cap</TableHead>
+                            <TableHead>$ Saved</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {[baseline, guarded].map((s) => (
+                            <TableRow key={s.variant_id} className={s.variant_id === 'guarded' ? 'bg-success/5' : ''}>
+                              <TableCell className="font-medium text-xs">{s.variant_label}</TableCell>
+                              <TableCell className={s.profit_mean >= 0 ? 'text-success font-medium' : 'text-destructive font-medium'}>
+                                {fmt(s.profit_mean)}
+                              </TableCell>
+                              <TableCell className={s.worst_month < 0 ? 'text-destructive font-medium' : ''}>
+                                {fmt(s.worst_month)}
+                              </TableCell>
+                              <TableCell className={s.p_loss > 0.1 ? 'text-destructive font-medium' : ''}>
+                                {pct(s.p_loss)}
+                              </TableCell>
+                              <TableCell>{fmt(s.max_dd)}</TableCell>
+                              <TableCell className={s.reserve_breach > 0.1 ? 'text-destructive font-medium' : ''}>
+                                {pct(s.reserve_breach)}
+                              </TableCell>
+                              <TableCell>{s.avg_payout_size != null ? fmt(s.avg_payout_size) : '—'}</TableCell>
+                              <TableCell>{s.cap_binding_rate != null ? pct(s.cap_binding_rate) : '—'}</TableCell>
+                              <TableCell className="font-mono text-xs">
+                                {s.avg_payout_pre_cap != null && s.avg_payout_post_cap != null
+                                  ? `${fmt(s.avg_payout_pre_cap)} → ${fmt(s.avg_payout_post_cap)}`
+                                  : '—'}
+                              </TableCell>
+                              <TableCell className={s.cap_dollars_saved != null && s.cap_dollars_saved > 0 ? 'text-success font-medium' : ''}>
+                                {s.cap_dollars_saved != null ? fmt(s.cap_dollars_saved) : '—'}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                );
+              })}
 
               {/* Errors */}
-              {rampResult.errors && rampResult.errors.length > 0 && (
+              {rampResult?.errors && rampResult.errors.length > 0 && (
                 <div className="rounded-lg border border-warning/50 bg-warning/10 p-3 text-sm space-y-1">
                   <strong>Partial failures:</strong>
                   {rampResult.errors.map((e, i) => (
-                    <div key={i}>{e.variant_id}: {e.error}</div>
+                    <div key={i}>N={e.n} ({e.variant_id}): {e.error}</div>
                   ))}
                 </div>
               )}

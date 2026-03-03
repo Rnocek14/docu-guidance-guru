@@ -50,6 +50,10 @@ interface SweepSummary {
   ever_reached_elite_pct?: number
   cap_binding_rate?: number
   avg_payout_size?: number
+  // Cap audit fields
+  avg_payout_pre_cap?: number
+  avg_payout_post_cap?: number
+  cap_dollars_saved?: number
 }
 
 Deno.serve(async (req) => {
@@ -154,7 +158,7 @@ Deno.serve(async (req) => {
       for (const variant of effectiveVariants) {
         try {
           // Merge shared knobs with variant knobs (variant wins on conflict)
-          const mergedKnobs = { ...knobs, ...variant.knobs }
+          const mergedKnobs = { ...(knobs ?? {}), ...(variant.knobs ?? {}) }
 
           const simBody = {
             iterations,
@@ -206,9 +210,25 @@ Deno.serve(async (req) => {
               data.results?.risk?.reserveBreach ??
               0
 
-            // Extract ladder evidence fields
-            const le = data.results?.ladderEvidence
-            const pd = data.results?.payoutDiagnostics
+            // Extract ladder evidence fields — fallback chain for different nesting
+            const le =
+              data.results?.ladderEvidence ??
+              data.results?.full_results?.ladderEvidence ??
+              data.full_results?.ladderEvidence ??
+              null
+            const pd =
+              data.results?.payoutDiagnostics ??
+              data.results?.full_results?.payoutDiagnostics ??
+              data.full_results?.payoutDiagnostics ??
+              null
+
+            // Cap audit: compute dollars saved from cap regime
+            const avgPreCap = pd?.avgFirstPayoutBeforeCap ?? pd?.avgGrossInCapRegime ?? undefined
+            const avgPostCap = pd?.avgFirstPayoutAfterCap ?? pd?.avgNetInCapRegime ?? undefined
+            const capHits = pd?.capHits ?? 0
+            const capDollarsSaved = (avgPreCap != null && avgPostCap != null && capHits > 0)
+              ? (avgPreCap - avgPostCap) * capHits
+              : undefined
 
             summaries.push({
               n,
@@ -230,6 +250,10 @@ Deno.serve(async (req) => {
               ever_reached_elite_pct: le?.accountsEverReachedElitePct ?? undefined,
               cap_binding_rate: pd?.firstPayoutCapBindingRate ?? undefined,
               avg_payout_size: pd?.avgPayoutSize ?? undefined,
+              // Cap audit
+              avg_payout_pre_cap: avgPreCap,
+              avg_payout_post_cap: avgPostCap,
+              cap_dollars_saved: capDollarsSaved,
             })
           }
 
