@@ -73,7 +73,10 @@ interface ServerSimResult {
       // Legacy compat
       avgPayoutsPerAccount: number;
       lifetimeCapHitRate: number;
+      [key: string]: unknown;
     };
+    revenueBreakdown?: { entry: number; resets: number; total: number };
+    costBreakdown?: { payouts: number; fraud: number; chargebacks: number; variable: number; fixed: number; total: number };
   };
 }
 
@@ -165,6 +168,11 @@ export default function MonteCarloAnalytics() {
               knobs: {
                 resetPrice: overrides.resetFee,
                 attackIntensity: overrides.attackIntensity,
+                // Knob-level overrides from excitement/hostile presets
+                ...(overrides.payoutSplitPercent != null && { payoutSplitPercent: overrides.payoutSplitPercent }),
+                ...(overrides.firstPayoutCap !== undefined && { firstPayoutCap: overrides.firstPayoutCap }),
+                ...(overrides.firstPayoutCapCount != null && { firstPayoutCapCount: overrides.firstPayoutCapCount }),
+                ...(overrides.minMonthsBetweenPayouts != null && { minMonthsBetweenPayouts: overrides.minMonthsBetweenPayouts }),
               },
             },
           }),

@@ -16,6 +16,11 @@ export interface SimOverrides {
   attackIntensity: number;
   iterations: number;
   reserveThreshold: number;
+  // Knob-level overrides (optional — only set by excitement/hostile presets)
+  payoutSplitPercent?: number;      // e.g. 0.85 for 85%
+  firstPayoutCap?: number | null;   // e.g. 750
+  firstPayoutCapCount?: number;     // e.g. 1 or 5
+  minMonthsBetweenPayouts?: number; // e.g. 0 for 7-day cooldown
 }
 
 const BUSINESS_PRESETS: Record<string, Partial<SimOverrides>> = {
