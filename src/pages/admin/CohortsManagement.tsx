@@ -355,7 +355,7 @@ export default function CohortsManagement() {
                           <TooltipTrigger asChild>
                             <div className="cursor-help">
                               <p className="text-muted-foreground flex items-center gap-1">
-                                Cooling Period
+                                Eligibility Delay
                                 <Info className="h-3 w-3" />
                               </p>
                               <p className="font-medium flex items-center gap-1">
@@ -368,6 +368,30 @@ export default function CohortsManagement() {
                             <p className="max-w-xs text-xs">
                               First payout request allowed {cohort.payout_eligibility_delay_days} days after passing. 
                               Uses NY time zone. Does not apply to subsequent payouts.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                    <div>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="cursor-help">
+                              <p className="text-muted-foreground flex items-center gap-1">
+                                Payout Cooldown
+                                <Info className="h-3 w-3" />
+                              </p>
+                              <p className="font-medium flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {cohort.payout_cooldown_days} days
+                              </p>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p className="max-w-xs text-xs">
+                              Minimum {cohort.payout_cooldown_days} days between payout requests. 
+                              Applies to all payouts after the first.
                             </p>
                           </TooltipContent>
                         </Tooltip>
