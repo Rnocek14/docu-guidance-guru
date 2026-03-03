@@ -10,26 +10,50 @@
 
 // ----- Core Definitions -----
 
+// ============================================================
+// SPEC-HARDENING DECISIONS (v1.0 — locked 2026-03-03)
+// ============================================================
+//
+// Decision 1: Does L1 (Tighten) disqualify clean payouts?
+//   NO. L1 is a structural risk control ("tighten seatbelt"), not a
+//   trader behavior signal. Disqualifying L1 payouts would block
+//   progress during normal volatility, feeling unfair. Only L2 (Freeze)
+//   disqualifies — but L2 blocks payouts entirely, making it moot.
+//
+// Decision 2: Is "clean" evaluated at PAID time or REQUEST time?
+//   AT PAID TIME. This is simpler (no request-time snapshot needed),
+//   operationally unambiguous, and still fair. Deferral just delays
+//   the payout; the clean evaluation happens once it actually settles.
+//   No special deferral logic, no snapshot storage, no disputes.
+//
+// Decision 3: Ladder scope = per USER or per ACCOUNT LINEAGE?
+//   PER ACCOUNT LINEAGE (root_account_id chain). This prevents gaming
+//   via multi-account fast-tracking. Marketing tradeoff accepted:
+//   power users with multiple lineages progress each independently.
+//   UI should show ladder per-lineage, not aggregated.
+// ============================================================
+
 /**
- * A "clean payout" is one that:
- * 1. Reached terminal paid status (paid | paid_confirmed)
- * 2. Was NOT deferred by soft pacing (budget deferral)
- * 3. Had no active breaker engagement (L1 or L2) at time of request
- * 4. Had no rule violations flagged on the account during that payout cycle
+ * A "clean payout" is one that, AT THE TIME IT REACHES TERMINAL PAID STATUS:
+ * 1. Has terminal paid status (paid | paid_confirmed)
+ * 2. Account had NO active compliance flags (pending | escalated) at paid time
+ * 3. Breaker was NOT at L2 (Freeze) at paid time (L1 Tighten is OK)
  *
- * Rationale: Deferred payouts are not the trader's fault, but they
- * don't demonstrate sustained clean behavior either. We don't penalize
- * (no streak reset), but we don't credit them.
+ * Note: Deferred payouts are NOT disqualified. Deferral delays the payout;
+ * once it settles, it's evaluated like any other. If clean at paid time, it counts.
+ * This means there is NO concept of "deferred but clean at request time" — simpler.
+ *
+ * Note: L1 (Tighten) does NOT disqualify. L1 is structural risk pacing.
+ * Only L2 (Freeze) disqualifies, but L2 blocks payouts entirely, so in
+ * practice this criterion is a safety net, not a regular gate.
  */
 export interface CleanPayoutCriteria {
   /** Must be in TERMINAL_PAID_STATUSES */
   terminalPaid: true;
-  /** Payout was not deferred by soft pacing budget */
-  notDeferred: true;
-  /** No breaker engagement (L1/L2) at time of payout request */
-  noBreakerEngaged: true;
-  /** No open flags on the account during the payout cycle */
-  noActiveFlags: true;
+  /** No active compliance flags (pending | escalated) on account at paid time */
+  noActiveComplianceFlags: true;
+  /** Breaker NOT at L2 (Freeze) at paid time. L1 (Tighten) is OK. */
+  noBreakerL2: true;
 }
 
 // ----- Ladder Tiers -----
@@ -56,10 +80,11 @@ export interface LadderTier {
  * Each subsequent tier requires cumulative clean payouts.
  *
  * Key design decisions:
- * - Unlocks are PERMANENT once earned (no downgrade)
- * - Clean payout count never resets
- * - Deferred payouts don't count but don't reset streak
- * - Breaker engagement pauses progress (doesn't count) but doesn't reset
+ * - Unlocks are PERMANENT once earned (no downgrade, no decay)
+ * - Clean payout count never resets (monotonically increasing)
+ * - Deferred payouts: evaluated at paid time like any other
+ * - L1 (Tighten) does NOT disqualify — only L2 (Freeze) does
+ * - Evaluated at PAID time, not request time (no snapshots needed)
  */
 export const LADDER_TIERS: LadderTier[] = [
   {
@@ -198,28 +223,33 @@ export function getUnlockBenefits(fromTier: LadderTier, toTier: LadderTier): Unl
   return benefits;
 }
 
-// ----- Interaction with Pacing & Breaker -----
+// ----- Interaction with Pacing & Breaker (HARDENED) -----
 
 /**
  * How ladder progression interacts with the risk system:
  *
- * SOFT PACING (Layer 1):
- * - If a payout is deferred due to budget: it does NOT count as clean
- * - It also does NOT reset the streak (neutral — not the trader's fault)
- * - Once the deferred payout is eventually paid, it counts as clean
- *   ONLY if the other clean criteria were met at original request time
+ * EVALUATION TIMING:
+ * - "Clean" is evaluated AT PAID TIME (when payout reaches terminal status).
+ * - No request-time snapshots are needed. No special deferral logic.
+ * - This is simpler, operationally unambiguous, and non-disputable.
  *
- * HARD BREAKER (Layer 2):
- * - If breaker is at L1 (Tighten) at time of payout request:
- *   payout does not count as clean (tightened rules were active)
- * - If breaker is at L2 (Freeze): payouts are blocked entirely,
- *   so no payout can occur — moot
- * - Breaker engagement does NOT reset clean count (no punishment)
+ * SOFT PACING (Layer 1):
+ * - Deferral just delays the payout. It doesn't create special logic.
+ * - Once a deferred payout settles to paid, it's evaluated like any other.
+ * - If clean at paid time → counts. If not → doesn't count (no reset).
+ *
+ * HARD BREAKER:
+ * - L1 (Tighten): does NOT disqualify. L1 is structural risk pacing,
+ *   not a trader behavior signal. Blocking progress during L1 would
+ *   punish traders for market conditions they don't control.
+ * - L2 (Freeze): would disqualify, but L2 blocks payouts entirely,
+ *   so no payout can reach paid status during L2. Safety net only.
  *
  * FLAGS:
- * - Any open flag (pending/escalated) on the account during the
- *   payout cycle disqualifies that payout from "clean" status
- * - Cleared flags before payout request: payout can still be clean
+ * - Any active compliance flag (pending | escalated) on the account
+ *   AT THE TIME the payout reaches terminal paid → disqualifies.
+ * - Flags cleared before paid time: payout can still be clean.
+ * - Flags created after paid time: irrelevant to that payout.
  *
  * DOWNGRADES:
  * - There are NO downgrades. Unlocks are permanent.
@@ -232,7 +262,16 @@ export function getUnlockBenefits(fromTier: LadderTier, toTier: LadderTier): Unl
  * - Rationale: Punishing returning traders hurts retention.
  *
  * ACCOUNT SCOPE:
- * - Clean payout count is PER ROOT ACCOUNT LINEAGE, not per user.
+ * - Clean payout count is PER ROOT ACCOUNT LINEAGE (root_account_id chain).
  * - A trader with multiple accounts has separate ladder progress per lineage.
  * - Rationale: Prevents gaming via multi-account to fast-track unlocks.
+ * - UI shows ladder per-lineage, not aggregated across lineages.
+ *
+ * DATA REQUIREMENTS:
+ * - Payouts table needs: is_clean_payout boolean (set at paid time)
+ * - Clean count can be derived: COUNT(*) WHERE is_clean_payout = true
+ *   AND account_id IN (lineage accounts) AND status IN terminal_paid
+ * - Alternatively, store clean_payout_count on the root account for perf.
+ * - Breaker state check: query econ_breaker_state.breaker_level at paid time
+ * - Flag check: query flags WHERE account_id = X AND status IN ('pending','escalated')
  */
