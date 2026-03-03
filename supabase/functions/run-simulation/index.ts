@@ -853,6 +853,7 @@ function runSimulation(
   let ladderSplit80 = 0        // count of payouts at base 80%
   let ladderSplit82 = 0        // count of payouts at Pro 82%
   let ladderSplit85 = 0        // count of payouts at Elite 85%
+  let ladderSplitUnknown = 0   // drift guard: splits outside {0.80, 0.82, 0.85}
   let ladderAccountsPro = 0    // accounts at end-of-iter with cleanPayoutCount >= 3
   let ladderAccountsElite = 0  // accounts at end-of-iter with cleanPayoutCount >= 6
   let ladderTotalAccounts = 0  // total accounts observed at end of iteration
@@ -911,7 +912,8 @@ function runSimulation(
         const s2 = Math.round(s * 100) / 100
         if (s2 === 0.85) ladderSplit85++
         else if (s2 === 0.82) ladderSplit82++
-        else ladderSplit80++
+        else if (s2 === 0.80) ladderSplit80++
+        else ladderSplitUnknown++
       }
       // Track per-iteration max-month payout outflow
       if (result.payoutDollars > iterMaxPayoutOutflow) {
@@ -1140,7 +1142,7 @@ function runSimulation(
     },
     // Ladder split evidence: proves splits are actually being applied
     ladderEvidence: (() => {
-      if (ladderSplitCount === 0) return { avgEffectiveSplit: 0, p95EffectiveSplit: 0, maxEffectiveSplit: 0, totalExecutedPayouts: 0, splitDistribution: { at80: 0, at82: 0, at85: 0 }, accountsReachedProPct_endOfIter: 0, accountsReachedElitePct_endOfIter: 0, avgCleanPayoutCount_endOfIter: 0 }
+      if (ladderSplitCount === 0) return { avgEffectiveSplit: 0, p95EffectiveSplit: 0, maxEffectiveSplit: 0, totalExecutedPayouts: 0, splitDistribution: { at80: 0, at82: 0, at85: 0, unknown: 0 }, accountsReachedProPct_endOfIter: 0, accountsReachedElitePct_endOfIter: 0, avgCleanPayoutCount_endOfIter: 0 }
       // Exact p95 from discrete counters (splits are only 0.80/0.82/0.85)
       const p95Rank = Math.ceil(0.95 * ladderSplitCount)
       const p95Split = p95Rank <= ladderSplit80 ? 0.80
@@ -1152,7 +1154,7 @@ function runSimulation(
         p95EffectiveSplit: p95Split,
         maxEffectiveSplit: maxSplit,
         totalExecutedPayouts: ladderSplitCount,
-        splitDistribution: { at80: ladderSplit80, at82: ladderSplit82, at85: ladderSplit85 },
+        splitDistribution: { at80: ladderSplit80, at82: ladderSplit82, at85: ladderSplit85, unknown: ladderSplitUnknown },
         // Denominator clarification: fraction of accounts alive at end-of-iteration
         // that reached Pro/Elite clean payout thresholds. NOT "ever reached".
         accountsReachedProPct_endOfIter: ladderTotalAccounts > 0 ? ladderAccountsPro / ladderTotalAccounts : 0,
@@ -1351,7 +1353,9 @@ Deno.serve(async (req) => {
     // Ladder evidence log — eyeball-checkable in function logs without opening JSON
     const le = results.ladderEvidence as Record<string, unknown> | undefined
     if (le) {
-      console.log(`[ladder-evidence] run=${inserted?.id ?? 'unknown'} payouts=${le.totalExecutedPayouts} avgSplit=${typeof le.avgEffectiveSplit === 'number' ? (le.avgEffectiveSplit as number).toFixed(4) : '?'} maxSplit=${le.maxEffectiveSplit} dist=${JSON.stringify(le.splitDistribution)} proPct=${typeof le.accountsReachedProPct_endOfIter === 'number' ? ((le.accountsReachedProPct_endOfIter as number) * 100).toFixed(1) : '?'}% elitePct=${typeof le.accountsReachedElitePct_endOfIter === 'number' ? ((le.accountsReachedElitePct_endOfIter as number) * 100).toFixed(1) : '?'}% avgCleanCount=${typeof le.avgCleanPayoutCount_endOfIter === 'number' ? (le.avgCleanPayoutCount_endOfIter as number).toFixed(2) : '?'}`)
+      const dist = le.splitDistribution as Record<string, number> | undefined
+      const driftWarn = dist && dist.unknown > 0 ? ` ⚠️ DRIFT:${dist.unknown}` : ''
+      console.log(`[ladder-evidence] run=${inserted?.id ?? 'unknown'} payouts=${le.totalExecutedPayouts} avgSplit=${typeof le.avgEffectiveSplit === 'number' ? (le.avgEffectiveSplit as number).toFixed(4) : '?'} maxSplit=${le.maxEffectiveSplit} dist=${JSON.stringify(le.splitDistribution)} proPct=${typeof le.accountsReachedProPct_endOfIter === 'number' ? ((le.accountsReachedProPct_endOfIter as number) * 100).toFixed(1) : '?'}% elitePct=${typeof le.accountsReachedElitePct_endOfIter === 'number' ? ((le.accountsReachedElitePct_endOfIter as number) * 100).toFixed(1) : '?'}% avgCleanCount=${typeof le.avgCleanPayoutCount_endOfIter === 'number' ? (le.avgCleanPayoutCount_endOfIter as number).toFixed(2) : '?'}${driftWarn}`)
     }
 
     if (inserted?.id) {
