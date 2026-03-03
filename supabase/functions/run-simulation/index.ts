@@ -959,6 +959,13 @@ function runSimulation(
       capRejectionsPerPayoutRequest: totalPayoutRequests > 0 ? totalCapRejections / totalPayoutRequests : 0,
       avgPayoutsPerAccount: totalPayoutCount / safePassedAccounts,
       lifetimeCapHitRate: totalCapCompletions / safePassedAccounts,
+      // Computed margins for assertion evaluation
+      effectiveMargin: aggTotalRevenue > 0
+        ? (aggTotalRevenue - aggTotalCost) / aggTotalRevenue
+        : 0,
+      payoutToRevenueRatio: aggTotalRevenue > 0
+        ? aggPayoutCost / aggTotalRevenue
+        : 0,
       // Guardrail: structurally tied to the data series it validates (not completedIterations)
       ...(perIterMaxPayoutOutflow.length >= 500 && totalPayoutRequests > 0 && payoutOutflow.p95 === 0
         ? { payout_outflow_percentile_zero_with_payouts: true } : {}),

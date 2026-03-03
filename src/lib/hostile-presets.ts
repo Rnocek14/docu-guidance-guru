@@ -27,7 +27,8 @@ export type BreakerAssertionType =
   | 'MARGIN_ABOVE'            // effective margin > threshold
   | 'MAX_PAYOUT_OUTFLOW_BELOW'    // p95 peak monthly payout outflow < threshold
   | 'MAX_PAYOUT_OUTFLOW_P99_BELOW' // p99 peak monthly payout outflow < threshold (advisory)
-  | 'PAYOUT_REQUESTS_ABOVE';       // total payout requests > threshold (validates flow is exercised)
+  | 'PAYOUT_REQUESTS_ABOVE'       // total payout requests > threshold (validates flow is exercised)
+  | 'PAY_REV_P95_BELOW';          // payout-to-revenue ratio P95 < threshold (tail control)
 
 export interface BreakerAssertion {
   type: BreakerAssertionType;
@@ -208,7 +209,7 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
     presetId: 'excitement-85-split',
     name: 'Excitement: 85% Split Baseline',
     description: 'Tests raising Starter split from 80% → 85%. All other guards unchanged. 12-month horizon at Growth scale.',
-    scenarioVersion: 'v1.0',
+    scenarioVersion: 'v1.1',
     severity: 'warning',
     inputs: {
       accountsPerMonth: 200,
@@ -219,19 +220,21 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       attackIntensity: 0,
       iterations: 2000,
       reserveThreshold: 15000,
+      payoutSplitPercent: 0.85,
     },
     expectedAssertions: [
       { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Still profitable at 85% split' },
       { type: 'ANNUAL_LOSS_PROB_BELOW', threshold: 0.10, description: 'Annual loss probability < 10%' },
       { type: 'MARGIN_ABOVE', threshold: 0.15, description: 'Effective margin stays above 15%' },
       { type: 'RESERVE_BREACH_BELOW', threshold: 0.10, description: 'Reserve breach < 10%' },
+      { type: 'PAY_REV_P95_BELOW', threshold: 0.45, description: 'Pay/Rev P95 < 45% (tail control)' },
     ],
   },
   {
     presetId: 'excitement-85-split-clustered',
     name: 'Excitement: 85% Split + Clustering',
     description: '85% split under correlated payout timing (1.4× frequency, 1.15× size). Tests split increase under worst-case payout bunching.',
-    scenarioVersion: 'v1.0',
+    scenarioVersion: 'v1.1',
     severity: 'critical',
     inputs: {
       accountsPerMonth: 200,
@@ -242,19 +245,21 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       attackIntensity: 0.5,
       iterations: 2000,
       reserveThreshold: 15000,
+      payoutSplitPercent: 0.85,
     },
     expectedAssertions: [
       { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Profitable at 85% split even with clustering' },
       { type: 'RESERVE_BREACH_BELOW', threshold: 0.20, description: 'Reserve breach < 20% under clustering' },
       { type: 'WORST_MONTH_ABOVE', threshold: -20000, description: 'Worst month > -$20k' },
       { type: 'MAX_PAYOUT_OUTFLOW_BELOW', threshold: 25000, description: 'P95 peak outflow < $25k' },
+      { type: 'PAY_REV_P95_BELOW', threshold: 0.55, description: 'Pay/Rev P95 < 55% under clustering' },
     ],
   },
   {
     presetId: 'excitement-750-cap',
     name: 'Excitement: $750 First Payout Cap',
     description: 'Raises first payout cap from $500 → $750 (Elite-tier level). Tests early extraction increase at Growth scale.',
-    scenarioVersion: 'v1.0',
+    scenarioVersion: 'v1.1',
     severity: 'warning',
     inputs: {
       accountsPerMonth: 200,
@@ -265,19 +270,21 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       attackIntensity: 0,
       iterations: 2000,
       reserveThreshold: 15000,
+      firstPayoutCap: 750,
     },
     expectedAssertions: [
       { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Profitable with $750 first cap' },
       { type: 'ANNUAL_LOSS_PROB_BELOW', threshold: 0.08, description: 'Annual loss probability < 8%' },
       { type: 'MARGIN_ABOVE', threshold: 0.20, description: 'Margin stays above 20%' },
       { type: 'RESERVE_BREACH_BELOW', threshold: 0.08, description: 'Reserve breach < 8%' },
+      { type: 'PAY_REV_P95_BELOW', threshold: 0.45, description: 'Pay/Rev P95 < 45%' },
     ],
   },
   {
     presetId: 'excitement-1000-cap',
     name: 'Excitement: $1,000 First Payout Cap',
-    description: 'Raises first payout cap from $500 → $1,000. Tests aggressive early extraction. Requires guard rail change.',
-    scenarioVersion: 'v1.0',
+    description: 'Raises first payout cap from $500 → $1,000. Tests aggressive early extraction. Requires guard rail change. Analysis only — not a launch candidate.',
+    scenarioVersion: 'v1.1',
     severity: 'critical',
     inputs: {
       accountsPerMonth: 200,
@@ -288,19 +295,21 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       attackIntensity: 0,
       iterations: 2000,
       reserveThreshold: 15000,
+      firstPayoutCap: 1000,
     },
     expectedAssertions: [
       { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Profitable with $1k first cap' },
       { type: 'ANNUAL_LOSS_PROB_BELOW', threshold: 0.12, description: 'Annual loss probability < 12%' },
       { type: 'MARGIN_ABOVE', threshold: 0.15, description: 'Margin stays above 15%' },
       { type: 'RESERVE_BREACH_BELOW', threshold: 0.12, description: 'Reserve breach < 12%' },
+      { type: 'PAY_REV_P95_BELOW', threshold: 0.50, description: 'Pay/Rev P95 < 50%' },
     ],
   },
   {
     presetId: 'excitement-fast-cooldown',
     name: 'Excitement: Accelerated Cooldown',
-    description: 'Reduces payout cooldown from 14 → 7 days after $3k cumulative profit. Tests velocity gate relaxation under normal conditions.',
-    scenarioVersion: 'v1.0',
+    description: 'Reduces payout cooldown from ~1 month → 0 (sub-monthly payouts allowed). Static gate relaxation — does NOT model conditional "$3k profit" trigger.',
+    scenarioVersion: 'v1.1',
     severity: 'warning',
     inputs: {
       accountsPerMonth: 200,
@@ -311,19 +320,21 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       attackIntensity: 0,
       iterations: 2000,
       reserveThreshold: 15000,
+      minMonthsBetweenPayouts: 0,
     },
     expectedAssertions: [
       { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Profitable with faster cooldown' },
       { type: 'ANNUAL_LOSS_PROB_BELOW', threshold: 0.08, description: 'Annual loss probability < 8%' },
       { type: 'MAX_PAYOUT_OUTFLOW_BELOW', threshold: 20000, description: 'P95 peak outflow < $20k (velocity stable)' },
       { type: 'RESERVE_BREACH_BELOW', threshold: 0.10, description: 'Reserve breach < 10%' },
+      { type: 'PAY_REV_P95_BELOW', threshold: 0.45, description: 'Pay/Rev P95 < 45%' },
     ],
   },
   {
     presetId: 'excitement-full-stack',
     name: 'Excitement: Full Stack (All Levers)',
-    description: '85% split + $750 cap + 7-day cooldown + clustering. The "max excitement" stress test — all levers pulled simultaneously.',
-    scenarioVersion: 'v1.0',
+    description: '85% split + $750 cap + 0-month cooldown + clustering. The "max excitement" stress test — all levers pulled simultaneously.',
+    scenarioVersion: 'v1.1',
     severity: 'existential',
     inputs: {
       accountsPerMonth: 200,
@@ -334,6 +345,9 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       attackIntensity: 0.5,
       iterations: 2000,
       reserveThreshold: 15000,
+      payoutSplitPercent: 0.85,
+      firstPayoutCap: 750,
+      minMonthsBetweenPayouts: 0,
     },
     expectedAssertions: [
       { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Still profitable with ALL excitement levers + clustering' },
@@ -341,6 +355,7 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       { type: 'RESERVE_BREACH_BELOW', threshold: 0.25, description: 'Reserve breach < 25%' },
       { type: 'WORST_MONTH_ABOVE', threshold: -25000, description: 'Worst month > -$25k' },
       { type: 'MAX_PAYOUT_OUTFLOW_BELOW', threshold: 30000, description: 'P95 peak outflow < $30k' },
+      { type: 'PAY_REV_P95_BELOW', threshold: 0.60, description: 'Pay/Rev P95 < 60% (full-stack stress ceiling)' },
     ],
   },
 ];
@@ -359,6 +374,13 @@ const METRIC_EXTRACTORS: Record<string, (r: SimResultForAssertions) => number | 
   MAX_PAYOUT_OUTFLOW_BELOW: (r) => r.risk?.maxPayoutOutflowMonth?.p95,
   MAX_PAYOUT_OUTFLOW_P99_BELOW: (r) => r.risk?.maxPayoutOutflowMonth?.p99,
   PAYOUT_REQUESTS_ABOVE: (r) => r.diagnostics?.totalPayoutRequests,
+  PAY_REV_P95_BELOW: (r) => {
+    // Compute Pay/Rev from revenue/cost breakdown if available
+    const rev = r.revenueBreakdown?.total;
+    const payouts = r.costBreakdown?.payouts;
+    if (rev != null && rev > 0 && payouts != null) return payouts / rev;
+    return r.diagnostics?.payoutToRevenueP95;
+  },
 };
 
 // ============================================================================
@@ -371,6 +393,8 @@ interface SimResultForAssertions {
   risk: { worstMonth: number; maxPayoutOutflowMonth?: { p95: number; p99: number; max: number } };
   reserve: { breachProbability: number };
   diagnostics: Record<string, any> | null;
+  revenueBreakdown?: { entry: number; resets: number; total: number };
+  costBreakdown?: { payouts: number; fraud: number; chargebacks: number; variable: number; fixed: number; total: number };
 }
 
 export function evaluateAssertions(
@@ -454,6 +478,10 @@ export function evaluateAssertions(
       case 'PAYOUT_REQUESTS_ABOVE':
         passed = value > (assertion.threshold ?? 1);
         detail = `Total payout requests: ${Math.round(value).toLocaleString()} (minimum required: ${Math.round(assertion.threshold ?? 1).toLocaleString()})`;
+        break;
+      case 'PAY_REV_P95_BELOW':
+        passed = value < (assertion.threshold ?? 0.45);
+        detail = `Pay/Rev ratio: ${(value * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.45) * 100).toFixed(1)}%)`;
         break;
     }
 
