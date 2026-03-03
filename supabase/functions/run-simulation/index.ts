@@ -415,11 +415,10 @@ function simulateMonthPerAccount(
   const payoutBudget = knobs.targetPayRevSoft != null
     ? monthTotalRevenue * knobs.targetPayRevSoft
     : Infinity
-  // Whether budget is conditional (engage threshold) or always-on
-  const engageThreshold = knobs.payRevEngageThreshold != null
-    ? monthTotalRevenue * knobs.payRevEngageThreshold
-    : 0  // 0 = always engaged when targetPayRevSoft is set
-  let budgetEngaged = knobs.targetPayRevSoft == null ? false : (engageThreshold <= 0)
+  // Engagement uses RUNNING RATIO (payoutDollars / revenue), not absolute dollars.
+  // This prevents premature engagement from a single large payout.
+  const engageRatio = knobs.payRevEngageThreshold ?? 0  // 0 = always-on when targetPayRevSoft set
+  let budgetEngaged = knobs.targetPayRevSoft == null ? false : (engageRatio <= 0)
 
   const eligibleAccounts: AccountState[] = []
   ctx.accountStates.forEach(state => {
@@ -486,9 +485,14 @@ function simulateMonthPerAccount(
       // Min $50 threshold
       if (traderPayout < 50) continue
 
-      // CONDITIONAL BUDGET CHECK: engage budget when month crosses threshold
-      if (knobs.targetPayRevSoft != null && !budgetEngaged && (payoutDollars + traderPayout) > engageThreshold) {
-        budgetEngaged = true
+      // CONDITIONAL BUDGET CHECK: engage when running pay/rev RATIO crosses threshold
+      // Using ratio instead of absolute dollars prevents premature engagement from
+      // a single large payout in a high-revenue month.
+      if (knobs.targetPayRevSoft != null && !budgetEngaged && monthTotalRevenue > 0) {
+        const runningPayRev = (payoutDollars + traderPayout) / monthTotalRevenue
+        if (runningPayRev > engageRatio) {
+          budgetEngaged = true
+        }
       }
 
       // PAYOUT BUDGET CHECK (hard ceiling — only when engaged)
