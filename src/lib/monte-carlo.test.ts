@@ -401,6 +401,8 @@ describe('Scenario Comparisons (Relative Behavior)', () => {
     // Use margin comparison instead of probabilityOfLoss which can pin to 0
     // at low iteration counts, causing flaky equality assertions.
     expect(capped.profit.p5).toBeGreaterThanOrEqual(uncapped.profit.p5);
+    // Secondary assertion: capped should have lower or equal max drawdown
+    expect(capped.risk.maxDrawdown).toBeLessThanOrEqual(uncapped.risk.maxDrawdown);
   }, 15000);
 
   it('lifetime cap mitigates attack damage', () => {
