@@ -51,6 +51,8 @@ interface SimKnobs {
   minWinningDaysPerPayout: number; minProfitSinceLastPayout: number
   minMonthsBetweenPayouts: number; verificationMonths: number
   verificationFailRate: number
+  /** Monthly payout budget as fraction of revenue. null = disabled (no soft pacing). */
+  targetPayRevSoft: number | null
 }
 
 interface AccountState {
@@ -232,6 +234,7 @@ function cohortToAssumptions(cohorts: CohortConfig[], overrides?: Partial<SimAss
       minMonthsBetweenPayouts: Math.ceil((perfCohort?.payout_cooldown_days ?? 30) / 30),
       verificationMonths: cohorts.some(c => c.cohort_phase === 'verification') ? 1 : 0,
       verificationFailRate: 0.15,
+      targetPayRevSoft: null,  // disabled by default — enable via preset/override
     },
   }
 
@@ -271,6 +274,9 @@ interface MonthResult {
   // Revenue/cost breakdown for auditability
   revenueBreakdown: { entry: number; resets: number; total: number }
   costBreakdown: { payouts: number; fraud: number; chargebacks: number; variable: number; fixed: number; total: number }
+  // Payout budgeting (soft pacing) diagnostics
+  deferredPayoutDollars: number
+  deferredPayoutRequests: number
 }
 
 function simulateMonthPerAccount(
@@ -398,6 +404,14 @@ function simulateMonthPerAccount(
   let capCompletions = 0
   let capClips = 0
   let capRejections = 0
+  let deferredPayoutDollars = 0
+  let deferredPayoutRequests = 0
+
+  // Payout budget (soft pacing): limits per-month payout mass to fraction of revenue
+  const monthTotalRevenue = revenue + resetRevenue
+  const payoutBudget = knobs.targetPayRevSoft != null
+    ? monthTotalRevenue * knobs.targetPayRevSoft
+    : Infinity
 
   const eligibleAccounts: AccountState[] = []
   ctx.accountStates.forEach(state => {
@@ -451,6 +465,15 @@ function simulateMonthPerAccount(
 
       // Min $50 threshold
       if (traderPayout < 50) continue
+
+      // PAYOUT BUDGET CHECK (soft pacing / tail smoother)
+      // If this payout would exceed the monthly budget, defer it.
+      // The account remains eligible and will naturally retry next month.
+      if (payoutDollars + traderPayout > payoutBudget && knobs.targetPayRevSoft != null) {
+        deferredPayoutRequests++
+        deferredPayoutDollars += traderPayout
+        continue  // deferred — account retries next month naturally
+      }
 
       // Hard guard
       if (lifetimeCap !== null && account.lifetimePaidTotal + traderPayout > lifetimeCap + 1e-6) {
@@ -512,6 +535,8 @@ function simulateMonthPerAccount(
     zombieCompletions, resets: resetsThisMonth,
     revenueBreakdown: { entry: revenue, resets: resetRevenue, total: totalRevenue },
     costBreakdown: { payouts: payoutDollars, fraud: fraudLoss, chargebacks, variable: variableCosts, fixed: fixedCosts, total: totalCosts },
+    deferredPayoutDollars,
+    deferredPayoutRequests,
   }
 }
 
@@ -758,6 +783,8 @@ function runSimulation(
   let totalCapClips = 0
   let totalCapRejections = 0
   let totalPassedAccounts = 0
+  let totalDeferredDollars = 0
+  let totalDeferredRequests = 0
   let completedIterations = 0
   let partial = false
   let partialReason: string | null = null
@@ -803,6 +830,8 @@ function runSimulation(
       totalCapCompletions += result.capCompletions
       totalCapClips += result.capClips
       totalCapRejections += result.capRejections
+      totalDeferredDollars += result.deferredPayoutDollars
+      totalDeferredRequests += result.deferredPayoutRequests
       // Track per-iteration max-month payout outflow
       if (result.payoutDollars > iterMaxPayoutOutflow) {
         iterMaxPayoutOutflow = result.payoutDollars
@@ -998,6 +1027,16 @@ function runSimulation(
       payoutToRevenueP50: payRevPercentiles.p50,
       payoutToRevenueMax: payRevPercentiles.max,
       payoutToRevenueSampleCount: payRevPercentiles.sampleCount,
+      // Payout budgeting (soft pacing) diagnostics
+      payoutBudgetEnabled: assumptions.knobs.targetPayRevSoft != null,
+      targetPayRevSoft: assumptions.knobs.targetPayRevSoft,
+      totalDeferredDollars,
+      totalDeferredRequests,
+      deferredDollarsPerIteration: totalDeferredDollars / Math.max(1, completedIterations),
+      deferredRequestsPerIteration: totalDeferredRequests / Math.max(1, completedIterations),
+      deferralRate: totalPayoutRequests > 0
+        ? totalDeferredRequests / (totalPayoutRequests + totalDeferredRequests)
+        : 0,
       // Guardrail: structurally tied to the data series it validates (not completedIterations)
       ...(perIterMaxPayoutOutflow.length >= 500 && totalPayoutRequests > 0 && payoutOutflow.p95 === 0
         ? { payout_outflow_percentile_zero_with_payouts: true } : {}),

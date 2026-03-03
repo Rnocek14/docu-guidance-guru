@@ -21,6 +21,7 @@ export interface SimOverrides {
   firstPayoutCap?: number | null;   // e.g. 750
   firstPayoutCapCount?: number;     // e.g. 1 or 5
   minMonthsBetweenPayouts?: number; // e.g. 0 for 7-day cooldown
+  targetPayRevSoft?: number | null; // e.g. 0.40 for 40% monthly payout budget
 }
 
 const BUSINESS_PRESETS: Record<string, Partial<SimOverrides>> = {

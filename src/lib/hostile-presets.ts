@@ -28,7 +28,8 @@ export type BreakerAssertionType =
   | 'MAX_PAYOUT_OUTFLOW_BELOW'    // p95 peak monthly payout outflow < threshold
   | 'MAX_PAYOUT_OUTFLOW_P99_BELOW' // p99 peak monthly payout outflow < threshold (advisory)
   | 'PAYOUT_REQUESTS_ABOVE'       // total payout requests > threshold (validates flow is exercised)
-  | 'PAY_REV_P95_BELOW';          // payout-to-revenue ratio P95 < threshold (tail control)
+  | 'PAY_REV_P95_BELOW'           // payout-to-revenue ratio P95 < threshold (tail control)
+  | 'DEFERRAL_RATE_BELOW';        // payout deferral rate < threshold (UX quality — too many deferrals = bad UX)
 
 export interface BreakerAssertion {
   type: BreakerAssertionType;
@@ -358,6 +359,113 @@ export const HOSTILE_PRESETS: HostilePreset[] = [
       { type: 'PAY_REV_P95_BELOW', threshold: 0.60, description: 'Pay/Rev P95 < 60% (full-stack stress ceiling)' },
     ],
   },
+
+
+  // ========================================================================
+  // PAYOUT BUDGETING (TAIL SMOOTHER) — tests soft pacing at various targets
+  // ========================================================================
+
+  {
+    presetId: 'pacing-baseline-040',
+    name: 'Pacing: Baseline + 40% Budget',
+    description: 'Baseline economics with soft monthly payout budget at 40% of revenue. Tests whether tail smoother brings Pay/Rev P95 under 45% without wrecking UX.',
+    scenarioVersion: 'v1.2',
+    severity: 'warning',
+    inputs: {
+      accountsPerMonth: 200,
+      fixedMonthlyCosts: 12000,
+      entryFee: 149,
+      resetFee: 99,
+      horizon: 15,
+      attackIntensity: 0,
+      iterations: 2000,
+      reserveThreshold: 15000,
+      targetPayRevSoft: 0.40,
+    },
+    expectedAssertions: [
+      { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Profitable with payout pacing' },
+      { type: 'PAY_REV_P95_BELOW', threshold: 0.45, description: 'Pay/Rev P95 < 45% (tail controlled by budget)' },
+      { type: 'DEFERRAL_RATE_BELOW', threshold: 0.20, description: 'Deferral rate < 20% (UX quality — most payouts still go through)' },
+      { type: 'MARGIN_ABOVE', threshold: 0.20, description: 'Margin stays above 20%' },
+      { type: 'RESERVE_BREACH_BELOW', threshold: 0.05, description: 'Reserve breach < 5%' },
+    ],
+  },
+  {
+    presetId: 'pacing-baseline-035',
+    name: 'Pacing: Baseline + 35% Budget',
+    description: 'Tighter payout budget at 35% of revenue. Tests aggressive tail control — may increase deferral rate.',
+    scenarioVersion: 'v1.2',
+    severity: 'warning',
+    inputs: {
+      accountsPerMonth: 200,
+      fixedMonthlyCosts: 12000,
+      entryFee: 149,
+      resetFee: 99,
+      horizon: 15,
+      attackIntensity: 0,
+      iterations: 2000,
+      reserveThreshold: 15000,
+      targetPayRevSoft: 0.35,
+    },
+    expectedAssertions: [
+      { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Profitable with tighter pacing' },
+      { type: 'PAY_REV_P95_BELOW', threshold: 0.40, description: 'Pay/Rev P95 < 40% (aggressive clamp)' },
+      { type: 'DEFERRAL_RATE_BELOW', threshold: 0.30, description: 'Deferral rate < 30% (UX ceiling — too much deferral = bad experience)' },
+      { type: 'MARGIN_ABOVE', threshold: 0.22, description: 'Margin stays above 22%' },
+    ],
+  },
+  {
+    presetId: 'pacing-clustered-040',
+    name: 'Pacing: Clustering + 40% Budget',
+    description: 'Payout budgeting under correlated payout timing (clustering attack). Tests whether soft pacing absorbs payout spikes.',
+    scenarioVersion: 'v1.2',
+    severity: 'critical',
+    inputs: {
+      accountsPerMonth: 200,
+      fixedMonthlyCosts: 12000,
+      entryFee: 149,
+      resetFee: 99,
+      horizon: 15,
+      attackIntensity: 0.5,
+      iterations: 2000,
+      reserveThreshold: 15000,
+      targetPayRevSoft: 0.40,
+    },
+    expectedAssertions: [
+      { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Profitable with pacing + clustering' },
+      { type: 'PAY_REV_P95_BELOW', threshold: 0.50, description: 'Pay/Rev P95 < 50% under clustering' },
+      { type: 'DEFERRAL_RATE_BELOW', threshold: 0.35, description: 'Deferral rate < 35% under clustering' },
+      { type: 'RESERVE_BREACH_BELOW', threshold: 0.15, description: 'Reserve breach < 15% under clustering' },
+      { type: 'WORST_MONTH_ABOVE', threshold: -15000, description: 'Worst month > -$15k' },
+    ],
+  },
+  {
+    presetId: 'pacing-excitement-040',
+    name: 'Pacing: 85% Split + $750 Cap + 40% Budget',
+    description: 'Full excitement stack WITH payout budgeting. Tests whether soft pacing makes excitement levers launch-safe.',
+    scenarioVersion: 'v1.2',
+    severity: 'critical',
+    inputs: {
+      accountsPerMonth: 200,
+      fixedMonthlyCosts: 12000,
+      entryFee: 149,
+      resetFee: 99,
+      horizon: 15,
+      attackIntensity: 0,
+      iterations: 2000,
+      reserveThreshold: 15000,
+      payoutSplitPercent: 0.85,
+      firstPayoutCap: 750,
+      targetPayRevSoft: 0.40,
+    },
+    expectedAssertions: [
+      { type: 'ANNUAL_PROFIT_POSITIVE', description: 'Profitable with excitement + pacing' },
+      { type: 'PAY_REV_P95_BELOW', threshold: 0.45, description: 'Pay/Rev P95 < 45% (excitement controlled by budget)' },
+      { type: 'DEFERRAL_RATE_BELOW', threshold: 0.25, description: 'Deferral rate < 25%' },
+      { type: 'MARGIN_ABOVE', threshold: 0.15, description: 'Margin stays above 15%' },
+      { type: 'RESERVE_BREACH_BELOW', threshold: 0.10, description: 'Reserve breach < 10%' },
+    ],
+  },
 ];
 
 // ============================================================================
@@ -384,6 +492,7 @@ const METRIC_EXTRACTORS: Record<string, (r: SimResultForAssertions) => number | 
     if (rev != null && rev > 0 && payouts != null) return payouts / rev;
     return undefined;
   },
+  DEFERRAL_RATE_BELOW: (r) => r.diagnostics?.deferralRate,
 };
 
 // ============================================================================
@@ -488,6 +597,10 @@ export function evaluateAssertions(
         detail = `Pay/Rev [${source}]: ${(value * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.45) * 100).toFixed(1)}%)`;
         break;
       }
+      case 'DEFERRAL_RATE_BELOW':
+        passed = value < (assertion.threshold ?? 0.20);
+        detail = `Deferral rate: ${(value * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.20) * 100).toFixed(1)}%) — ${results.diagnostics?.totalDeferredRequests?.toLocaleString() ?? '?'} deferred, ~$${Math.round(results.diagnostics?.deferredDollarsPerIteration ?? 0).toLocaleString()}/iter`;
+        break;
     }
 
     return { assertion, passed, observedValue: value, detail, isInformational: informational };
