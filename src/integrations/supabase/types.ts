@@ -1740,6 +1740,7 @@ export type Database = {
           approved_at: string | null
           approved_by: string | null
           calculated_eligible_amount: number | null
+          clean_evaluated_at: string | null
           clean_payout_reason: string | null
           destination_name_match: boolean | null
           device_fingerprint_id: string | null
@@ -1768,6 +1769,7 @@ export type Database = {
           approved_at?: string | null
           approved_by?: string | null
           calculated_eligible_amount?: number | null
+          clean_evaluated_at?: string | null
           clean_payout_reason?: string | null
           destination_name_match?: boolean | null
           device_fingerprint_id?: string | null
@@ -1796,6 +1798,7 @@ export type Database = {
           approved_at?: string | null
           approved_by?: string | null
           calculated_eligible_amount?: number | null
+          clean_evaluated_at?: string | null
           clean_payout_reason?: string | null
           destination_name_match?: boolean | null
           device_fingerprint_id?: string | null
@@ -3044,7 +3047,7 @@ export type Database = {
       cleanup_old_payload_samples: { Args: never; Returns: undefined }
       confirm_payout_payment: {
         Args: {
-          _confirmed_at?: string
+          _confirmed_at: string
           _payout_id: string
           _provider: string
           _provider_event_id: string
