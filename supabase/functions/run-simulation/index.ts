@@ -301,6 +301,8 @@ interface MonthResult {
   // Payout budgeting (soft pacing) diagnostics
   deferredPayoutDollars: number
   deferredPayoutRequests: number
+  // Ladder split evidence
+  ladderSplits: number[]     // all effective splits used this month
 }
 
 function simulateMonthPerAccount(
@@ -431,6 +433,7 @@ function simulateMonthPerAccount(
   let capRejections = 0
   let deferredPayoutDollars = 0
   let deferredPayoutRequests = 0
+  const monthLadderSplits: number[] = []
 
   // Payout budget (conditional pacing): only engages when month is "hot"
   const monthTotalRevenue = revenue + resetRevenue
@@ -533,6 +536,7 @@ function simulateMonthPerAccount(
 
       payoutDollars += traderPayout
       payoutCount++
+      monthLadderSplits.push(effectiveSplit)
       account.lifetimePaidTotal += traderPayout
       account.attemptPaid += traderPayout
       account.payoutCount++
@@ -593,6 +597,7 @@ function simulateMonthPerAccount(
     costBreakdown: { payouts: payoutDollars, fraud: fraudLoss, chargebacks, variable: variableCosts, fixed: fixedCosts, total: totalCosts },
     deferredPayoutDollars,
     deferredPayoutRequests,
+    ladderSplits: monthLadderSplits,
   }
 }
 
@@ -842,6 +847,14 @@ function runSimulation(
   let totalDeferredDollars = 0
   let totalDeferredRequests = 0
   let completedIterations = 0
+  // Ladder split evidence tracking
+  let ladderSplitSum = 0       // sum of all effective splits used
+  let ladderSplitCount = 0     // number of executed payouts (for avg)
+  let ladderSplitMax = 0       // highest split observed
+  const ladderSplitAll: number[] = []  // all splits for p95
+  let ladderAccountsPro = 0    // accounts that reached cleanPayoutCount >= 3
+  let ladderAccountsElite = 0  // accounts that reached cleanPayoutCount >= 6
+  let ladderTotalAccounts = 0  // total accounts observed at end of iteration
   let partial = false
   let partialReason: string | null = null
   const perIterMaxPayoutOutflow: number[] = [] // Per-iteration max-month payout outflow for percentile calculation
@@ -888,6 +901,13 @@ function runSimulation(
       totalCapRejections += result.capRejections
       totalDeferredDollars += result.deferredPayoutDollars
       totalDeferredRequests += result.deferredPayoutRequests
+      // Ladder split evidence
+      for (const s of result.ladderSplits) {
+        ladderSplitSum += s
+        ladderSplitCount++
+        if (s > ladderSplitMax) ladderSplitMax = s
+        ladderSplitAll.push(s)
+      }
       // Track per-iteration max-month payout outflow
       if (result.payoutDollars > iterMaxPayoutOutflow) {
         iterMaxPayoutOutflow = result.payoutDollars
@@ -921,6 +941,12 @@ function runSimulation(
     totalPassedAccounts += ctx.totalPassedAccounts
     allIterProfits.push(cumProfit)
     perIterMaxPayoutOutflow.push(iterMaxPayoutOutflow)
+    // Count ladder progression at iteration end
+    ctx.accountStates.forEach(state => {
+      ladderTotalAccounts++
+      if (state.cleanPayoutCount >= 3) ladderAccountsPro++
+      if (state.cleanPayoutCount >= 6) ladderAccountsElite++
+    })
     completedIterations++
   }
 
@@ -1104,6 +1130,20 @@ function runSimulation(
       ...(perIterMaxPayoutOutflow.length >= 500 && totalPayoutRequests > 0 && payoutOutflow.p95 === 0
         ? { payout_outflow_percentile_zero_with_payouts: true } : {}),
     },
+    // Ladder split evidence: proves splits are actually being applied
+    ladderEvidence: (() => {
+      if (ladderSplitCount === 0) return { avgEffectiveSplit: 0, p95EffectiveSplit: 0, maxEffectiveSplit: 0, totalExecutedPayouts: 0, accountsReachedProPct: 0, accountsReachedElitePct: 0 }
+      const sorted = ladderSplitAll.slice().sort((a, b) => a - b)
+      const p95Idx = Math.min(Math.max(Math.ceil(0.95 * sorted.length) - 1, 0), sorted.length - 1)
+      return {
+        avgEffectiveSplit: ladderSplitSum / ladderSplitCount,
+        p95EffectiveSplit: sorted[p95Idx],
+        maxEffectiveSplit: ladderSplitMax,
+        totalExecutedPayouts: ladderSplitCount,
+        accountsReachedProPct: ladderTotalAccounts > 0 ? ladderAccountsPro / ladderTotalAccounts : 0,
+        accountsReachedElitePct: ladderTotalAccounts > 0 ? ladderAccountsElite / ladderTotalAccounts : 0,
+      }
+    })(),
     // Aggregate revenue/cost breakdown (averaged per iteration for auditability)
     revenueBreakdown: {
       entry: aggEntryRevenue / Math.max(1, completedIterations),
