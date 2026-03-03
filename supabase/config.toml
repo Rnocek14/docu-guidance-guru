@@ -86,3 +86,6 @@ verify_jwt = false
 
 [functions.compute-cpc]
 verify_jwt = false
+
+[functions.run-sweep]
+verify_jwt = false
