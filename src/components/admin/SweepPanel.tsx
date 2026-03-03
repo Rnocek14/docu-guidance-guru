@@ -14,6 +14,7 @@ interface SweepSummary {
   p_loss: number;
   max_dd: number;
   reserve_breach: number;
+  worst_month: number;
   duration_ms: number;
 }
 
@@ -153,6 +154,7 @@ export function SweepPanel() {
                   <TableRow>
                     <TableHead className="w-[80px]">N</TableHead>
                     <TableHead>Mean Profit</TableHead>
+                    <TableHead>Worst Month</TableHead>
                     <TableHead>P5 (Worst)</TableHead>
                     <TableHead>P(Loss)</TableHead>
                     <TableHead>Max DD</TableHead>
@@ -175,6 +177,9 @@ export function SweepPanel() {
                             {fmt(s.profit_mean)}
                           </span>
                         </div>
+                      </TableCell>
+                      <TableCell className={s.worst_month < 0 ? 'text-destructive font-medium' : ''}>
+                        {fmt(s.worst_month)}
                       </TableCell>
                       <TableCell className={s.profit_p5 < 0 ? 'text-destructive' : ''}>
                         {fmt(s.profit_p5)}

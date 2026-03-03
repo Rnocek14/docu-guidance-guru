@@ -1353,7 +1353,12 @@ Deno.serve(async (req) => {
       min_profitable_days: c.min_profitable_days as number,
     }))
 
-    const assumptions = cohortToAssumptions(cohortConfigs, body.overrides)
+    // Extract sweep_meta before passing to simulation (it's metadata, not a sim parameter)
+    const sweepMeta = body.overrides?.sweep_meta as Record<string, unknown> | undefined
+    const simOverrides = body.overrides ? { ...body.overrides } : undefined
+    if (simOverrides) delete (simOverrides as Record<string, unknown>).sweep_meta
+
+    const assumptions = cohortToAssumptions(cohortConfigs, simOverrides)
     const effectiveAssumptions = applyAttackIntensity(assumptions)
 
     const scaling = autoScaleIterations(rawIterations, months, effectiveAssumptions.accountsPerMonth, forceIterations, effectiveAssumptions.knobs.attackIntensity)
@@ -1395,7 +1400,7 @@ Deno.serve(async (req) => {
       .from('simulation_runs')
       .insert({
         seed, iterations: results.completedIterations, months_per_iteration: months,
-        assumptions: assumptions as unknown, cohort_configs: cohortConfigs as unknown,
+        assumptions: { ...(assumptions as unknown as Record<string, unknown>), ...(sweepMeta ?? {}) } as unknown, cohort_configs: cohortConfigs as unknown,
         profit_mean: results.profit.mean, profit_p5: results.profit.p5,
         profit_p50: results.profit.p50, profit_p95: results.profit.p95,
         profit_std_dev: results.profit.stdDev,
