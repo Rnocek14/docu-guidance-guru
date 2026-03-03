@@ -21,6 +21,7 @@ import { BreakerValidationPanel } from '@/components/admin/BreakerValidationPane
 import { HOSTILE_PRESETS, evaluateAssertions, computeOverallVerdict, type HostilePreset, type AssertionResult } from '@/lib/hostile-presets';
 import { captureDbConfigSnapshot, validateBreakerConfig, type BreakerValidationResult } from '@/lib/breaker-evaluator';
 import { V1StressBattery } from '@/components/admin/V1StressBattery';
+import { SweepPanel } from '@/components/admin/SweepPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -306,7 +307,8 @@ export default function MonteCarloAnalytics() {
           onSelectPreset={setActivePreset}
         />
 
-        {/* Comparison indicator */}
+        {/* N-Sweep Panel */}
+        <SweepPanel />
         {comparison && (
           <div className="flex items-center gap-2 rounded-lg border border-muted bg-muted/30 p-3 text-sm">
             <span className="text-muted-foreground">Comparing against:</span>

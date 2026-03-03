@@ -1277,28 +1277,48 @@ Deno.serve(async (req) => {
 
   const startTime = Date.now()
 
-  const authHeader = req.headers.get('Authorization')
-  if (!authHeader?.startsWith('Bearer ')) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
-  }
-
-  const jwt = authHeader.replace('Bearer ', '')
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
-
-  const anonClient = createClient(supabaseUrl, anonKey)
   const serviceClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
-  const { data: userData, error: userError } = await anonClient.auth.getUser(jwt)
-  if (userError || !userData?.user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
-  }
-  const userId = userData.user.id
+  // ── Auth: JWT (admin/risk_officer) OR x-cron-secret (service-to-service) ──
+  let userId: string | null = null
+  const cronSecretHeader = req.headers.get('x-cron-secret')
+  const authHeader = req.headers.get('Authorization')
 
-  const { data: isAdmin } = await serviceClient.rpc('has_role', { _user_id: userId, _role: 'admin' })
-  const { data: isRisk } = await serviceClient.rpc('has_role', { _user_id: userId, _role: 'risk_officer' })
-  if (isAdmin !== true && isRisk !== true) {
-    return new Response(JSON.stringify({ error: 'Forbidden: admin or risk_officer required' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+  if (cronSecretHeader) {
+    // Service-to-service auth via CRON_SECRET
+    let expectedSecret = Deno.env.get('CRON_SECRET') ?? ''
+    if (!expectedSecret) {
+      try {
+        const { data } = await serviceClient.from('internal_secrets').select('value').eq('key', 'CRON_SECRET').single()
+        expectedSecret = data?.value ?? ''
+      } catch { /* best effort */ }
+    }
+    if (!expectedSecret || cronSecretHeader !== expectedSecret) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+    // Accept triggered_by from body for audit trail
+    try {
+      const peek = await req.clone().json()
+      userId = peek.triggered_by ?? null
+    } catch { /* userId stays null */ }
+  } else if (authHeader?.startsWith('Bearer ')) {
+    // JWT auth (existing path)
+    const jwt = authHeader.replace('Bearer ', '')
+    const anonClient = createClient(supabaseUrl, anonKey)
+    const { data: userData, error: userError } = await anonClient.auth.getUser(jwt)
+    if (userError || !userData?.user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+    userId = userData.user.id
+    const { data: isAdmin } = await serviceClient.rpc('has_role', { _user_id: userId, _role: 'admin' })
+    const { data: isRisk } = await serviceClient.rpc('has_role', { _user_id: userId, _role: 'risk_officer' })
+    if (isAdmin !== true && isRisk !== true) {
+      return new Response(JSON.stringify({ error: 'Forbidden: admin or risk_officer required' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+  } else {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   }
 
   try {
