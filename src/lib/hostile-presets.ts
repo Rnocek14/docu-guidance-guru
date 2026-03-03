@@ -375,11 +375,14 @@ const METRIC_EXTRACTORS: Record<string, (r: SimResultForAssertions) => number | 
   MAX_PAYOUT_OUTFLOW_P99_BELOW: (r) => r.risk?.maxPayoutOutflowMonth?.p99,
   PAYOUT_REQUESTS_ABOVE: (r) => r.diagnostics?.totalPayoutRequests,
   PAY_REV_P95_BELOW: (r) => {
-    // Compute Pay/Rev from revenue/cost breakdown if available
+    // Use TRUE P95 from per-month distribution (not aggregate mean ratio)
+    const trueP95 = r.diagnostics?.payoutToRevenueP95;
+    if (trueP95 != null && typeof trueP95 === 'number') return trueP95;
+    // Fallback: aggregate mean ratio (labeled as such in detail string)
     const rev = r.revenueBreakdown?.total;
     const payouts = r.costBreakdown?.payouts;
     if (rev != null && rev > 0 && payouts != null) return payouts / rev;
-    return r.diagnostics?.payoutToRevenueP95;
+    return undefined;
   },
 };
 
@@ -479,10 +482,12 @@ export function evaluateAssertions(
         passed = value > (assertion.threshold ?? 1);
         detail = `Total payout requests: ${Math.round(value).toLocaleString()} (minimum required: ${Math.round(assertion.threshold ?? 1).toLocaleString()})`;
         break;
-      case 'PAY_REV_P95_BELOW':
+      case 'PAY_REV_P95_BELOW': {
         passed = value < (assertion.threshold ?? 0.45);
-        detail = `Pay/Rev ratio: ${(value * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.45) * 100).toFixed(1)}%)`;
+        const source = results.diagnostics?.payoutToRevenueP95 != null ? 'true P95 (per-month distribution)' : 'FALLBACK: aggregate mean ratio';
+        detail = `Pay/Rev [${source}]: ${(value * 100).toFixed(1)}% (threshold: ${((assertion.threshold ?? 0.45) * 100).toFixed(1)}%)`;
         break;
+      }
     }
 
     return { assertion, passed, observedValue: value, detail, isInformational: informational };
