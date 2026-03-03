@@ -765,6 +765,8 @@ function runSimulation(
   // Aggregate revenue/cost breakdown across all iterations
   let aggEntryRevenue = 0, aggResetRevenue = 0, aggTotalRevenue = 0
   let aggPayoutCost = 0, aggFraudCost = 0, aggChargebackCost = 0, aggVariableCost = 0, aggFixedCost = 0, aggTotalCost = 0
+  // Per-iteration per-month Pay/Rev ratios for TRUE percentile computation
+  const allMonthlyPayRevRatios: number[] = []
 
   for (let iter = 0; iter < iterations; iter++) {
     // Runtime budget check EVERY iteration
@@ -821,6 +823,12 @@ function runSimulation(
       cohortEligibleCols[month].push(result.eligiblePool)
       cohortFirstPayoutCols[month].push(result.firstPayoutPool)
       cohortCapCompletionCols[month].push(cumCapCompletions)
+
+      // Track per-month Pay/Rev ratio for percentile computation
+      const monthRevenue = result.revenueBreakdown.total
+      if (monthRevenue > 0) {
+        allMonthlyPayRevRatios.push(result.costBreakdown.payouts / monthRevenue)
+      }
     }
 
     if (partial) break
@@ -930,6 +938,23 @@ function runSimulation(
     return { p95: sorted[pIndex(0.95)], p99: sorted[pIndex(0.99)], max: sorted[len - 1] }
   })()
 
+  // TRUE Pay/Rev percentiles from per-month distribution (not aggregated mean)
+  const payRevPercentiles = (() => {
+    const sorted = allMonthlyPayRevRatios.slice().sort((a, b) => a - b)
+    const len = sorted.length
+    if (len === 0) return { mean: 0, p50: 0, p95: 0, p99: 0, max: 0, sampleCount: 0 }
+    const pIndex = (p: number) => Math.min(Math.max(Math.ceil(p * len) - 1, 0), len - 1)
+    const sum = sorted.reduce((a, b) => a + b, 0)
+    return {
+      mean: sum / len,
+      p50: sorted[pIndex(0.50)],
+      p95: sorted[pIndex(0.95)],
+      p99: sorted[pIndex(0.99)],
+      max: sorted[len - 1],
+      sampleCount: len,
+    }
+  })()
+
   return {
     partial,
     partialReason,
@@ -966,6 +991,13 @@ function runSimulation(
       payoutToRevenueRatio: aggTotalRevenue > 0
         ? aggPayoutCost / aggTotalRevenue
         : 0,
+      // TRUE percentile Pay/Rev from per-month distribution
+      payoutToRevenueP95: payRevPercentiles.p95,
+      payoutToRevenueP99: payRevPercentiles.p99,
+      payoutToRevenueMean: payRevPercentiles.mean,
+      payoutToRevenueP50: payRevPercentiles.p50,
+      payoutToRevenueMax: payRevPercentiles.max,
+      payoutToRevenueSampleCount: payRevPercentiles.sampleCount,
       // Guardrail: structurally tied to the data series it validates (not completedIterations)
       ...(perIterMaxPayoutOutflow.length >= 500 && totalPayoutRequests > 0 && payoutOutflow.p95 === 0
         ? { payout_outflow_percentile_zero_with_payouts: true } : {}),
