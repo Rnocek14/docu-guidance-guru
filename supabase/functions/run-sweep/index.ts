@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
 
     const runIds: string[] = []
     const errors: { n: number; error: string }[] = []
-    const summaries: { n: number; run_id: string | null; profit_mean: number; profit_p5: number; p_loss: number; max_dd: number; reserve_breach: number; duration_ms: number }[] = []
+    const summaries: { n: number; run_id: string | null; profit_mean: number; profit_p5: number; p_loss: number; max_dd: number; reserve_breach: number; worst_month: number; duration_ms: number }[] = []
 
     // Sequential execution — each run-simulation invocation gets its own 15s budget
     for (const n of accountsPerMonthList) {
@@ -127,6 +127,13 @@ Deno.serve(async (req) => {
             ...overrides,
             knobs: {
               ...knobs,
+            },
+            // Atomic sweep tagging — run-simulation merges this into assumptions at insert time
+            sweep_meta: {
+              sweep_id: sweepId,
+              sweep_type,
+              sweep_preset: preset,
+              sweep_n: n,
             },
           },
         }
@@ -150,29 +157,16 @@ Deno.serve(async (req) => {
 
         const runId = data.run_id as string | null
 
-        // Tag the run with sweep metadata
         if (runId) {
-          const { data: existing } = await serviceClient
-            .from('simulation_runs')
-            .select('assumptions')
-            .eq('id', runId)
-            .single()
-
-          if (existing?.assumptions) {
-            const taggedAssumptions = {
-              ...(existing.assumptions as Record<string, unknown>),
-              sweep_id: sweepId,
-              sweep_type,
-              sweep_preset: preset,
-              sweep_n: n,
-            }
-            await serviceClient
-              .from('simulation_runs')
-              .update({ assumptions: taggedAssumptions })
-              .eq('id', runId)
-          }
-
           runIds.push(runId)
+
+          // Reserve breach: fallback chain across possible result shapes
+          const reserveBreach =
+            data.results?.reserve?.breachProbability ??
+            data.results?.risk?.reserveBreachProbability ??
+            data.results?.risk?.reserveBreach ??
+            0
+
           summaries.push({
             n,
             run_id: runId,
@@ -180,7 +174,8 @@ Deno.serve(async (req) => {
             profit_p5: data.results?.profit?.p5 ?? 0,
             p_loss: data.results?.risk?.probabilityOfLoss ?? 0,
             max_dd: data.results?.risk?.maxDrawdown ?? 0,
-            reserve_breach: data.results?.reserve?.breachProbability ?? 0,
+            reserve_breach: reserveBreach,
+            worst_month: data.results?.risk?.worstMonth ?? 0,
             duration_ms: data.duration_ms ?? 0,
           })
         }
