@@ -4,11 +4,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { CheckCircle2, XCircle, Clock, Banknote } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Banknote, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface RecentPayoutsTableProps {
   accountId: string;
+  /** If true, the most recent clean-paid row gets a "Tier Up" badge */
+  highlightTierUp?: boolean;
 }
 
 type PayoutRow = {
@@ -91,7 +93,7 @@ function statusLabel(status: string) {
   }
 }
 
-export function RecentPayoutsTable({ accountId }: RecentPayoutsTableProps) {
+export function RecentPayoutsTable({ accountId, highlightTierUp = false }: RecentPayoutsTableProps) {
   const { data: payouts, isLoading } = useQuery({
     queryKey: ['recent-payouts', accountId],
     queryFn: async () => {
@@ -125,6 +127,11 @@ export function RecentPayoutsTable({ accountId }: RecentPayoutsTableProps) {
 
   if (!payouts?.length) return null;
 
+  // Find the first clean-paid row for tier-up highlight
+  const tierUpRowId = highlightTierUp
+    ? payouts.find((p) => p.is_clean_payout === true && TERMINAL_PAID.includes(p.status))?.id
+    : null;
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -147,7 +154,15 @@ export function RecentPayoutsTable({ accountId }: RecentPayoutsTableProps) {
             {payouts.map((p) => (
               <TableRow key={p.id}>
                 <TableCell className="text-sm">
-                  {format(new Date(p.requested_at), 'MMM d, yyyy')}
+                  <span className="flex items-center gap-1.5">
+                    {format(new Date(p.requested_at), 'MMM d, yyyy')}
+                    {p.id === tierUpRowId && (
+                      <Badge variant="outline" className="gap-1 text-xs px-1.5 py-0 text-amber-600 border-amber-300 bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:bg-amber-950">
+                        <Sparkles className="h-3 w-3" />
+                        Tier Up
+                      </Badge>
+                    )}
+                  </span>
                 </TableCell>
                 <TableCell className="text-sm text-right font-medium">
                   ${p.amount.toLocaleString()}

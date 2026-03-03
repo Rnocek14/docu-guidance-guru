@@ -1,4 +1,6 @@
 import { useMemo } from 'react';
+import { useTierUpDetection } from '@/hooks/use-tier-up-detection';
+import { TierUpCelebrationModal } from '@/components/trader/TierUpCelebrationModal';
 import { Link, useSearchParams } from 'react-router-dom';
 import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -132,8 +134,22 @@ export default function TraderDashboard() {
     [cleanPayoutCount],
   );
 
+  const { tierUpEvent, dismissTierUp } = useTierUpDetection(
+    isPerformanceAccount ? cleanPayoutCount ?? undefined : undefined,
+  );
+
   return (
     <DashboardLayout title="Trader Dashboard" navItems={traderNavItems}>
+      {/* Tier-Up Celebration Modal */}
+      {tierUpEvent && (
+        <TierUpCelebrationModal
+          open
+          onClose={dismissTierUp}
+          fromTier={tierUpEvent.fromTier}
+          toTier={tierUpEvent.toTier}
+          cleanPayoutNumber={tierUpEvent.cleanPayoutNumber}
+        />
+      )}
       <div className="space-y-6">
         {/* Smart greeting */}
         <SmartGreeting accounts={accounts ?? []} />
@@ -190,7 +206,7 @@ export default function TraderDashboard() {
                       <UnlockRoadmap progress={ladderProgress} />
                       <CleanPayoutChecklist />
                     </div>
-                    <RecentPayoutsTable accountId={activeAccount.id} />
+                    <RecentPayoutsTable accountId={activeAccount.id} highlightTierUp={!!tierUpEvent} />
                   </>
                 )}
 
