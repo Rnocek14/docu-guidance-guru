@@ -35,6 +35,9 @@ export type AnalyticsEvent =
   | 'tier_upcoming_view'
   | 'tier_upcoming_click'
   | 'tier_live_flip'
+  // Ladder celebration
+  | 'tier_up_viewed'
+  | 'tier_up_cta_clicked'
   // Landing page engagement
   | 'promo_view'
   | 'promo_click'

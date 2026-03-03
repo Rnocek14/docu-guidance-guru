@@ -12,18 +12,33 @@ interface TierUpEvent {
  * Detects when the trader crosses a ladder tier threshold.
  * Uses a ref to track the previous tier index so it only fires on
  * real-time transitions, not on mount/backfill.
+ *
+ * @param cleanPayoutCount - current clean payout count (undefined = not loaded)
+ * @param scopeKey - lineage root id or account id; resets detection when it changes
  */
-export function useTierUpDetection(cleanPayoutCount: number | undefined) {
+export function useTierUpDetection(
+  cleanPayoutCount: number | undefined,
+  scopeKey: string | undefined,
+) {
   const prevTierIndexRef = useRef<number | null>(null);
+  const prevScopeRef = useRef<string | undefined>(undefined);
   const [tierUpEvent, setTierUpEvent] = useState<TierUpEvent | null>(null);
 
   useEffect(() => {
+    // Reset when scope (lineage/account) changes
+    if (scopeKey !== prevScopeRef.current) {
+      prevTierIndexRef.current = null;
+      prevScopeRef.current = scopeKey;
+      setTierUpEvent(null);
+      // Don't return — fall through to seed with current value
+    }
+
     if (cleanPayoutCount == null) return;
 
     const progress = calculateLadderProgress(cleanPayoutCount);
     const currentIdx = progress.currentTierIndex;
 
-    // First render: seed the ref, don't trigger
+    // First render or after scope reset: seed the ref, don't trigger
     if (prevTierIndexRef.current === null) {
       prevTierIndexRef.current = currentIdx;
       return;
@@ -41,7 +56,7 @@ export function useTierUpDetection(cleanPayoutCount: number | undefined) {
     }
 
     prevTierIndexRef.current = currentIdx;
-  }, [cleanPayoutCount]);
+  }, [cleanPayoutCount, scopeKey]);
 
   const dismissTierUp = useCallback(() => setTierUpEvent(null), []);
 

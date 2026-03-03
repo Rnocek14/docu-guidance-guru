@@ -134,8 +134,10 @@ export default function TraderDashboard() {
     [cleanPayoutCount],
   );
 
+  const lineageRoot = activeAccount?.root_account_id ?? activeAccount?.id;
   const { tierUpEvent, dismissTierUp } = useTierUpDetection(
     isPerformanceAccount ? cleanPayoutCount ?? undefined : undefined,
+    lineageRoot,
   );
 
   return (
