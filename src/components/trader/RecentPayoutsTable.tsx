@@ -26,7 +26,9 @@ const REASON_LABELS: Record<string, string> = {
   BREAKER_L2: 'System was in emergency freeze mode when this payout was confirmed.',
 };
 
-function CleanBadge({ isClean, reason }: { isClean: boolean | null; reason: string | null }) {
+const TERMINAL_PAID = ['paid', 'paid_confirmed'];
+
+function CleanBadge({ isClean, reason, status }: { isClean: boolean | null; reason: string | null; status: string }) {
   if (isClean === true) {
     return (
       <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-200 bg-emerald-50 dark:text-emerald-400 dark:border-emerald-800 dark:bg-emerald-950">
@@ -55,12 +57,18 @@ function CleanBadge({ isClean, reason }: { isClean: boolean | null; reason: stri
     );
   }
 
-  return (
-    <Badge variant="outline" className="gap-1 text-amber-600 border-amber-200 bg-amber-50 dark:text-amber-400 dark:border-amber-800 dark:bg-amber-950">
-      <Clock className="h-3 w-3" />
-      Pending
-    </Badge>
-  );
+  // Only show "Pending" for terminal-paid rows awaiting classification
+  if (TERMINAL_PAID.includes(status)) {
+    return (
+      <Badge variant="outline" className="gap-1 text-amber-600 border-amber-200 bg-amber-50 dark:text-amber-400 dark:border-amber-800 dark:bg-amber-950">
+        <Clock className="h-3 w-3" />
+        Pending
+      </Badge>
+    );
+  }
+
+  // Non-terminal statuses: clean column is not applicable
+  return <span className="text-xs text-muted-foreground">—</span>;
 }
 
 function statusLabel(status: string) {
@@ -146,7 +154,7 @@ export function RecentPayoutsTable({ accountId }: RecentPayoutsTableProps) {
                 </TableCell>
                 <TableCell>{statusLabel(p.status)}</TableCell>
                 <TableCell>
-                  <CleanBadge isClean={p.is_clean_payout} reason={p.clean_payout_reason} />
+                  <CleanBadge isClean={p.is_clean_payout} reason={p.clean_payout_reason} status={p.status} />
                 </TableCell>
               </TableRow>
             ))}
