@@ -31,6 +31,36 @@
 
 ---
 
+## Ramp Guard — Formation-Phase Protection
+
+### Problem
+MES is ~300 accounts/mo. At N=200 (likely launch volume), worst month is -$4.4k and P(Loss) is 52%. Not fatal with reserves, but creates psychological risk (panic → bad decisions).
+
+### Solution: Light Ramp Guard + Moderate Reserve
+- **First payout cap**: $300 for first 3 payouts per account
+- **Reserve hold**: $40k–$50k cash
+- **Auto-unlock**: Guard lifts when monthly accounts ≥ 300 OR monthly revenue ≥ $45k
+
+### Why combined
+- Reserve alone: still exposes to -$4k+ variance spikes
+- Cap alone: doesn't absorb tail events
+- Combined: cap reduces spike amplitude, reserve absorbs remainder
+
+### Auto-unlock logic (to implement in cohort config or governor)
+```
+IF monthly_new_accounts >= 300 OR monthly_revenue >= 45000:
+  SET first_payout_cap = NULL  (or raise to normal)
+  LOG "ramp guard lifted" to audit_logs
+```
+
+### What this does NOT change
+- Payout split stays at 80%
+- Pacing stays at 0.45/0.38
+- Lifetime cap unchanged
+- Only first 3 payouts per account are affected
+
+---
+
 
 # Multi-Account Trader Dashboard Redesign
 
