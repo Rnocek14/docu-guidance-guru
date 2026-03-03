@@ -536,9 +536,11 @@ function simulateMonthPerAccount(
       account.lifetimePaidTotal += traderPayout
       account.attemptPaid += traderPayout
       account.payoutCount++
-      // ~80% of payouts are "clean" (no flag, no L2) — conservative estimate
-      // for ladder progression modeling. Actual clean rate depends on flag/breaker frequency.
-      if (random() < 0.80) account.cleanPayoutCount++
+      // In the sim, all executed payouts are "clean" — deferrals already
+      // `continue` above and never reach here. L2 freeze blocks payouts
+      // entirely (not modeled as partial). This matches the production
+      // definition: clean is evaluated at paid_confirmed time.
+      account.cleanPayoutCount++
 
       // Reset velocity counters
       account.profitSinceLastPayout = 0
