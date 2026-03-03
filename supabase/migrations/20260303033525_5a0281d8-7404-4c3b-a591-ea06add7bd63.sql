@@ -1,0 +1,1 @@
+UPDATE cohorts SET profit_target_percent = 10, min_trading_days = 5 WHERE id = 'e2965581-ada0-4895-be32-4e6d984ea362';
