@@ -264,13 +264,19 @@ Deno.serve(async (req) => {
     )
   }
 
-  // Auth — log headers for debugging
-  console.log('Auth headers:', {
-    authorization: req.headers.get('authorization')?.substring(0, 30) + '...',
-    apikey: req.headers.get('apikey')?.substring(0, 30) + '...',
-    cronSecret: req.headers.get('x-cron-secret') ? 'present' : 'absent',
-  })
-  const auth = await verifyAuth(req)
+  // Parse body first (need authKey for auth, and input for processing)
+  let input: SmokeTestRequest & { authKey?: string }
+  try {
+    input = await req.json()
+  } catch {
+    return new Response(
+      JSON.stringify({ error: 'Invalid JSON body', request_id: requestId }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Auth
+  const auth = await verifyAuth(req, input.authKey)
   if (!auth.ok) {
     return new Response(
       JSON.stringify({ error: auth.reason, request_id: requestId }),
@@ -284,7 +290,6 @@ Deno.serve(async (req) => {
   )
 
   try {
-    const input: SmokeTestRequest = await req.json()
     const mode = input.mode ?? 'dry-run'
     const broker = input.broker
 
