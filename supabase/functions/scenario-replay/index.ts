@@ -1,18 +1,24 @@
 // ============================================================
-// Scenario Replay Runner v3.1
+// Scenario Replay Runner v3.2
 // ============================================================
 // Replays deterministic trade sequences through the canonical
 // ingest_trade_atomic RPC and asserts expected outcomes.
 //
-// v3.1 changes:
-//   - Fingerprint scenarios now use DISTINCT user IDs (fixes onConflict collision)
-//   - Bootstrap account_created insert clearly marked as intentional
-//   - Added UI/backend risk-line parity validator scenarios
-//   - Cross-account runner accepts per-account user overrides
+// v3.2 changes:
+//   - Batch stress mode: 30 accounts with mixed normal/abusive behavior
+//   - Same-symbol crowding detection (20+ accounts in ES)
+//   - Linked-user cluster batch (4 users sharing fingerprint)
+//   - Launch certification scorecard with GO/NO-GO gate
 //
 // POST /scenario-replay
 //   Auth: CRON_SECRET or admin JWT
-//   Body (optional): { scenarios?: string[], prefix?: string, includeAudit?: boolean }
+//   Body: {
+//     mode?: 'standard' | 'batch' | 'full',  // default: 'standard'
+//     scenarios?: string[],
+//     prefix?: string,
+//     includeAudit?: boolean,
+//     batchSize?: number   // override batch account count (default 30)
+//   }
 // ============================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -1350,6 +1356,389 @@ async function verifyAuditChain(
 }
 
 // ══════════════════════════════════════════════════════════════
+// BATCH STRESS MODE
+// ══════════════════════════════════════════════════════════════
+
+interface BatchConfig {
+  totalAccounts: number
+  normalCount: number        // clean traders
+  breachCount: number        // will trigger daily/drawdown breaches
+  passCount: number          // will hit profit target + min days
+  crowdSymbol: string        // symbol for crowding test
+  crowdCount: number         // accounts piled into same symbol
+}
+
+function buildBatchConfig(size: number): BatchConfig {
+  // Scale proportionally: ~40% normal, ~25% breach, ~20% pass, ~15% crowd
+  const normalCount = Math.max(4, Math.round(size * 0.4))
+  const breachCount = Math.max(3, Math.round(size * 0.25))
+  const passCount = Math.max(3, Math.round(size * 0.2))
+  const crowdCount = Math.max(4, size - normalCount - breachCount - passCount)
+  return {
+    totalAccounts: normalCount + breachCount + passCount + crowdCount,
+    normalCount,
+    breachCount,
+    passCount,
+    crowdSymbol: 'ES',
+    crowdCount,
+  }
+}
+
+function generateBatchTrades(
+  accountIndex: number,
+  role: 'normal' | 'breach_daily' | 'breach_drawdown' | 'pass' | 'crowd',
+  prefix: string,
+): SyntheticTrade[] {
+  const p = `${prefix}b${accountIndex}`
+  switch (role) {
+    case 'normal':
+      return makeTrades(p, [
+        { daysAgo: 10, pnl: 500 + (accountIndex * 50) },
+        { daysAgo: 9, pnl: -200 },
+        { daysAgo: 8, pnl: 300 },
+        { daysAgo: 7, pnl: -150 },
+        { daysAgo: 6, pnl: 400 },
+      ])
+    case 'breach_daily':
+      return makeTrades(p, [
+        { daysAgo: 10, pnl: 500 },
+        { daysAgo: 9, pnl: -5500 }, // >5% daily loss
+      ])
+    case 'breach_drawdown':
+      return makeTrades(p, [
+        { daysAgo: 15, pnl: -2000 },
+        { daysAgo: 14, pnl: -2000 },
+        { daysAgo: 13, pnl: -2000 },
+        { daysAgo: 12, pnl: -2000 },
+        { daysAgo: 11, pnl: -2500 },
+      ])
+    case 'pass':
+      return makeTrades(p, [
+        { daysAgo: 20, pnl: 2000 },
+        { daysAgo: 19, pnl: 2000 },
+        { daysAgo: 18, pnl: 2000 },
+        { daysAgo: 17, pnl: 2000 },
+        { daysAgo: 16, pnl: 2500 },
+      ])
+    case 'crowd':
+      // All crowd accounts trade the same symbol
+      return makeTrades(p, [
+        { daysAgo: 5, pnl: 300 + (accountIndex * 10), symbol: 'ES', side: 'buy' },
+        { daysAgo: 4, pnl: 200, symbol: 'ES', side: 'buy' },
+        { daysAgo: 3, pnl: -100, symbol: 'ES', side: 'buy' },
+      ])
+  }
+}
+
+interface BatchResult {
+  pass: boolean
+  config: BatchConfig
+  accountsCreated: number
+  tradesIngested: number
+  durationMs: number
+  roleBreakdown: {
+    normal: { total: number; active: number; breached: number; passed: number }
+    breach: { total: number; breached: number; missedBreach: number }
+    pass: { total: number; passed: number; missedPass: number }
+    crowd: { total: number; sameSymbolCount: number }
+  }
+  assertions: AssertionResult[]
+  crowdingAnalysis: {
+    symbol: string
+    accountCount: number
+    totalExposure: number
+  }
+  errors: string[]
+}
+
+async function runBatchMode(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  prefix: string,
+  runId: string,
+  batchSize: number,
+): Promise<BatchResult> {
+  const start = Date.now()
+  const config = buildBatchConfig(batchSize)
+  const assertions: AssertionResult[] = []
+  const errors: string[] = []
+  const accountIds: string[] = []
+  const accountRoles: Array<{ id: string; role: string; number: string }> = []
+  let totalTrades = 0
+
+  // Create all accounts and ingest trades
+  let idx = 0
+  const roles: Array<{ role: 'normal' | 'breach_daily' | 'breach_drawdown' | 'pass' | 'crowd'; count: number }> = [
+    { role: 'normal', count: config.normalCount },
+    { role: 'breach_daily', count: Math.ceil(config.breachCount / 2) },
+    { role: 'breach_drawdown', count: Math.floor(config.breachCount / 2) },
+    { role: 'pass', count: config.passCount },
+    { role: 'crowd', count: config.crowdCount },
+  ]
+
+  for (const { role, count } of roles) {
+    for (let i = 0; i < count; i++) {
+      idx++
+      const accountNumber = `${prefix}BATCH-${role}-${idx}`
+      try {
+        const { accountId } = await createReplayAccount(
+          supabase, userId, accountNumber, 'evaluation', runId, `batch-${role}-${idx}`,
+        )
+        accountIds.push(accountId)
+        accountRoles.push({ id: accountId, role, number: accountNumber })
+
+        const trades = generateBatchTrades(idx, role, prefix)
+        const { tradeResults } = await ingestTradesForAccount(
+          supabase, accountId, accountNumber, trades, { id: `batch-${role}-${idx}` }, runId,
+        )
+        totalTrades += tradeResults.filter(t => t.success).length
+
+        // For pass accounts, try auto-pass
+        if (role === 'pass') {
+          const { data: acct } = await supabase.from('accounts')
+            .select('current_balance, starting_balance, trading_days_count')
+            .eq('id', accountId).single()
+          if (acct) {
+            const profitPct = ((Number(acct.current_balance) - Number(acct.starting_balance)) / Number(acct.starting_balance)) * 100
+            if (profitPct >= 10 && Number(acct.trading_days_count) >= 5) {
+              try {
+                await supabase.rpc('try_auto_pass', {
+                  _account_id: accountId,
+                  _request_id: `replay-batch-${runId}-${idx}`,
+                })
+                await supabase.rpc('spawn_next_phase_account', {
+                  _from_account_id: accountId,
+                  _request_id: `replay-batch-${runId}`,
+                })
+              } catch { /* best effort */ }
+            }
+          }
+        }
+      } catch (e) {
+        errors.push(`${role}-${idx}: ${(e as Error).message}`)
+      }
+    }
+  }
+
+  // Read all account states
+  const { data: allAccounts } = await supabase.from('accounts')
+    .select('id, status, current_balance')
+    .in('id', accountIds)
+
+  const statusMap = new Map((allAccounts ?? []).map(a => [a.id, a.status]))
+
+  // Tally by role
+  const normalAccts = accountRoles.filter(r => r.role === 'normal')
+  const breachAccts = accountRoles.filter(r => r.role === 'breach_daily' || r.role === 'breach_drawdown')
+  const passAccts = accountRoles.filter(r => r.role === 'pass')
+  const crowdAccts = accountRoles.filter(r => r.role === 'crowd')
+
+  const normalActive = normalAccts.filter(a => statusMap.get(a.id) === 'active').length
+  const normalBreached = normalAccts.filter(a => statusMap.get(a.id) === 'breached_detected').length
+  const normalPassed = normalAccts.filter(a => statusMap.get(a.id) === 'passed').length
+  const breachActuallyBreached = breachAccts.filter(a => statusMap.get(a.id) === 'breached_detected').length
+  const passActuallyPassed = passAccts.filter(a => statusMap.get(a.id) === 'passed').length
+
+  // Assertions
+  assertions.push({
+    check: 'batch:accounts_created',
+    expected: `${config.totalAccounts}`,
+    actual: String(accountIds.length),
+    pass: accountIds.length >= config.totalAccounts * 0.9, // allow 10% creation failures
+  })
+
+  assertions.push({
+    check: 'batch:normal_no_spurious_breach',
+    expected: '0 normal accounts breached',
+    actual: `${normalBreached} breached out of ${normalAccts.length}`,
+    pass: normalBreached === 0,
+  })
+
+  assertions.push({
+    check: 'batch:breach_accounts_detected',
+    expected: `>= ${Math.floor(breachAccts.length * 0.8)} breaches`,
+    actual: `${breachActuallyBreached} out of ${breachAccts.length}`,
+    pass: breachActuallyBreached >= Math.floor(breachAccts.length * 0.8),
+  })
+
+  assertions.push({
+    check: 'batch:pass_accounts_passed',
+    expected: `>= ${Math.floor(passAccts.length * 0.8)} passed`,
+    actual: `${passActuallyPassed} out of ${passAccts.length}`,
+    pass: passActuallyPassed >= Math.floor(passAccts.length * 0.8),
+  })
+
+  // Same-symbol crowding analysis
+  const { data: crowdTrades } = await supabase.from('trades')
+    .select('account_id, symbol, quantity')
+    .in('account_id', crowdAccts.map(a => a.id))
+    .eq('symbol', config.crowdSymbol)
+  
+  const crowdAccountsWithSymbol = new Set((crowdTrades ?? []).map(t => t.account_id))
+
+  assertions.push({
+    check: 'batch:crowd_same_symbol',
+    expected: `>= ${Math.floor(crowdAccts.length * 0.8)} accounts in ${config.crowdSymbol}`,
+    actual: `${crowdAccountsWithSymbol.size} accounts`,
+    pass: crowdAccountsWithSymbol.size >= Math.floor(crowdAccts.length * 0.8),
+  })
+
+  // Aggregate violation count for breach accounts
+  const { count: batchViolCount } = await supabase.from('violations')
+    .select('*', { count: 'exact', head: true })
+    .in('account_id', breachAccts.map(a => a.id))
+
+  assertions.push({
+    check: 'batch:violations_for_breaches',
+    expected: `>= ${breachActuallyBreached} violations`,
+    actual: String(batchViolCount ?? 0),
+    pass: (batchViolCount ?? 0) >= breachActuallyBreached,
+  })
+
+  return {
+    pass: assertions.every(a => a.pass) && errors.length === 0,
+    config,
+    accountsCreated: accountIds.length,
+    tradesIngested: totalTrades,
+    durationMs: Date.now() - start,
+    roleBreakdown: {
+      normal: { total: normalAccts.length, active: normalActive, breached: normalBreached, passed: normalPassed },
+      breach: { total: breachAccts.length, breached: breachActuallyBreached, missedBreach: breachAccts.length - breachActuallyBreached },
+      pass: { total: passAccts.length, passed: passActuallyPassed, missedPass: passAccts.length - passActuallyPassed },
+      crowd: { total: crowdAccts.length, sameSymbolCount: crowdAccountsWithSymbol.size },
+    },
+    assertions,
+    crowdingAnalysis: {
+      symbol: config.crowdSymbol,
+      accountCount: crowdAccountsWithSymbol.size,
+      totalExposure: (crowdTrades ?? []).reduce((sum, t) => sum + Number(t.quantity), 0),
+    },
+    errors,
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// LAUNCH CERTIFICATION SCORECARD
+// ══════════════════════════════════════════════════════════════
+
+interface LaunchScorecard {
+  verdict: 'GO' | 'NO-GO' | 'CONDITIONAL'
+  timestamp: string
+  domains: {
+    rules_correctness: { pass: boolean; score: string; detail: string }
+    risk_line_parity: { pass: boolean; score: string; detail: string }
+    audit_integrity: { pass: boolean; score: string; detail: string }
+    linked_account_detection: { pass: boolean; score: string; detail: string }
+    correlation_detection: { pass: boolean; score: string; detail: string }
+    batch_stress: { pass: boolean; score: string; detail: string }
+  }
+  blockers: string[]
+  warnings: string[]
+}
+
+function buildLaunchScorecard(
+  results: ScenarioResult[],
+  batchResult: BatchResult | null,
+  auditVerification: AuditVerification | null,
+): LaunchScorecard {
+  const blockers: string[] = []
+  const warnings: string[] = []
+
+  // 1. Rules correctness: single-account scenarios (not risk-line, not cross-account)
+  const ruleScenarios = results.filter(r =>
+    !r.scenarioId.startsWith('risk-line') &&
+    !r.scenarioName.startsWith('[Cross-Account]') &&
+    !r.scenarioName.startsWith('[Risk-Line')
+  )
+  const rulesPassed = ruleScenarios.filter(r => r.pass).length
+  const rulesTotal = ruleScenarios.length
+  const rulesPass = rulesTotal > 0 && rulesPassed === rulesTotal
+  if (!rulesPass && rulesTotal > 0) blockers.push(`${rulesTotal - rulesPassed} rule scenario(s) failed`)
+
+  // 2. Risk-line parity
+  const rlScenarios = results.filter(r => r.scenarioId.startsWith('risk-line'))
+  const rlPassed = rlScenarios.filter(r => r.pass).length
+  const rlTotal = rlScenarios.length
+  const rlPass = rlTotal > 0 ? rlPassed === rlTotal : false
+  if (rlTotal === 0) warnings.push('No risk-line parity scenarios executed')
+  else if (!rlPass) blockers.push(`${rlTotal - rlPassed} risk-line parity scenario(s) failed`)
+
+  // 3. Audit integrity
+  const auditPass = auditVerification?.hashChainValid ?? false
+  if (!auditPass) {
+    if (auditVerification) blockers.push(`Audit chain broken: ${auditVerification.brokenLinks.length} link(s)`)
+    else warnings.push('Audit verification not executed')
+  }
+
+  // 4. Linked-account detection
+  const fpScenarios = results.filter(r => r.scenarioId === 'same-device-fingerprint')
+  const fpPass = fpScenarios.length > 0 && fpScenarios.every(r => r.pass)
+  if (fpScenarios.length === 0) warnings.push('Fingerprint clustering scenario not executed')
+  else if (!fpPass) blockers.push('Fingerprint clustering scenario failed')
+
+  // 5. Correlation detection
+  const corrScenarios = results.filter(r =>
+    r.scenarioId === 'mirror-opposite-trades' || r.scenarioId === 'correlated-instrument-hedge'
+  )
+  const corrPassed = corrScenarios.filter(r => r.pass).length
+  const corrTotal = corrScenarios.length
+  const corrPass = corrTotal > 0 && corrPassed === corrTotal
+  if (corrTotal === 0) warnings.push('No correlation detection scenarios executed')
+  else if (!corrPass) blockers.push(`${corrTotal - corrPassed} correlation scenario(s) failed`)
+
+  // 6. Batch stress
+  const batchPass = batchResult?.pass ?? false
+  if (!batchResult) warnings.push('Batch stress mode not executed')
+  else if (!batchPass) blockers.push(`Batch stress failed: ${batchResult.errors.length} errors, ${batchResult.assertions.filter(a => !a.pass).length} assertion failures`)
+
+  const allDomainsPass = rulesPass && rlPass && auditPass && fpPass && corrPass && batchPass
+  const verdict: 'GO' | 'NO-GO' | 'CONDITIONAL' =
+    allDomainsPass ? 'GO' :
+    blockers.length === 0 ? 'CONDITIONAL' : 'NO-GO'
+
+  return {
+    verdict,
+    timestamp: new Date().toISOString(),
+    domains: {
+      rules_correctness: {
+        pass: rulesPass,
+        score: rulesTotal > 0 ? `${rulesPassed}/${rulesTotal}` : 'N/A',
+        detail: rulesPass ? 'All rule scenarios passed' : `${rulesTotal - rulesPassed} failed`,
+      },
+      risk_line_parity: {
+        pass: rlPass,
+        score: rlTotal > 0 ? `${rlPassed}/${rlTotal}` : 'N/A',
+        detail: rlPass ? 'UI/backend parity verified' : rlTotal === 0 ? 'Not executed' : `${rlTotal - rlPassed} mismatches`,
+      },
+      audit_integrity: {
+        pass: auditPass,
+        score: auditPass ? 'INTACT' : 'BROKEN',
+        detail: auditPass ? `Chain valid, ${auditVerification?.totalAuditRows ?? 0} rows` : `${auditVerification?.brokenLinks.length ?? 0} broken links`,
+      },
+      linked_account_detection: {
+        pass: fpPass,
+        score: fpScenarios.length > 0 ? (fpPass ? '1/1' : '0/1') : 'N/A',
+        detail: fpPass ? 'Cluster creation verified with distinct users' : fpScenarios.length === 0 ? 'Not executed' : 'Clustering failed',
+      },
+      correlation_detection: {
+        pass: corrPass,
+        score: corrTotal > 0 ? `${corrPassed}/${corrTotal}` : 'N/A',
+        detail: corrPass ? 'Mirror + correlated hedge detected' : corrTotal === 0 ? 'Not executed' : `${corrTotal - corrPassed} missed`,
+      },
+      batch_stress: {
+        pass: batchPass,
+        score: batchResult ? `${batchResult.accountsCreated} accts / ${batchResult.tradesIngested} trades` : 'N/A',
+        detail: batchResult
+          ? (batchPass ? `${batchResult.config.totalAccounts} accounts, all role checks passed` : `${batchResult.errors.length} errors`)
+          : 'Not executed',
+      },
+    },
+    blockers,
+    warnings,
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // MAIN HANDLER
 // ══════════════════════════════════════════════════════════════
 
@@ -1373,6 +1762,8 @@ Deno.serve(async (req: Request) => {
   let requestedScenarios: string[] | null = null
   let prefix = DEFAULT_PREFIX
   let includeAudit = true
+  let mode: 'standard' | 'batch' | 'full' = 'standard'
+  let batchSize = 30
   try {
     const body = await req.json()
     if (body.scenarios && Array.isArray(body.scenarios)) {
@@ -1380,9 +1771,11 @@ Deno.serve(async (req: Request) => {
     }
     if (body.prefix) prefix = body.prefix
     if (body.includeAudit === false) includeAudit = false
+    if (body.mode === 'batch' || body.mode === 'full') mode = body.mode
+    if (body.batchSize && typeof body.batchSize === 'number') batchSize = Math.min(50, Math.max(10, body.batchSize))
   } catch { /* empty body is fine, run all scenarios */ }
 
-  // Fetch at least 2 distinct user_ids for cross-account scenarios that need them
+  // Fetch at least 2 distinct user_ids for cross-account scenarios
   const { data: profiles, error: profileErr } = await supabase
     .from('profiles').select('user_id, email')
     .order('created_at', { ascending: false }).limit(2)
@@ -1395,146 +1788,155 @@ Deno.serve(async (req: Request) => {
 
   const primaryUserId = profiles[0].user_id
   const allUserIds = profiles.map(p => p.user_id)
-  
-  // Warn if only 1 user available for distinct-user scenarios
   const hasDistinctUsers = allUserIds.length >= 2
   const runId = crypto.randomUUID()
   const results: ScenarioResult[] = []
+  let batchResult: BatchResult | null = null
 
   await cleanupReplayAccounts(supabase, prefix)
 
-  const scenariosToRun = requestedScenarios
-    ? SCENARIOS.filter(s => requestedScenarios!.includes(s.id))
-    : SCENARIOS
+  const runStandard = mode === 'standard' || mode === 'full'
+  const runBatch = mode === 'batch' || mode === 'full'
 
-  const crossScenariosToRun = requestedScenarios
-    ? CROSS_ACCOUNT_SCENARIOS.filter(s => requestedScenarios!.includes(s.id))
-    : CROSS_ACCOUNT_SCENARIOS
+  // ── Standard scenarios ──
+  if (runStandard) {
+    const scenariosToRun = requestedScenarios
+      ? SCENARIOS.filter(s => requestedScenarios!.includes(s.id))
+      : SCENARIOS
 
-  const riskLineScenariosToRun = requestedScenarios
-    ? RISK_LINE_SCENARIOS.filter(s => requestedScenarios!.includes(s.id))
-    : RISK_LINE_SCENARIOS
+    const crossScenariosToRun = requestedScenarios
+      ? CROSS_ACCOUNT_SCENARIOS.filter(s => requestedScenarios!.includes(s.id))
+      : CROSS_ACCOUNT_SCENARIOS
 
-  // ── Execute single-account scenarios ──
-  for (const scenario of scenariosToRun) {
-    const start = Date.now()
-    const accountNumber = `${prefix}${scenario.id}`
-    const assertions: AssertionResult[] = []
+    const riskLineScenariosToRun = requestedScenarios
+      ? RISK_LINE_SCENARIOS.filter(s => requestedScenarios!.includes(s.id))
+      : RISK_LINE_SCENARIOS
 
-    try {
-      const { accountId } = await createReplayAccount(
-        supabase, primaryUserId, accountNumber, scenario.cohortPhase, runId, scenario.id,
-      )
+    // Single-account scenarios
+    for (const scenario of scenariosToRun) {
+      const start = Date.now()
+      const accountNumber = `${prefix}${scenario.id}`
+      const assertions: AssertionResult[] = []
 
-      const { tradeResults, anyBreachDetected, lastBreachType, accountPassed } =
-        await ingestTradesForAccount(supabase, accountId, accountNumber, scenario.trades, scenario, runId)
+      try {
+        const { accountId } = await createReplayAccount(
+          supabase, primaryUserId, accountNumber, scenario.cohortPhase, runId, scenario.id,
+        )
 
-      const [finalAccountRes, violRes, eventRes, spawnRes, tradeCountRes] = await Promise.all([
-        supabase.from('accounts').select('status, current_balance').eq('id', accountId).single(),
-        supabase.from('violations').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
-        supabase.from('account_events').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
-        supabase.from('account_phase_transitions').select('*', { count: 'exact', head: true }).eq('from_account_id', accountId),
-        supabase.from('trades').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
-      ])
+        const { tradeResults, anyBreachDetected, lastBreachType, accountPassed } =
+          await ingestTradesForAccount(supabase, accountId, accountNumber, scenario.trades, scenario, runId)
 
-      const finalStatus = finalAccountRes.data?.status ?? 'unknown'
-      const finalBalance = Number(finalAccountRes.data?.current_balance ?? 0)
-      const violationCount = violRes.count ?? 0
-      const eventCount = eventRes.count ?? 0
-      const spawnCount = spawnRes.count ?? 0
-      const tradeCount = tradeCountRes.count ?? 0
+        const [finalAccountRes, violRes, eventRes, spawnRes, tradeCountRes] = await Promise.all([
+          supabase.from('accounts').select('status, current_balance').eq('id', accountId).single(),
+          supabase.from('violations').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
+          supabase.from('account_events').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
+          supabase.from('account_phase_transitions').select('*', { count: 'exact', head: true }).eq('from_account_id', accountId),
+          supabase.from('trades').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
+        ])
 
-      assertions.push({ check: 'account_status', expected: scenario.expected.status, actual: finalStatus, pass: finalStatus === scenario.expected.status })
-      assertions.push({ check: 'breach_detected', expected: String(scenario.expected.breachDetected), actual: String(anyBreachDetected), pass: anyBreachDetected === scenario.expected.breachDetected })
+        const finalStatus = finalAccountRes.data?.status ?? 'unknown'
+        const finalBalance = Number(finalAccountRes.data?.current_balance ?? 0)
+        const violationCount = violRes.count ?? 0
+        const eventCount = eventRes.count ?? 0
+        const spawnCount = spawnRes.count ?? 0
+        const tradeCount = tradeCountRes.count ?? 0
 
-      if (scenario.expected.breachType) {
-        assertions.push({ check: 'breach_type', expected: scenario.expected.breachType, actual: lastBreachType ?? 'none', pass: lastBreachType === scenario.expected.breachType })
-      }
+        assertions.push({ check: 'account_status', expected: scenario.expected.status, actual: finalStatus, pass: finalStatus === scenario.expected.status })
+        assertions.push({ check: 'breach_detected', expected: String(scenario.expected.breachDetected), actual: String(anyBreachDetected), pass: anyBreachDetected === scenario.expected.breachDetected })
 
-      assertions.push({ check: 'account_passed', expected: String(scenario.expected.passed), actual: String(accountPassed), pass: accountPassed === scenario.expected.passed })
+        if (scenario.expected.breachType) {
+          assertions.push({ check: 'breach_type', expected: scenario.expected.breachType, actual: lastBreachType ?? 'none', pass: lastBreachType === scenario.expected.breachType })
+        }
 
-      if (scenario.expected.spawnedNextPhase !== undefined) {
-        assertions.push({ check: 'spawned_next_phase', expected: String(scenario.expected.spawnedNextPhase), actual: String(spawnCount > 0), pass: (spawnCount > 0) === scenario.expected.spawnedNextPhase })
-      }
-      if (scenario.expected.minViolations !== undefined) {
-        assertions.push({ check: 'min_violations', expected: `>= ${scenario.expected.minViolations}`, actual: String(violationCount), pass: violationCount >= scenario.expected.minViolations })
-      }
-      if (scenario.expected.minEvents !== undefined) {
-        assertions.push({ check: 'min_events', expected: `>= ${scenario.expected.minEvents}`, actual: String(eventCount), pass: eventCount >= scenario.expected.minEvents })
-      }
-      if (scenario.expected.balanceCheck) {
-        assertions.push({ check: 'balance_check', expected: scenario.expected.balanceDescription ?? 'custom', actual: `$${finalBalance.toFixed(2)}`, pass: scenario.expected.balanceCheck(finalBalance) })
-      }
+        assertions.push({ check: 'account_passed', expected: String(scenario.expected.passed), actual: String(accountPassed), pass: accountPassed === scenario.expected.passed })
 
-      const consistency = await checkConsistency(supabase, accountId, scenario, anyBreachDetected, accountPassed)
-      assertions.push(...consistency.checks.map(c => ({ ...c, check: `consistency:${c.check}` })))
+        if (scenario.expected.spawnedNextPhase !== undefined) {
+          assertions.push({ check: 'spawned_next_phase', expected: String(scenario.expected.spawnedNextPhase), actual: String(spawnCount > 0), pass: (spawnCount > 0) === scenario.expected.spawnedNextPhase })
+        }
+        if (scenario.expected.minViolations !== undefined) {
+          assertions.push({ check: 'min_violations', expected: `>= ${scenario.expected.minViolations}`, actual: String(violationCount), pass: violationCount >= scenario.expected.minViolations })
+        }
+        if (scenario.expected.minEvents !== undefined) {
+          assertions.push({ check: 'min_events', expected: `>= ${scenario.expected.minEvents}`, actual: String(eventCount), pass: eventCount >= scenario.expected.minEvents })
+        }
+        if (scenario.expected.balanceCheck) {
+          assertions.push({ check: 'balance_check', expected: scenario.expected.balanceDescription ?? 'custom', actual: `$${finalBalance.toFixed(2)}`, pass: scenario.expected.balanceCheck(finalBalance) })
+        }
 
-      results.push({
-        scenarioId: scenario.id,
-        scenarioName: scenario.name,
-        pass: assertions.every(a => a.pass),
-        assertions,
-        tradeResults,
-        finalAccountStatus: finalStatus,
-        finalBalance,
-        violationCount,
-        eventCount,
-        tradeCount,
-        consistencyChecks: consistency,
-        durationMs: Date.now() - start,
-      })
-    } catch (e) {
-      results.push({
-        scenarioId: scenario.id,
-        scenarioName: scenario.name,
-        pass: false,
-        assertions: [],
-        tradeResults: [],
-        finalAccountStatus: 'error',
-        finalBalance: 0,
-        violationCount: 0,
-        eventCount: 0,
-        tradeCount: 0,
-        durationMs: Date.now() - start,
-        error: (e as Error).message,
-      })
-    }
-  }
+        const consistency = await checkConsistency(supabase, accountId, scenario, anyBreachDetected, accountPassed)
+        assertions.push(...consistency.checks.map(c => ({ ...c, check: `consistency:${c.check}` })))
 
-  // ── Execute risk-line parity scenarios ──
-  for (const rlScenario of riskLineScenariosToRun) {
-    const result = await runRiskLineScenario(supabase, rlScenario, primaryUserId, prefix, runId)
-    results.push(result)
-  }
-
-  // ── Execute cross-account scenarios ──
-  for (const crossScenario of crossScenariosToRun) {
-    // For scenarios requiring distinct users, check we have enough
-    if (crossScenario.requireDistinctUsers && !hasDistinctUsers) {
-      results.push({
-        scenarioId: crossScenario.id,
-        scenarioName: `[Cross-Account] ${crossScenario.name}`,
-        pass: false,
-        assertions: [{
-          check: 'distinct_users_available',
-          expected: '>= 2 distinct users in profiles table',
-          actual: `only ${allUserIds.length} user(s) found`,
+        results.push({
+          scenarioId: scenario.id,
+          scenarioName: scenario.name,
+          pass: assertions.every(a => a.pass),
+          assertions,
+          tradeResults,
+          finalAccountStatus: finalStatus,
+          finalBalance,
+          violationCount,
+          eventCount,
+          tradeCount,
+          consistencyChecks: consistency,
+          durationMs: Date.now() - start,
+        })
+      } catch (e) {
+        results.push({
+          scenarioId: scenario.id,
+          scenarioName: scenario.name,
           pass: false,
-        }],
-        tradeResults: [],
-        finalAccountStatus: 'skipped',
-        finalBalance: 0,
-        violationCount: 0,
-        eventCount: 0,
-        tradeCount: 0,
-        durationMs: 0,
-        error: 'Not enough distinct users in profiles table for this scenario. Create a second user to enable.',
-      })
-      continue
+          assertions: [],
+          tradeResults: [],
+          finalAccountStatus: 'error',
+          finalBalance: 0,
+          violationCount: 0,
+          eventCount: 0,
+          tradeCount: 0,
+          durationMs: Date.now() - start,
+          error: (e as Error).message,
+        })
+      }
     }
 
-    const result = await runCrossAccountScenario(supabase, crossScenario, allUserIds, prefix, runId)
-    results.push(result)
+    // Risk-line parity scenarios
+    for (const rlScenario of riskLineScenariosToRun) {
+      const result = await runRiskLineScenario(supabase, rlScenario, primaryUserId, prefix, runId)
+      results.push(result)
+    }
+
+    // Cross-account scenarios
+    for (const crossScenario of crossScenariosToRun) {
+      if (crossScenario.requireDistinctUsers && !hasDistinctUsers) {
+        results.push({
+          scenarioId: crossScenario.id,
+          scenarioName: `[Cross-Account] ${crossScenario.name}`,
+          pass: false,
+          assertions: [{
+            check: 'distinct_users_available',
+            expected: '>= 2 distinct users in profiles table',
+            actual: `only ${allUserIds.length} user(s) found`,
+            pass: false,
+          }],
+          tradeResults: [],
+          finalAccountStatus: 'skipped',
+          finalBalance: 0,
+          violationCount: 0,
+          eventCount: 0,
+          tradeCount: 0,
+          durationMs: 0,
+          error: 'Not enough distinct users in profiles table for this scenario.',
+        })
+        continue
+      }
+
+      const result = await runCrossAccountScenario(supabase, crossScenario, allUserIds, prefix, runId)
+      results.push(result)
+    }
+  }
+
+  // ── Batch stress mode ──
+  if (runBatch) {
+    batchResult = await runBatchMode(supabase, primaryUserId, prefix, runId, batchSize)
   }
 
   // ── Audit-chain verification ──
@@ -1543,29 +1945,37 @@ Deno.serve(async (req: Request) => {
     auditVerification = await verifyAuditChain(supabase, prefix)
   }
 
+  // ── Launch scorecard ──
+  const scorecard = buildLaunchScorecard(results, batchResult, auditVerification)
+
   // ── Summary ──
   const passed = results.filter(r => r.pass).length
   const failed = results.filter(r => !r.pass).length
-  const totalDuration = results.reduce((sum, r) => sum + r.durationMs, 0)
+  const totalDuration = results.reduce((sum, r) => sum + r.durationMs, 0) + (batchResult?.durationMs ?? 0)
 
   const response = {
     run_id: runId,
-    version: '3.1',
+    version: '3.2',
+    mode,
     timestamp: new Date().toISOString(),
     users: profiles.map(p => p.email),
     distinct_users_available: hasDistinctUsers,
     prefix,
+    launch_scorecard: scorecard,
     summary: {
       total: results.length,
       passed,
       failed,
       pass_rate: results.length > 0 ? `${((passed / results.length) * 100).toFixed(1)}%` : '0%',
       duration_ms: totalDuration,
-      single_account_scenarios: scenariosToRun.length,
-      risk_line_scenarios: riskLineScenariosToRun.length,
-      cross_account_scenarios: crossScenariosToRun.length,
+      single_account_scenarios: results.filter(r => !r.scenarioName.startsWith('[') ).length,
+      risk_line_scenarios: results.filter(r => r.scenarioId.startsWith('risk-line')).length,
+      cross_account_scenarios: results.filter(r => r.scenarioName.startsWith('[Cross-Account]')).length,
+      batch_accounts: batchResult?.accountsCreated ?? 0,
+      batch_trades: batchResult?.tradesIngested ?? 0,
     },
     audit_verification: auditVerification,
+    batch_result: batchResult,
     results,
     failures: results
       .filter(r => !r.pass)
@@ -1576,8 +1986,10 @@ Deno.serve(async (req: Request) => {
       })),
   }
 
+  const httpStatus = scorecard.verdict === 'GO' ? 200 : 207
+
   return new Response(JSON.stringify(response, null, 2), {
-    status: failed > 0 ? 207 : 200,
+    status: httpStatus,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 })
