@@ -500,7 +500,7 @@ Deno.serve(async (req) => {
       db_snapshot_json: {},
       overall_pass: runRecord.all_parsed && runRecord.all_expectations_met,
       overall_verdict: runRecord.all_parsed && runRecord.all_expectations_met ? 'PASS' : 'FAIL',
-    }).catch(() => {})
+    })
 
     // Build summary
     const summary = {
