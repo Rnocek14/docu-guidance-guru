@@ -592,6 +592,6 @@ Deno.serve(async (req) => {
     return json(200, result)
   } catch (err) {
     console.error('system-governor error:', err)
-    return json(500, { error: (err as Error).message })
+    return json(500, { error: 'Internal server error' })
   }
 })

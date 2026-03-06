@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     const error = err as Error
     console.error('Stripe webhook handler error:', error)
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     })

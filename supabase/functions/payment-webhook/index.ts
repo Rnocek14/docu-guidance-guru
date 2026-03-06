@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
     const error = err as Error
     console.error('payment-webhook error:', error)
     await emitErrorNotification(supabase, 'unknown', null, rawBody, `Unhandled error: ${error.message}`)
-    return new Response(JSON.stringify({ received: true, error: error.message }), {
+    return new Response(JSON.stringify({ received: true, error: 'Internal server error' }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     })

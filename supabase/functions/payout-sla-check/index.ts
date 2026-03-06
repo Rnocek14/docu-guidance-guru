@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
 
     if (error) {
       console.error('Failed to query overdue payouts:', error.message)
-      return new Response(JSON.stringify({ error: error.message }), {
+      return new Response(JSON.stringify({ error: 'Internal server error' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       })
@@ -184,7 +184,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     const error = err as Error
     console.error('payout-sla-check error:', error)
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     })

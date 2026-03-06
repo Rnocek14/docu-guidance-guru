@@ -294,7 +294,7 @@ Deno.serve(async (req) => {
         console.error('confirm_payout_payment RPC error:', error)
         // Return 500 so Wise retries
         return new Response(
-          JSON.stringify({ error: 'Internal error processing confirmation', details: error.message }),
+          JSON.stringify({ error: 'Internal error processing confirmation' }),
           { status: 500, headers: { 'Content-Type': 'application/json' } }
         )
       }
@@ -354,7 +354,7 @@ Deno.serve(async (req) => {
       if (error) {
         console.error('fail_payout_payment RPC error:', error)
         return new Response(
-          JSON.stringify({ error: 'Internal error processing failure', details: error.message }),
+          JSON.stringify({ error: 'Internal error processing failure' }),
           { status: 500, headers: { 'Content-Type': 'application/json' } }
         )
       }
@@ -395,7 +395,7 @@ Deno.serve(async (req) => {
     console.error('Webhook handler error:', error)
     // Return 500 so Wise retries (could be transient)
     return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error' }),
+      JSON.stringify({ error: 'Internal server error' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }
