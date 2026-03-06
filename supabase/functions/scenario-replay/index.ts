@@ -1,17 +1,16 @@
 // ============================================================
-// Scenario Replay Runner v3.3
+// Scenario Replay Runner v3.4
 // ============================================================
 // Replays deterministic trade sequences through the canonical
 // ingest_trade_atomic RPC and asserts expected outcomes.
 //
-// v3.3 changes:
-//   - Batch control assertions: flags, fraud_reviews, exposure alerts
-//     for crowd/breach accounts (not just visibility)
-//   - Cluster-level correlation: fingerprint cluster + mirrored
-//     trades across distinct users
-//   - Latency metrics: per-scenario timing in scorecard
-//   - Severity-graded scorecard: 'required_for_launch' vs
-//     'recommended_before_scale' blocker levels
+// v3.4 changes:
+//   - Production-owned control generation: fraud_reviews and flags
+//     are now created by the production evaluate_cluster_risk RPC
+//     and trg_fingerprint_cluster_risk trigger, NOT by the harness.
+//     Harness only asserts their existence.
+//   - Removed all manual fraud_review/flag inserts from harness
+//   - Cleanup updated to handle cluster_risk_evaluation review_type
 //
 // POST /scenario-replay
 //   Auth: CRON_SECRET or admin JWT
