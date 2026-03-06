@@ -272,7 +272,12 @@ Deno.serve(async (req) => {
     )
   }
 
-  // Auth
+  // Auth — log headers for debugging
+  console.log('Auth headers:', {
+    authorization: req.headers.get('authorization')?.substring(0, 30) + '...',
+    apikey: req.headers.get('apikey')?.substring(0, 30) + '...',
+    cronSecret: req.headers.get('x-cron-secret') ? 'present' : 'absent',
+  })
   const auth = await verifyAuth(req)
   if (!auth.ok) {
     return new Response(
