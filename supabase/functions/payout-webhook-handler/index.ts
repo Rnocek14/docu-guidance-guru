@@ -354,7 +354,7 @@ Deno.serve(async (req) => {
       if (error) {
         console.error('fail_payout_payment RPC error:', error)
         return new Response(
-          JSON.stringify({ error: 'Internal error processing failure', details: error.message }),
+          JSON.stringify({ error: 'Internal error processing failure' }),
           { status: 500, headers: { 'Content-Type': 'application/json' } }
         )
       }
