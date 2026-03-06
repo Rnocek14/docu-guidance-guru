@@ -46,12 +46,11 @@ async function verifyAuth(req: Request, bodyAuthKey?: string): Promise<{ ok: boo
   // Helper to check a candidate against CRON_SECRET (env or DB fallback)
   async function matchesCronSecret(candidate: string): Promise<boolean> {
     const envSecret = Deno.env.get('CRON_SECRET')
-    console.log('CRON_SECRET env length:', envSecret?.length, 'candidate length:', candidate.length, 'match:', envSecret === candidate)
-    if (envSecret) return candidate === envSecret
+    if (envSecret && candidate === envSecret) return true
+    // Always check DB as fallback (env and DB may diverge)
     try {
       const sb = createClient(Deno.env.get('SUPABASE_URL')!, serviceRoleKey!)
       const { data } = await sb.from('internal_secrets').select('value').eq('key', 'CRON_SECRET').single()
-      console.log('DB CRON_SECRET length:', data?.value?.length, 'match:', data?.value === candidate)
       return !!(data?.value && candidate === data.value)
     } catch { return false }
   }
