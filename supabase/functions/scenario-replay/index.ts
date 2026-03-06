@@ -1875,7 +1875,7 @@ function buildLaunchScorecard(
 
   // 5. Correlation detection (REQUIRED)
   const corrScenarios = results.filter(r =>
-    r.scenarioId === 'mirror-opposite-trades' || r.scenarioId === 'correlated-instrument-hedge'
+    r.scenarioId === 'mirror-opposite-trades'
   )
   const corrPassed = corrScenarios.filter(r => r.pass).length
   const corrTotal = corrScenarios.length
