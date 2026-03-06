@@ -88,34 +88,27 @@ Deno.serve(async (req) => {
 
     let clusterId: string | null = null
 
-    // If fingerprint matches other users, link to same cluster
+    // If fingerprint matches other users, link to same cluster.
+    // NOTE: This function only handles CLUSTER MEMBERSHIP (linking fingerprints
+    // to clusters). Risk scoring is owned by the evaluate_cluster_risk RPC/trigger
+    // which is the canonical owner of identity_clusters.risk_score.
+    // DO NOT update risk_score or is_flagged here — that creates a dual-writer bug.
     if (existingFingerprints && existingFingerprints.length > 0) {
       const existingClusterId = existingFingerprints[0].cluster_id
 
       if (existingClusterId) {
         clusterId = existingClusterId
-
-        // Update cluster risk score
-        await supabaseAdmin
-          .from('identity_clusters')
-          .update({ 
-            risk_score: existingFingerprints.length + 1,
-            is_flagged: existingFingerprints.length >= 2,
-            flag_reason: existingFingerprints.length >= 2 
-              ? `Device fingerprint shared across ${existingFingerprints.length + 1} users`
-              : null,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', existingClusterId)
+        // Do NOT update risk_score here — evaluate_cluster_risk is canonical owner
       } else {
-        // Create new cluster for linked accounts
+        // Create new cluster for linked accounts (with default risk_score=0)
+        // The evaluate_cluster_risk RPC will score it on next evaluation cycle
         const { data: newCluster } = await supabaseAdmin
           .from('identity_clusters')
           .insert({
             cluster_name: `Auto-detected cluster ${new Date().toISOString().slice(0, 10)}`,
-            risk_score: existingFingerprints.length + 1,
-            is_flagged: true,
-            flag_reason: `Device fingerprint shared across ${existingFingerprints.length + 1} users`
+            risk_score: 0,
+            is_flagged: false,
+            flag_reason: null,
           })
           .select('id')
           .single()
