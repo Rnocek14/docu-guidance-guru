@@ -1,18 +1,24 @@
 // ============================================================
-// Scenario Replay Runner v3.1
+// Scenario Replay Runner v3.2
 // ============================================================
 // Replays deterministic trade sequences through the canonical
 // ingest_trade_atomic RPC and asserts expected outcomes.
 //
-// v3.1 changes:
-//   - Fingerprint scenarios now use DISTINCT user IDs (fixes onConflict collision)
-//   - Bootstrap account_created insert clearly marked as intentional
-//   - Added UI/backend risk-line parity validator scenarios
-//   - Cross-account runner accepts per-account user overrides
+// v3.2 changes:
+//   - Batch stress mode: 30 accounts with mixed normal/abusive behavior
+//   - Same-symbol crowding detection (20+ accounts in ES)
+//   - Linked-user cluster batch (4 users sharing fingerprint)
+//   - Launch certification scorecard with GO/NO-GO gate
 //
 // POST /scenario-replay
 //   Auth: CRON_SECRET or admin JWT
-//   Body (optional): { scenarios?: string[], prefix?: string, includeAudit?: boolean }
+//   Body: {
+//     mode?: 'standard' | 'batch' | 'full',  // default: 'standard'
+//     scenarios?: string[],
+//     prefix?: string,
+//     includeAudit?: boolean,
+//     batchSize?: number   // override batch account count (default 30)
+//   }
 // ============================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
