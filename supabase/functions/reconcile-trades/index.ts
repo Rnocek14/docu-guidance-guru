@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { crypto } from 'https://deno.land/std@0.177.0/crypto/mod.ts'
+import { normalizeSymbol } from '../_shared/brokers/normalize-symbol.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -64,94 +65,7 @@ interface ReconcileResult {
 }
 
 // ============ SYMBOL NORMALIZATION ============
-// Futures month codes: F=Jan, G=Feb, H=Mar, J=Apr, K=May, M=Jun, N=Jul, Q=Aug, U=Sep, V=Oct, X=Nov, Z=Dec
-const MONTH_CODES = 'FGHJKMNQUVXZ'
-
-// Known base symbols for direct matching (covers edge cases like numeric-leading symbols)
-const KNOWN_BASE_SYMBOLS = new Set([
-  // E-mini and Micro indices
-  'ES', 'NQ', 'YM', 'RTY', 'MES', 'MNQ', 'MYM', 'M2K',
-  // Energy
-  'CL', 'NG', 'HO', 'RB', 'MCL',
-  // Metals
-  'GC', 'SI', 'HG', 'PL', 'MGC',
-  // Currencies (numeric-leading)
-  '6E', '6B', '6J', '6A', '6C', '6S', '6N', '6M',
-  // Bonds
-  'ZB', 'ZN', 'ZT', 'ZF', 'UB',
-  // Agricultural
-  'ZC', 'ZS', 'ZW', 'ZM', 'ZL', 'LE', 'HE', 'GF',
-])
-
-/**
- * Normalize a trading symbol for comparison (mismatch detection only, not trade identity).
- * Uses regex to extract base symbol from futures contract format: BASE + MONTH_CODE + YEAR
- * Examples: NQZ5 -> NQ, ESM24 -> ES, 6EH6 -> 6E, MNQU5 -> MNQ
- * 
- * Handles vendor-specific formats:
- * - Exchange suffixes: NQZ5-CME -> NQ, ESM24-CBOT -> ES
- * - Trailing punctuation: MNQU5! -> MNQ, CLZ5. -> CL
- * - Prefix exchanges: CME:NQZ5 -> NQ
- * 
- * IMPORTANT: Only strips contract suffix if base is a KNOWN futures symbol.
- * This prevents accidentally normalizing equities like AAPL -> AAP.
- * 
- * INTENTIONAL TRADEOFFS (futures-first system):
- * - BRK.B -> BRK (dot separator splits off .B suffix)
- * - META.Z5 -> META (dot separator takes first token)
- * These are acceptable because this normalization is used for mismatch reporting only,
- * not for trade identity. Trade matching uses platform_trade_id as the primary key.
- */
-function normalizeSymbol(symbol: string): string {
-  if (!symbol) return ''
-
-  const upper = symbol.trim().toUpperCase()
-
-  // Step 1: Handle prefix exchange codes (CME:NQZ5 -> NQZ5)
-  const prefixSplit = upper.split(':')
-  const preToken = prefixSplit.length > 1 ? prefixSplit[prefixSplit.length - 1] : upper
-
-  // Step 2: Remove obvious trailing punctuation like "!" "." (but keep separators for splitting)
-  const trimmed = preToken.replace(/[!]+$/g, '').replace(/[.]+$/g, '')
-
-  // Step 3: Split on vendor separators and take the first token (contract code)
-  // Examples:
-  //  - "NQZ5-CME" -> "NQZ5"
-  //  - "ES.M24"   -> "ES" (first token)
-  //  - "CL_Z5"    -> "CL" (first token)
-  //  - "CME:NQZ5-CME" -> handled by prefixSplit, but include : for robustness
-  const token = trimmed.split(/[-._:]/)[0]
-
-  // Step 4: Remove any remaining non-alphanumerics inside token (rare edge cases)
-  const cleaned = token.replace(/[^A-Z0-9]/g, '')
-
-  // Step 5: Futures contract extraction (only strip if base is known)
-  // Regex: capture base symbol, then month code + optional year digits
-  // Pattern: ^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,4})?$
-  const futuresMatch = cleaned.match(/^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,4})?$/)
-  
-  if (futuresMatch) {
-    const [, base, monthCode] = futuresMatch
-    // Only strip if:
-    // 1. The month code is valid, AND
-    // 2. The base is a KNOWN futures symbol
-    if (MONTH_CODES.includes(monthCode) && KNOWN_BASE_SYMBOLS.has(base)) {
-      return base
-    }
-    // If base isn't known, do NOT strip - could be an equity or unknown instrument
-    // Return cleaned version unchanged
-  }
-
-  // Step 6: Fallback - check if stripping trailing digits yields a known base
-  // (handles formats like ES24 without month code)
-  const strippedDigits = cleaned.replace(/\d+$/, '')
-  if (KNOWN_BASE_SYMBOLS.has(strippedDigits)) {
-    return strippedDigits
-  }
-
-  // Return cleaned but otherwise unchanged (preserves equities like AAPL)
-  return cleaned
-}
+// normalizeSymbol is now imported from _shared/brokers/normalize-symbol.ts
 
 // Deep stable stringify for deterministic hashing
 function stableSort(value: unknown): unknown {
