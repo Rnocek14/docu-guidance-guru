@@ -40,15 +40,7 @@ const PAYOUT_TRANSITIONS: Record<PayoutAction, { from: string[]; to: string }> =
 // Tolerance for amount verification (cents)
 const AMOUNT_TOLERANCE = 0.01
 
-// Helper: Generate deterministic idempotency key via SHA-256
-async function generateDeterministicKey(input: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(input)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-  return hashHex.slice(0, 48) // First 48 chars for reasonable length
-}
+import { generateDeterministicKey } from '../_shared/crypto.ts'
 
 // FIX C: All audit inserts now use idempotency_key for deduplication
 // deno-lint-ignore no-explicit-any

@@ -1,4 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { constantTimeEqual } from '../_shared/crypto.ts'
+import { TIER_COHORT_MAP } from '../_shared/checkout/tier-economics.ts'
 
 /**
  * Retry Fulfillment Queue — Cron-triggered Edge Function
@@ -16,36 +18,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const BATCH_LIMIT = 10
 
-// Tier → Cohort mapping (must match checkout-handler.ts)
-const TIER_COHORT_MAP: Record<string, {
-  accountSize: number
-  cohortName: string
-}> = {
-  starter: { accountSize: 50_000, cohortName: 'Starter' },
-  pro: { accountSize: 100_000, cohortName: 'Pro' },
-  elite: { accountSize: 200_000, cohortName: 'Elite' },
-}
-
 function generateAccountNumber(): string {
   const date = new Date()
   const ymd = date.toISOString().slice(0, 10).replace(/-/g, '')
   const rand = Math.random().toString(36).substring(2, 7).toUpperCase()
   return `EVAL-${ymd}-${rand}`
-}
-
-/**
- * Constant-time secret comparison via SHA-256 digest.
- */
-async function constantTimeEqual(a: string, b: string): Promise<boolean> {
-  const enc = new TextEncoder()
-  const [ah, bh] = await Promise.all([
-    crypto.subtle.digest('SHA-256', enc.encode(a)).then(buf => new Uint8Array(buf)),
-    crypto.subtle.digest('SHA-256', enc.encode(b)).then(buf => new Uint8Array(buf)),
-  ])
-  if (ah.length !== bh.length) return false
-  let diff = 0
-  for (let i = 0; i < ah.length; i++) diff |= ah[i] ^ bh[i]
-  return diff === 0
 }
 
 Deno.serve(async (req) => {

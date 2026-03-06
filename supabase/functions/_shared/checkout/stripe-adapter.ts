@@ -9,22 +9,10 @@ import type {
   CreateCheckoutResult,
   CheckoutWebhookEvent,
 } from './types.ts'
+import { TIER_STRIPE } from './tier-economics.ts'
 
-// Stripe-specific price/product IDs (created in Stripe Dashboard)
-const STRIPE_PRICE_MAP: Record<string, { priceId: string; productId: string }> = {
-  starter: {
-    priceId: 'price_1SxvRoLH4HmFKO8KSW3FUPzA',
-    productId: 'prod_Tvn1elGTRKWmdC',
-  },
-  pro: {
-    priceId: 'price_1SxvRpLH4HmFKO8KfvQtaGTV',
-    productId: 'prod_Tvn1sJVvjM0QoF',
-  },
-  elite: {
-    priceId: 'price_1SxvRqLH4HmFKO8KwCfeCx1C',
-    productId: 'prod_Tvn1vcoJGH3uwR',
-  },
-}
+// Derive from canonical source — no local duplication
+const STRIPE_PRICE_MAP = TIER_STRIPE
 
 export class StripeCheckoutAdapter implements CheckoutProviderAdapter {
   readonly providerId = 'stripe'

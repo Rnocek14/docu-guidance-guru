@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { constantTimeEqual } from '../_shared/crypto.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,22 +24,6 @@ interface Alarm {
   message: string
   value?: number
   threshold?: number
-}
-
-/**
- * Constant-time secret comparison via SHA-256 digest.
- * Prevents timing side-channels on the cron secret.
- */
-async function constantTimeEqual(a: string, b: string): Promise<boolean> {
-  const enc = new TextEncoder()
-  const [ah, bh] = await Promise.all([
-    crypto.subtle.digest('SHA-256', enc.encode(a)).then(buf => new Uint8Array(buf)),
-    crypto.subtle.digest('SHA-256', enc.encode(b)).then(buf => new Uint8Array(buf)),
-  ])
-  if (ah.length !== bh.length) return false
-  let diff = 0
-  for (let i = 0; i < ah.length; i++) diff |= ah[i] ^ bh[i]
-  return diff === 0
 }
 
 async function hashString(input: string): Promise<string> {
