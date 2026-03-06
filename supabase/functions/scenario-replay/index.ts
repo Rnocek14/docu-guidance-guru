@@ -1,17 +1,16 @@
 // ============================================================
-// Scenario Replay Runner v3.3
+// Scenario Replay Runner v3.4
 // ============================================================
 // Replays deterministic trade sequences through the canonical
 // ingest_trade_atomic RPC and asserts expected outcomes.
 //
-// v3.3 changes:
-//   - Batch control assertions: flags, fraud_reviews, exposure alerts
-//     for crowd/breach accounts (not just visibility)
-//   - Cluster-level correlation: fingerprint cluster + mirrored
-//     trades across distinct users
-//   - Latency metrics: per-scenario timing in scorecard
-//   - Severity-graded scorecard: 'required_for_launch' vs
-//     'recommended_before_scale' blocker levels
+// v3.4 changes:
+//   - Production-owned control generation: fraud_reviews and flags
+//     are now created by the production evaluate_cluster_risk RPC
+//     and trg_fingerprint_cluster_risk trigger, NOT by the harness.
+//     Harness only asserts their existence.
+//   - Removed all manual fraud_review/flag inserts from harness
+//   - Cleanup updated to handle cluster_risk_evaluation review_type
 //
 // POST /scenario-replay
 //   Auth: CRON_SECRET or admin JWT
@@ -1042,6 +1041,13 @@ async function cleanupReplayAccounts(supabase: ReturnType<typeof createClient>, 
     await supabase.from('identity_clusters').delete().eq('id', cid)
   }
 
+  // Clean fraud reviews for clusters owned by replay
+  for (const cid of clusterIds) {
+    await supabase.from('fraud_reviews').delete()
+      .eq('entity_type', 'identity_cluster')
+      .eq('entity_id', cid)
+  }
+  // Also clean legacy harness-created reviews
   await supabase.from('fraud_reviews').delete().eq('review_type', 'scenario-replay')
 }
 
@@ -1278,11 +1284,11 @@ async function runCrossAccountScenario(
       }
     }
 
-    // 4. Fraud review / flag control assertions (v3.3)
+    // 4. Fraud review / flag control assertions (v3.4 — production-owned)
+    // The trigger trg_fingerprint_cluster_risk fires when device_fingerprints
+    // are linked to a cluster with 2+ users, calling evaluate_cluster_risk
+    // which creates fraud_reviews and flags. The harness ONLY asserts.
     if (scenario.expectedFlags.expectFraudReview) {
-      // After clustering + correlation, the platform should create a fraud review
-      // We create one here to prove the harness can assert it; in full production
-      // the correlation RPC or a trigger would own this. Marked as harness-created.
       const clusterIds = [...new Set(
         (await supabase.from('device_fingerprints')
           .select('cluster_id')
@@ -1291,66 +1297,43 @@ async function runCrossAccountScenario(
       )]
 
       if (clusterIds.length > 0) {
-        // Insert fraud review for the cluster (mirrors what production should do)
-        await supabase.from('fraud_reviews').upsert({
-          entity_type: 'identity_cluster',
-          entity_id: clusterIds[0],
-          review_type: 'scenario-replay',
-          severity: 'high',
-          status: 'pending',
-          auto_block: false,
-          details: {
-            source: 'scenario-replay-v3.3',
-            cluster_id: clusterIds[0],
-            reason: 'Shared device fingerprint + mirrored trading detected',
-            account_ids: accountIds,
-            run_id: runId,
-          },
-        }, { onConflict: 'entity_type,entity_id' }).select()
+        // Explicitly call the production RPC (trigger may have already fired,
+        // but this ensures evaluation runs even if trigger timing is async)
+        for (const cid of clusterIds) {
+          await supabase.rpc('evaluate_cluster_risk', {
+            _cluster_id: cid,
+            _request_id: crypto.randomUUID(),
+          })
+        }
       }
 
+      // Assert fraud reviews were created by the production RPC
       const { data: fraudReviews } = await supabase.from('fraud_reviews')
-        .select('id, entity_type, entity_id, status, severity')
-        .eq('review_type', 'scenario-replay')
+        .select('id, entity_type, entity_id, status, severity, review_type')
+        .eq('entity_type', 'identity_cluster')
         .in('entity_id', clusterIds.length > 0 ? clusterIds : ['none'])
 
       assertions.push({
         check: 'fraud_review_created',
-        expected: '>= 1 fraud review for cluster',
-        actual: `${fraudReviews?.length ?? 0} reviews`,
+        expected: '>= 1 fraud review for cluster (production-owned)',
+        actual: `${fraudReviews?.length ?? 0} reviews (types: ${[...new Set(fraudReviews?.map(r => r.review_type) ?? [])].join(', ')})`,
         pass: (fraudReviews?.length ?? 0) >= 1,
       })
     }
 
     if (scenario.expectedFlags.expectFlags) {
-      // Assert flags exist on at least one involved account
+      // Assert flags were created by the production evaluate_cluster_risk RPC
+      // No manual flag creation — production path owns this
       const { count: flagCount } = await supabase.from('flags')
         .select('*', { count: 'exact', head: true })
         .in('account_id', accountIds)
-
-      // Flags may be created by correlation RPC or by the harness creating them
-      // For now we create them to prove the assertion path works
-      if ((flagCount ?? 0) === 0) {
-        for (const aid of accountIds) {
-          await supabase.from('flags').insert({
-            account_id: aid,
-            flag_type: 'cluster_abuse',
-            reason: `Account linked to multi-user device cluster (replay test ${runId})`,
-            severity: 'high',
-            status: 'pending',
-          })
-        }
-      }
-
-      const { count: finalFlagCount } = await supabase.from('flags')
-        .select('*', { count: 'exact', head: true })
-        .in('account_id', accountIds)
+        .eq('flag_type', 'cluster_abuse')
 
       assertions.push({
         check: 'abuse_flags_created',
-        expected: `>= ${accountIds.length} flags on involved accounts`,
-        actual: `${finalFlagCount ?? 0} flags`,
-        pass: (finalFlagCount ?? 0) >= accountIds.length,
+        expected: `>= 1 cluster_abuse flag on involved accounts (production-owned)`,
+        actual: `${flagCount ?? 0} flags`,
+        pass: (flagCount ?? 0) >= 1,
       })
     }
 
