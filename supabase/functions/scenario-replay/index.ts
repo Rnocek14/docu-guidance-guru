@@ -1041,6 +1041,13 @@ async function cleanupReplayAccounts(supabase: ReturnType<typeof createClient>, 
     await supabase.from('identity_clusters').delete().eq('id', cid)
   }
 
+  // Clean fraud reviews for clusters owned by replay
+  for (const cid of clusterIds) {
+    await supabase.from('fraud_reviews').delete()
+      .eq('entity_type', 'identity_cluster')
+      .eq('entity_id', cid)
+  }
+  // Also clean legacy harness-created reviews
   await supabase.from('fraud_reviews').delete().eq('review_type', 'scenario-replay')
 }
 
