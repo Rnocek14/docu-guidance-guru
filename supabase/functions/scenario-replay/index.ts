@@ -90,6 +90,10 @@ interface CrossAccountExpectation {
   minCorrelationMatches?: number
   expectedSymbols?: string[]
   expectedDirections?: Array<{ symbol: string; sides: string[] }>
+  /** If true, assert fraud_review created for the cluster */
+  expectFraudReview?: boolean
+  /** If true, assert flags created on involved accounts */
+  expectFlags?: boolean
 }
 
 // ── Risk-line parity types ──
