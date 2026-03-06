@@ -520,33 +520,39 @@ const CROSS_ACCOUNT_SCENARIOS: CrossAccountScenario[] = [
     },
   },
   {
-    id: 'correlated-instrument-hedge',
-    name: 'Correlated Instrument Hedge',
-    description: 'Two accounts hedge across correlated instruments (ES long + NQ short) — should trigger correlation detection',
+    id: 'cluster-correlated-abuse',
+    name: 'Cluster-Level Correlated Abuse',
+    description: 'Two distinct users share a device fingerprint AND trade mirrored positions — combines clustering + correlation into a single abuse surface',
+    requireDistinctUsers: true,
     accounts: [
       {
-        suffix: 'corr-A',
+        suffix: 'clcorr-A',
         cohortPhase: 'evaluation',
-        trades: makeTrades('corrA', [
-          { daysAgo: 5, pnl: 400, symbol: 'ES', side: 'buy' },
-          { daysAgo: 4, pnl: 300, symbol: 'ES', side: 'buy' },
-          { daysAgo: 3, pnl: 200, symbol: 'ES', side: 'buy' },
+        trades: makeTrades('clcorrA', [
+          { daysAgo: 5, pnl: 600, symbol: 'ES', side: 'buy' },
+          { daysAgo: 4, pnl: 400, symbol: 'ES', side: 'buy' },
+          { daysAgo: 3, pnl: 300, symbol: 'ES', side: 'buy' },
         ]),
+        fingerprintHash: 'replay-test-fingerprint-shared-hash',
       },
       {
-        suffix: 'corr-B',
+        suffix: 'clcorr-B',
         cohortPhase: 'evaluation',
-        trades: makeTrades('corrB', [
-          { daysAgo: 5, pnl: -400, symbol: 'NQ', side: 'sell' },
-          { daysAgo: 4, pnl: -300, symbol: 'NQ', side: 'sell' },
-          { daysAgo: 3, pnl: -200, symbol: 'NQ', side: 'sell' },
+        trades: makeTrades('clcorrB', [
+          { daysAgo: 5, pnl: -600, symbol: 'ES', side: 'sell' },
+          { daysAgo: 4, pnl: -400, symbol: 'ES', side: 'sell' },
+          { daysAgo: 3, pnl: -300, symbol: 'ES', side: 'sell' },
         ]),
+        fingerprintHash: 'replay-test-fingerprint-shared-hash',
       },
     ],
     expectedFlags: {
+      clusterLinked: true,
       correlationDetected: true,
       minCorrelationMatches: 3,
-      expectedSymbols: ['ES', 'NQ'],
+      expectedSymbols: ['ES'],
+      expectFraudReview: true,
+      expectFlags: true,
     },
   },
 ]
