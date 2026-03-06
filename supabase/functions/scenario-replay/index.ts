@@ -1766,6 +1766,21 @@ async function runBatchMode(
 // LAUNCH CERTIFICATION SCORECARD
 // ══════════════════════════════════════════════════════════════
 
+interface ScorecardBlocker {
+  message: string
+  severity: 'required_for_launch' | 'recommended_before_scale'
+  domain: string
+}
+
+interface LatencyMetrics {
+  p50_scenario_ms: number
+  p90_scenario_ms: number
+  max_scenario_ms: number
+  total_ms: number
+  batch_ms: number | null
+  slowest_scenario: string
+}
+
 interface LaunchScorecard {
   verdict: 'GO' | 'NO-GO' | 'CONDITIONAL'
   timestamp: string
@@ -1776,9 +1791,28 @@ interface LaunchScorecard {
     linked_account_detection: { pass: boolean; score: string; detail: string }
     correlation_detection: { pass: boolean; score: string; detail: string }
     batch_stress: { pass: boolean; score: string; detail: string }
+    cluster_correlation: { pass: boolean; score: string; detail: string }
   }
-  blockers: string[]
+  blockers: ScorecardBlocker[]
   warnings: string[]
+  latency: LatencyMetrics
+}
+
+function computeLatencyMetrics(results: ScenarioResult[], batchDurationMs: number | null): LatencyMetrics {
+  const durations = results.map(r => r.durationMs).sort((a, b) => a - b)
+  const total = durations.reduce((s, d) => s + d, 0) + (batchDurationMs ?? 0)
+  const p50Idx = Math.floor(durations.length * 0.5)
+  const p90Idx = Math.floor(durations.length * 0.9)
+  const slowest = results.reduce((s, r) => r.durationMs > s.durationMs ? r : s, results[0])
+
+  return {
+    p50_scenario_ms: durations[p50Idx] ?? 0,
+    p90_scenario_ms: durations[p90Idx] ?? 0,
+    max_scenario_ms: durations[durations.length - 1] ?? 0,
+    total_ms: total,
+    batch_ms: batchDurationMs,
+    slowest_scenario: slowest?.scenarioId ?? 'none',
+  }
 }
 
 function buildLaunchScorecard(
@@ -1786,10 +1820,10 @@ function buildLaunchScorecard(
   batchResult: BatchResult | null,
   auditVerification: AuditVerification | null,
 ): LaunchScorecard {
-  const blockers: string[] = []
+  const blockers: ScorecardBlocker[] = []
   const warnings: string[] = []
 
-  // 1. Rules correctness: single-account scenarios (not risk-line, not cross-account)
+  // 1. Rules correctness (REQUIRED)
   const ruleScenarios = results.filter(r =>
     !r.scenarioId.startsWith('risk-line') &&
     !r.scenarioName.startsWith('[Cross-Account]') &&
@@ -1798,30 +1832,48 @@ function buildLaunchScorecard(
   const rulesPassed = ruleScenarios.filter(r => r.pass).length
   const rulesTotal = ruleScenarios.length
   const rulesPass = rulesTotal > 0 && rulesPassed === rulesTotal
-  if (!rulesPass && rulesTotal > 0) blockers.push(`${rulesTotal - rulesPassed} rule scenario(s) failed`)
+  if (!rulesPass && rulesTotal > 0) blockers.push({
+    message: `${rulesTotal - rulesPassed} rule scenario(s) failed`,
+    severity: 'required_for_launch',
+    domain: 'rules_correctness',
+  })
 
-  // 2. Risk-line parity
+  // 2. Risk-line parity (REQUIRED)
   const rlScenarios = results.filter(r => r.scenarioId.startsWith('risk-line'))
   const rlPassed = rlScenarios.filter(r => r.pass).length
   const rlTotal = rlScenarios.length
   const rlPass = rlTotal > 0 ? rlPassed === rlTotal : false
   if (rlTotal === 0) warnings.push('No risk-line parity scenarios executed')
-  else if (!rlPass) blockers.push(`${rlTotal - rlPassed} risk-line parity scenario(s) failed`)
+  else if (!rlPass) blockers.push({
+    message: `${rlTotal - rlPassed} risk-line parity scenario(s) failed`,
+    severity: 'required_for_launch',
+    domain: 'risk_line_parity',
+  })
 
-  // 3. Audit integrity
+  // 3. Audit integrity (REQUIRED)
   const auditPass = auditVerification?.hashChainValid ?? false
   if (!auditPass) {
-    if (auditVerification) blockers.push(`Audit chain broken: ${auditVerification.brokenLinks.length} link(s)`)
+    if (auditVerification) blockers.push({
+      message: `Audit chain broken: ${auditVerification.brokenLinks.length} link(s)`,
+      severity: 'required_for_launch',
+      domain: 'audit_integrity',
+    })
     else warnings.push('Audit verification not executed')
   }
 
-  // 4. Linked-account detection
-  const fpScenarios = results.filter(r => r.scenarioId === 'same-device-fingerprint')
+  // 4. Linked-account detection (REQUIRED)
+  const fpScenarios = results.filter(r =>
+    r.scenarioId === 'same-device-fingerprint' || r.scenarioId === 'cluster-correlated-abuse'
+  )
   const fpPass = fpScenarios.length > 0 && fpScenarios.every(r => r.pass)
   if (fpScenarios.length === 0) warnings.push('Fingerprint clustering scenario not executed')
-  else if (!fpPass) blockers.push('Fingerprint clustering scenario failed')
+  else if (!fpPass) blockers.push({
+    message: 'Fingerprint clustering scenario failed',
+    severity: 'required_for_launch',
+    domain: 'linked_account_detection',
+  })
 
-  // 5. Correlation detection
+  // 5. Correlation detection (REQUIRED)
   const corrScenarios = results.filter(r =>
     r.scenarioId === 'mirror-opposite-trades' || r.scenarioId === 'correlated-instrument-hedge'
   )
@@ -1829,17 +1881,40 @@ function buildLaunchScorecard(
   const corrTotal = corrScenarios.length
   const corrPass = corrTotal > 0 && corrPassed === corrTotal
   if (corrTotal === 0) warnings.push('No correlation detection scenarios executed')
-  else if (!corrPass) blockers.push(`${corrTotal - corrPassed} correlation scenario(s) failed`)
+  else if (!corrPass) blockers.push({
+    message: `${corrTotal - corrPassed} correlation scenario(s) failed`,
+    severity: 'required_for_launch',
+    domain: 'correlation_detection',
+  })
 
-  // 6. Batch stress
+  // 6. Cluster-level correlation (NEW — RECOMMENDED, not blocking)
+  const clusterCorrScenarios = results.filter(r => r.scenarioId === 'cluster-correlated-abuse')
+  const clusterCorrPass = clusterCorrScenarios.length > 0 && clusterCorrScenarios.every(r => r.pass)
+  if (clusterCorrScenarios.length === 0) warnings.push('Cluster-level correlation scenario not executed')
+  else if (!clusterCorrPass) blockers.push({
+    message: 'Cluster-level correlated abuse detection failed',
+    severity: 'recommended_before_scale',
+    domain: 'cluster_correlation',
+  })
+
+  // 7. Batch stress (RECOMMENDED — can launch without, risky to scale without)
   const batchPass = batchResult?.pass ?? false
   if (!batchResult) warnings.push('Batch stress mode not executed')
-  else if (!batchPass) blockers.push(`Batch stress failed: ${batchResult.errors.length} errors, ${batchResult.assertions.filter(a => !a.pass).length} assertion failures`)
+  else if (!batchPass) blockers.push({
+    message: `Batch stress failed: ${batchResult.errors.length} errors, ${batchResult.assertions.filter(a => !a.pass).length} assertion failures`,
+    severity: 'recommended_before_scale',
+    domain: 'batch_stress',
+  })
 
-  const allDomainsPass = rulesPass && rlPass && auditPass && fpPass && corrPass && batchPass
+  // Verdict: NO-GO if any required_for_launch blocker exists
+  const requiredBlockers = blockers.filter(b => b.severity === 'required_for_launch')
+  const recommendedBlockers = blockers.filter(b => b.severity === 'recommended_before_scale')
+  const allDomainsPass = rulesPass && rlPass && auditPass && fpPass && corrPass && clusterCorrPass && batchPass
   const verdict: 'GO' | 'NO-GO' | 'CONDITIONAL' =
     allDomainsPass ? 'GO' :
-    blockers.length === 0 ? 'CONDITIONAL' : 'NO-GO'
+    requiredBlockers.length > 0 ? 'NO-GO' : 'CONDITIONAL'
+
+  const latency = computeLatencyMetrics(results, batchResult?.durationMs ?? null)
 
   return {
     verdict,
@@ -1862,13 +1937,18 @@ function buildLaunchScorecard(
       },
       linked_account_detection: {
         pass: fpPass,
-        score: fpScenarios.length > 0 ? (fpPass ? '1/1' : '0/1') : 'N/A',
+        score: fpScenarios.length > 0 ? (fpPass ? `${fpScenarios.filter(r=>r.pass).length}/${fpScenarios.length}` : `0/${fpScenarios.length}`) : 'N/A',
         detail: fpPass ? 'Cluster creation verified with distinct users' : fpScenarios.length === 0 ? 'Not executed' : 'Clustering failed',
       },
       correlation_detection: {
         pass: corrPass,
         score: corrTotal > 0 ? `${corrPassed}/${corrTotal}` : 'N/A',
         detail: corrPass ? 'Mirror + correlated hedge detected' : corrTotal === 0 ? 'Not executed' : `${corrTotal - corrPassed} missed`,
+      },
+      cluster_correlation: {
+        pass: clusterCorrPass,
+        score: clusterCorrScenarios.length > 0 ? (clusterCorrPass ? '1/1' : '0/1') : 'N/A',
+        detail: clusterCorrPass ? 'Fingerprint cluster + mirrored trades detected' : clusterCorrScenarios.length === 0 ? 'Not executed' : 'Cluster-level correlation failed',
       },
       batch_stress: {
         pass: batchPass,
@@ -1880,6 +1960,7 @@ function buildLaunchScorecard(
     },
     blockers,
     warnings,
+    latency,
   }
 }
 
