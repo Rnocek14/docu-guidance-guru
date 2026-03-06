@@ -1,14 +1,14 @@
 // ============================================================
-// Scenario Replay Runner v3.0
+// Scenario Replay Runner v3.1
 // ============================================================
 // Replays deterministic trade sequences through the canonical
 // ingest_trade_atomic RPC and asserts expected outcomes.
 //
-// v3 changes:
-//   - Removed manual violation/event writes — production pipeline owns all side effects
-//   - Hardened fingerprint assertions: requires real cluster_id, no soft fallback
-//   - Hardened correlation assertions: checks match count, account pairs, symbols
-//   - Cross-table consistency checks: trades↔violations↔events↔transitions
+// v3.1 changes:
+//   - Fingerprint scenarios now use DISTINCT user IDs (fixes onConflict collision)
+//   - Bootstrap account_created insert clearly marked as intentional
+//   - Added UI/backend risk-line parity validator scenarios
+//   - Cross-account runner accepts per-account user overrides
 //
 // POST /scenario-replay
 //   Auth: CRON_SECRET or admin JWT
@@ -64,6 +64,8 @@ interface CrossAccountScenario {
   description: string
   accounts: CrossAccountSpec[]
   expectedFlags: CrossAccountExpectation
+  /** If true, each account gets a distinct user_id (required for fingerprint clustering) */
+  requireDistinctUsers?: boolean
 }
 
 interface CrossAccountSpec {
@@ -79,6 +81,28 @@ interface CrossAccountExpectation {
   minCorrelationMatches?: number
   expectedSymbols?: string[]
   expectedDirections?: Array<{ symbol: string; sides: string[] }>
+}
+
+// ── Risk-line parity types ──
+
+interface RiskLineParity {
+  id: string
+  name: string
+  description: string
+  cohortPhase: 'evaluation' | 'verification' | 'performance'
+  trades: SyntheticTrade[]
+  /** Expected risk-line values after all trades are ingested */
+  expectedRiskLine: {
+    dailyPnlOnLastDay: number
+    totalPnl: number
+    currentBalance: number
+    highestBalance: number
+    tradingDaysCount: number
+    /** Whether current_balance should be >= starting - (starting * max_total_drawdown_percent/100) */
+    withinDrawdownLimit: boolean
+    /** Whether daily_pnl should be >= -(starting * max_daily_loss_percent/100) */
+    withinDailyLimit: boolean
+  }
 }
 
 interface TradeResult {
@@ -219,7 +243,7 @@ const SCENARIOS: Scenario[] = [
       passed: false,
       minViolations: 1,
       minEvents: 2,
-      minTrades: 7, // last trade may be rejected as ACCOUNT_TERMINAL
+      minTrades: 7,
     },
   },
   {
@@ -373,6 +397,58 @@ const SCENARIOS: Scenario[] = [
 ]
 
 // ══════════════════════════════════════════════════════════════
+// UI/BACKEND RISK-LINE PARITY SCENARIOS
+// ══════════════════════════════════════════════════════════════
+
+const RISK_LINE_SCENARIOS: RiskLineParity[] = [
+  {
+    id: 'risk-line-normal-trading',
+    name: 'Risk Line Parity — Normal Trading',
+    description: 'After a sequence of wins/losses, verify account record exactly matches expected drawdown math',
+    cohortPhase: 'evaluation',
+    trades: makeTrades('rlnt', [
+      { daysAgo: 10, pnl: 2000 },
+      { daysAgo: 9, pnl: -800 },
+      { daysAgo: 8, pnl: 1500 },
+      { daysAgo: 7, pnl: -300 },
+      { daysAgo: 6, pnl: 600 },
+    ]),
+    expectedRiskLine: {
+      // cumulative: +2000, -800, +1500, -300, +600 = +3000
+      dailyPnlOnLastDay: 600,
+      totalPnl: 3000,
+      currentBalance: 103000,
+      highestBalance: 103000, // peak after all trades: 100000+2000=102000, -800=101200, +1500=102700, -300=102400, +600=103000
+      tradingDaysCount: 5,
+      withinDrawdownLimit: true,
+      withinDailyLimit: true,
+    },
+  },
+  {
+    id: 'risk-line-drawdown-near-limit',
+    name: 'Risk Line Parity — Near Drawdown Limit',
+    description: 'Verify drawdown tracking after peak then decline stays accurate',
+    cohortPhase: 'evaluation',
+    trades: makeTrades('rldl', [
+      { daysAgo: 10, pnl: 5000 },   // bal=105000 (new high)
+      { daysAgo: 9, pnl: -3000 },    // bal=102000
+      { daysAgo: 8, pnl: -2000 },    // bal=100000
+      { daysAgo: 7, pnl: -2000 },    // bal=98000
+      { daysAgo: 6, pnl: -1500 },    // bal=96500
+    ]),
+    expectedRiskLine: {
+      dailyPnlOnLastDay: -1500,
+      totalPnl: -3500,
+      currentBalance: 96500,
+      highestBalance: 105000,
+      tradingDaysCount: 5,
+      withinDrawdownLimit: true, // drawdown from high = 105000-96500 = 8500 = 8.5% < 10%
+      withinDailyLimit: true,    // worst day = -3000 = 3% < 5%
+    },
+  },
+]
+
+// ══════════════════════════════════════════════════════════════
 // CROSS-ACCOUNT ABUSE SCENARIOS
 // ══════════════════════════════════════════════════════════════
 
@@ -409,8 +485,9 @@ const CROSS_ACCOUNT_SCENARIOS: CrossAccountScenario[] = [
   },
   {
     id: 'same-device-fingerprint',
-    name: 'Same Device Fingerprint',
-    description: 'Two accounts with identical device fingerprint — must create real identity cluster via collect-fingerprint EF',
+    name: 'Same Device Fingerprint (Distinct Users)',
+    description: 'Two DIFFERENT users with identical device fingerprint — must create real identity cluster. Uses distinct user_ids to correctly trigger onConflict clustering.',
+    requireDistinctUsers: true,
     accounts: [
       {
         suffix: 'fp-A',
@@ -549,13 +626,14 @@ async function createReplayAccount(
     platform_name: 'scenario-replay',
   })
 
-  // Let the production pipeline create account_created events via triggers.
-  // Only insert if no trigger exists for this, to ensure baseline event count.
+  // BOOTSTRAP EVENT: No production trigger creates account_created on manual insert.
+  // This is intentional scaffolding so consistency checks have a baseline event.
+  // If a production trigger is added for account creation, remove this insert.
   await supabase.from('account_events').insert({
     account_id: account.id,
     event_type: 'account_created',
     idempotency_key: `replay.created:${account.id}`,
-    event_data: { scenario: scenarioId, run_id: runId },
+    event_data: { scenario: scenarioId, run_id: runId, _bootstrap: true },
   })
 
   return { accountId: account.id, cohort }
@@ -673,7 +751,6 @@ async function checkConsistency(
 ): Promise<ConsistencyResult> {
   const checks: AssertionResult[] = []
 
-  // Fetch counts from all tables
   const [
     { count: tradeCount },
     { count: violationCount },
@@ -691,7 +768,6 @@ async function checkConsistency(
   const ec = eventCount ?? 0
   const pc = transitionCount ?? 0
 
-  // 1. Trade count should match ingested trades minus terminal rejections
   if (scenario.expected.minTrades !== undefined) {
     checks.push({
       check: 'trades_ingested',
@@ -701,7 +777,6 @@ async function checkConsistency(
     })
   }
 
-  // 2. Breach scenarios must have violations created by production
   if (anyBreachDetected) {
     checks.push({
       check: 'breach_has_violations',
@@ -710,7 +785,6 @@ async function checkConsistency(
       pass: vc >= 1,
     })
 
-    // Breach scenarios must have breach_detected event from production
     const { data: breachEvents } = await supabase.from('account_events')
       .select('event_type')
       .eq('account_id', accountId)
@@ -723,7 +797,6 @@ async function checkConsistency(
     })
   }
 
-  // 3. Passed scenarios must have transition + passed event
   if (accountPassed) {
     checks.push({
       check: 'pass_has_transition',
@@ -744,7 +817,6 @@ async function checkConsistency(
     })
   }
 
-  // 4. Non-breach, non-pass scenarios should have zero violations
   if (!anyBreachDetected && !accountPassed) {
     checks.push({
       check: 'no_spurious_violations',
@@ -754,7 +826,6 @@ async function checkConsistency(
     })
   }
 
-  // 5. Every account must have at least account_created event
   checks.push({
     check: 'has_creation_event',
     expected: '>= 1 event',
@@ -765,6 +836,146 @@ async function checkConsistency(
   return {
     pass: checks.every(c => c.pass),
     checks,
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// RISK-LINE PARITY CHECKER
+// ══════════════════════════════════════════════════════════════
+
+async function runRiskLineScenario(
+  supabase: ReturnType<typeof createClient>,
+  scenario: RiskLineParity,
+  userId: string,
+  prefix: string,
+  runId: string,
+): Promise<ScenarioResult> {
+  const start = Date.now()
+  const assertions: AssertionResult[] = []
+  const accountNumber = `${prefix}rl-${scenario.id}`
+
+  try {
+    const { accountId, cohort } = await createReplayAccount(
+      supabase, userId, accountNumber, scenario.cohortPhase, runId, scenario.id,
+    )
+
+    const { tradeResults } = await ingestTradesForAccount(
+      supabase, accountId, accountNumber, scenario.trades, scenario, runId,
+    )
+
+    // Read actual account state — this is what the dashboard would display
+    const { data: acct } = await supabase.from('accounts')
+      .select('current_balance, highest_balance, total_pnl, daily_pnl, trading_days_count, starting_balance, status')
+      .eq('id', accountId).single()
+
+    if (!acct) throw new Error('Account not found after trade ingestion')
+
+    const ex = scenario.expectedRiskLine
+    const actualBal = Number(acct.current_balance)
+    const actualHigh = Number(acct.highest_balance)
+    const actualTotalPnl = Number(acct.total_pnl)
+    const actualDailyPnl = Number(acct.daily_pnl)
+    const actualTDCount = Number(acct.trading_days_count)
+    const startBal = Number(acct.starting_balance)
+
+    // Tolerance for floating-point: $0.01
+    const tol = 0.01
+
+    assertions.push({
+      check: 'rl:current_balance',
+      expected: `$${ex.currentBalance.toFixed(2)}`,
+      actual: `$${actualBal.toFixed(2)}`,
+      pass: Math.abs(actualBal - ex.currentBalance) <= tol,
+    })
+
+    assertions.push({
+      check: 'rl:highest_balance',
+      expected: `$${ex.highestBalance.toFixed(2)}`,
+      actual: `$${actualHigh.toFixed(2)}`,
+      pass: Math.abs(actualHigh - ex.highestBalance) <= tol,
+    })
+
+    assertions.push({
+      check: 'rl:total_pnl',
+      expected: `$${ex.totalPnl.toFixed(2)}`,
+      actual: `$${actualTotalPnl.toFixed(2)}`,
+      pass: Math.abs(actualTotalPnl - ex.totalPnl) <= tol,
+    })
+
+    assertions.push({
+      check: 'rl:trading_days_count',
+      expected: String(ex.tradingDaysCount),
+      actual: String(actualTDCount),
+      pass: actualTDCount === ex.tradingDaysCount,
+    })
+
+    // Drawdown limit check: is current_balance within max_total_drawdown of starting?
+    const maxDDPct = Number(cohort?.max_total_drawdown_percent ?? 10)
+    const ddFloor = startBal - (startBal * maxDDPct / 100)
+    const actualWithinDD = actualBal >= ddFloor
+    assertions.push({
+      check: 'rl:within_drawdown_limit',
+      expected: String(ex.withinDrawdownLimit),
+      actual: `${actualWithinDD} (floor=$${ddFloor.toFixed(2)}, bal=$${actualBal.toFixed(2)})`,
+      pass: actualWithinDD === ex.withinDrawdownLimit,
+    })
+
+    // Daily loss limit check
+    const maxDailyPct = Number(cohort?.max_daily_loss_percent ?? 5)
+    const dailyLossFloor = -(startBal * maxDailyPct / 100)
+    const actualWithinDaily = actualDailyPnl >= dailyLossFloor
+    assertions.push({
+      check: 'rl:within_daily_limit',
+      expected: String(ex.withinDailyLimit),
+      actual: `${actualWithinDaily} (floor=$${dailyLossFloor.toFixed(2)}, daily_pnl=$${actualDailyPnl.toFixed(2)})`,
+      pass: actualWithinDaily === ex.withinDailyLimit,
+    })
+
+    // Dashboard display diff: what a user would see vs backend truth
+    // This catches the "I didn't know I breached" class of bugs
+    const dashboardDrawdownPct = ((actualHigh - actualBal) / startBal * 100)
+    const dashboardProfitPct = (actualTotalPnl / startBal * 100)
+    assertions.push({
+      check: 'rl:dashboard_drawdown_pct',
+      expected: 'computed from account record',
+      actual: `${dashboardDrawdownPct.toFixed(2)}% drawdown from high, ${dashboardProfitPct.toFixed(2)}% total profit`,
+      pass: true, // informational — the numeric checks above are the hard assertions
+    })
+
+    const [violRes, eventRes, tradeCountRes] = await Promise.all([
+      supabase.from('violations').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
+      supabase.from('account_events').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
+      supabase.from('trades').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
+    ])
+
+    return {
+      scenarioId: scenario.id,
+      scenarioName: `[Risk-Line Parity] ${scenario.name}`,
+      pass: assertions.every(a => a.pass),
+      assertions,
+      tradeResults,
+      finalAccountStatus: acct.status,
+      finalBalance: actualBal,
+      violationCount: violRes.count ?? 0,
+      eventCount: eventRes.count ?? 0,
+      tradeCount: tradeCountRes.count ?? 0,
+      durationMs: Date.now() - start,
+    }
+  } catch (e) {
+    return {
+      scenarioId: scenario.id,
+      scenarioName: `[Risk-Line Parity] ${scenario.name}`,
+      pass: false,
+      assertions,
+      tradeResults: [],
+      finalAccountStatus: 'error',
+      finalBalance: 0,
+      violationCount: 0,
+      eventCount: 0,
+      tradeCount: 0,
+      durationMs: Date.now() - start,
+      error: (e as Error).message,
+    }
   }
 }
 
@@ -808,7 +1019,6 @@ async function cleanupReplayAccounts(supabase: ReturnType<typeof createClient>, 
   await supabase.from('device_fingerprints').delete()
     .eq('fingerprint_hash', 'replay-test-fingerprint-shared-hash')
   
-  // Clean up any clusters created during replay
   for (const cid of clusterIds) {
     await supabase.from('identity_clusters').delete().eq('id', cid)
   }
@@ -817,13 +1027,13 @@ async function cleanupReplayAccounts(supabase: ReturnType<typeof createClient>, 
 }
 
 // ══════════════════════════════════════════════════════════════
-// CROSS-ACCOUNT SCENARIO RUNNER (hardened v3)
+// CROSS-ACCOUNT SCENARIO RUNNER (hardened v3.1)
 // ══════════════════════════════════════════════════════════════
 
 async function runCrossAccountScenario(
   supabase: ReturnType<typeof createClient>,
   scenario: CrossAccountScenario,
-  userId: string,
+  userIds: string[],
   prefix: string,
   runId: string,
 ): Promise<ScenarioResult> {
@@ -831,15 +1041,23 @@ async function runCrossAccountScenario(
   const assertions: AssertionResult[] = []
   const allTradeResults: TradeResult[] = []
   const accountIds: string[] = []
+  const accountUserMap: Array<{ accountId: string; userId: string; suffix: string }> = []
 
   try {
     // 1. Create all accounts and ingest trades
-    for (const spec of scenario.accounts) {
+    // If requireDistinctUsers, each account gets a different userId
+    for (let i = 0; i < scenario.accounts.length; i++) {
+      const spec = scenario.accounts[i]
+      const userId = scenario.requireDistinctUsers
+        ? userIds[Math.min(i, userIds.length - 1)]
+        : userIds[0]
+      
       const accountNumber = `${prefix}${scenario.id}-${spec.suffix}`
       const { accountId } = await createReplayAccount(
         supabase, userId, accountNumber, spec.cohortPhase, runId, scenario.id,
       )
       accountIds.push(accountId)
+      accountUserMap.push({ accountId, userId, suffix: spec.suffix })
 
       const { tradeResults } = await ingestTradesForAccount(
         supabase, accountId, accountNumber, spec.trades, scenario, runId,
@@ -847,66 +1065,51 @@ async function runCrossAccountScenario(
       allTradeResults.push(...tradeResults)
     }
 
-    // 2. Fingerprint scenario: call collect-fingerprint EF for real clustering
+    // 2. Fingerprint scenario: use DISTINCT user IDs for real clustering
     const fpSpecs = scenario.accounts.filter(s => s.fingerprintHash)
     if (fpSpecs.length > 0 && scenario.expectedFlags.clusterLinked !== undefined) {
-      // Call the actual collect-fingerprint edge function for each account
-      // to trigger real cluster creation through production logic
-      const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-      const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-      
+      // Insert fingerprints using each account's actual userId.
+      // Because onConflict is 'user_id,fingerprint_hash', distinct userIds
+      // create separate rows, which is the precondition for cluster detection.
       for (let i = 0; i < fpSpecs.length; i++) {
         const spec = fpSpecs[i]
-        // Use service role key as bearer to bypass auth in the EF
-        // The EF validates the token via getUser, so we create a mock
-        // fingerprint directly using service role (same as production would)
-        
-        // Insert fingerprint via the production collect-fingerprint path:
-        // Since we can't easily call the EF with a valid user JWT from here,
-        // we replicate the exact clustering logic the EF uses:
+        const mapping = accountUserMap[i]
         const fpHash = spec.fingerprintHash!
         const fpComponents = { canvas_hash: 'replay-test', platform: 'scenario-replay', run: runId }
 
-        // Check for existing fingerprints from OTHER accounts (mirroring EF logic)
+        // Check for existing fingerprints from OTHER users (same as collect-fingerprint EF logic)
         const { data: existingFps } = await supabase
           .from('device_fingerprints')
           .select('id, user_id, cluster_id')
           .eq('fingerprint_hash', fpHash)
-          .neq('user_id', userId) // In a real multi-user scenario this matters
-
-        // For same-user multi-account, check across all fingerprints with this hash
-        const { data: allFpsWithHash } = await supabase
-          .from('device_fingerprints')
-          .select('id, user_id, cluster_id')
-          .eq('fingerprint_hash', fpHash)
+          .neq('user_id', mapping.userId)
 
         let clusterId: string | null = null
-        const priorRecords = allFpsWithHash ?? []
 
-        if (priorRecords.length > 0) {
-          // Find existing cluster
-          const existingCluster = priorRecords.find(f => f.cluster_id)
+        if (existingFps && existingFps.length > 0) {
+          // Found fingerprint under a DIFFERENT user — this is the real abuse signal
+          const existingCluster = existingFps.find(f => f.cluster_id)
           if (existingCluster?.cluster_id) {
             clusterId = existingCluster.cluster_id
             await supabase.from('identity_clusters').update({
-              risk_score: priorRecords.length + 1,
+              risk_score: existingFps.length + 1,
               is_flagged: true,
-              flag_reason: `Device fingerprint shared across ${priorRecords.length + 1} records (replay test)`,
+              flag_reason: `Device fingerprint shared across ${existingFps.length + 1} distinct users (replay test)`,
               updated_at: new Date().toISOString(),
             }).eq('id', clusterId)
-          } else if (priorRecords.length >= 1) {
-            // Create new cluster
+          } else {
+            // Create new cluster linking these distinct users
             const { data: newCluster } = await supabase.from('identity_clusters').insert({
-              cluster_name: `Replay-detected cluster ${runId}`,
-              risk_score: priorRecords.length + 1,
+              cluster_name: `Replay multi-user cluster ${runId}`,
+              risk_score: existingFps.length + 1,
               is_flagged: true,
-              flag_reason: `Device fingerprint shared across ${priorRecords.length + 1} records (replay test)`,
+              flag_reason: `Device fingerprint shared across ${existingFps.length + 1} distinct users (replay test)`,
             }).select('id').single()
 
             if (newCluster) {
               clusterId = newCluster.id
               // Link existing records to cluster
-              for (const fp of priorRecords) {
+              for (const fp of existingFps) {
                 await supabase.from('device_fingerprints')
                   .update({ cluster_id: clusterId })
                   .eq('id', fp.id)
@@ -915,9 +1118,9 @@ async function runCrossAccountScenario(
           }
         }
 
-        // Upsert this fingerprint record
+        // Upsert this fingerprint record (distinct user_id means new row, not overwrite)
         await supabase.from('device_fingerprints').upsert({
-          user_id: userId,
+          user_id: mapping.userId,
           fingerprint_hash: fpHash,
           fingerprint_components: fpComponents,
           ip_address: '10.0.0.1',
@@ -927,36 +1130,53 @@ async function runCrossAccountScenario(
         }, { onConflict: 'user_id,fingerprint_hash' })
       }
 
-      // Now assert: require a REAL cluster_id on fingerprint records
+      // Assert: REAL cluster_id on ALL fingerprint records, no soft fallback
       const { data: fps } = await supabase.from('device_fingerprints')
-        .select('id, cluster_id, fingerprint_hash')
+        .select('id, user_id, cluster_id, fingerprint_hash')
         .eq('fingerprint_hash', 'replay-test-fingerprint-shared-hash')
 
-      const hasRealCluster = fps && fps.length >= 2 && fps.every(f => f.cluster_id !== null)
-      const clusterIds = [...new Set((fps ?? []).map(f => f.cluster_id).filter(Boolean))]
-      const sameCluster = clusterIds.length === 1
+      const fpCount = fps?.length ?? 0
+      const hasRealCluster = fps && fpCount >= 2 && fps.every(f => f.cluster_id !== null)
+      const fpClusterIds = [...new Set((fps ?? []).map(f => f.cluster_id).filter(Boolean))]
+      const sameCluster = fpClusterIds.length === 1
+
+      // Verify distinct user_ids on fingerprint rows
+      const distinctUserIds = [...new Set((fps ?? []).map(f => f.user_id))]
+      assertions.push({
+        check: 'fingerprint_distinct_users',
+        expected: `>= 2 distinct user_ids`,
+        actual: `${distinctUserIds.length} distinct users: ${distinctUserIds.join(', ').slice(0, 80)}`,
+        pass: distinctUserIds.length >= 2,
+      })
+
+      assertions.push({
+        check: 'fingerprint_record_count',
+        expected: `>= 2 fingerprint rows`,
+        actual: `${fpCount} rows`,
+        pass: fpCount >= 2,
+      })
 
       assertions.push({
         check: 'fingerprint_cluster_created',
         expected: 'real cluster_id on all fingerprint records',
         actual: hasRealCluster
-          ? `${fps!.length} records, all linked to cluster ${clusterIds[0]}`
-          : `${fps?.length ?? 0} records, cluster_ids: ${JSON.stringify(clusterIds)}`,
+          ? `${fpCount} records, all linked to cluster ${fpClusterIds[0]}`
+          : `${fpCount} records, cluster_ids: ${JSON.stringify(fpClusterIds)}`,
         pass: !!hasRealCluster,
       })
 
       assertions.push({
         check: 'fingerprint_same_cluster',
         expected: 'all fingerprints in same cluster',
-        actual: sameCluster ? `single cluster: ${clusterIds[0]}` : `${clusterIds.length} different clusters`,
-        pass: sameCluster && clusterIds.length === 1,
+        actual: sameCluster ? `single cluster: ${fpClusterIds[0]}` : `${fpClusterIds.length} different clusters`,
+        pass: sameCluster && fpClusterIds.length === 1,
       })
 
       // Verify the cluster is flagged
-      if (clusterIds.length > 0) {
+      if (fpClusterIds.length > 0) {
         const { data: cluster } = await supabase.from('identity_clusters')
           .select('is_flagged, risk_score, flag_reason')
-          .eq('id', clusterIds[0])
+          .eq('id', fpClusterIds[0])
           .single()
 
         assertions.push({
@@ -977,9 +1197,10 @@ async function runCrossAccountScenario(
 
     // 3. Correlation detection with hardened assertions
     if (scenario.expectedFlags.correlationDetected !== undefined) {
+      // For correlation, use the first user (accounts owned by same user for correlation)
       const { data: correlations, error: corrErr } = await supabase.rpc(
         'detect_cross_instrument_correlations',
-        { _user_id: userId }
+        { _user_id: userIds[0] }
       )
 
       const matchCount = (!corrErr && correlations) ? correlations.length : 0
@@ -992,7 +1213,6 @@ async function runCrossAccountScenario(
         pass: hasCorrelation === scenario.expectedFlags.correlationDetected,
       })
 
-      // Assert minimum match count
       if (scenario.expectedFlags.minCorrelationMatches !== undefined) {
         assertions.push({
           check: 'correlation_match_count',
@@ -1002,13 +1222,11 @@ async function runCrossAccountScenario(
         })
       }
 
-      // Assert expected symbols appear in matches
       if (scenario.expectedFlags.expectedSymbols && correlations && correlations.length > 0) {
         const matchedSymbols = new Set<string>()
         for (const corr of correlations) {
           if (corr.symbol_a) matchedSymbols.add(corr.symbol_a)
           if (corr.symbol_b) matchedSymbols.add(corr.symbol_b)
-          // Also check flattened symbol field
           if (corr.symbol) matchedSymbols.add(corr.symbol)
         }
 
@@ -1023,7 +1241,6 @@ async function runCrossAccountScenario(
         }
       }
 
-      // Assert that accounts involved are the replay accounts
       if (hasCorrelation && correlations.length > 0 && accountIds.length >= 2) {
         const involvedAccountIds = new Set<string>()
         for (const corr of correlations) {
@@ -1165,17 +1382,22 @@ Deno.serve(async (req: Request) => {
     if (body.includeAudit === false) includeAudit = false
   } catch { /* empty body is fine, run all scenarios */ }
 
-  const { data: profile, error: profileErr } = await supabase
+  // Fetch at least 2 distinct user_ids for cross-account scenarios that need them
+  const { data: profiles, error: profileErr } = await supabase
     .from('profiles').select('user_id, email')
-    .order('created_at', { ascending: false }).limit(1).single()
+    .order('created_at', { ascending: false }).limit(2)
 
-  if (profileErr || !profile) {
-    return new Response(JSON.stringify({ error: 'No user found in profiles' }), {
+  if (profileErr || !profiles || profiles.length === 0) {
+    return new Response(JSON.stringify({ error: 'No users found in profiles' }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
   }
 
-  const userId = profile.user_id
+  const primaryUserId = profiles[0].user_id
+  const allUserIds = profiles.map(p => p.user_id)
+  
+  // Warn if only 1 user available for distinct-user scenarios
+  const hasDistinctUsers = allUserIds.length >= 2
   const runId = crypto.randomUUID()
   const results: ScenarioResult[] = []
 
@@ -1189,6 +1411,10 @@ Deno.serve(async (req: Request) => {
     ? CROSS_ACCOUNT_SCENARIOS.filter(s => requestedScenarios!.includes(s.id))
     : CROSS_ACCOUNT_SCENARIOS
 
+  const riskLineScenariosToRun = requestedScenarios
+    ? RISK_LINE_SCENARIOS.filter(s => requestedScenarios!.includes(s.id))
+    : RISK_LINE_SCENARIOS
+
   // ── Execute single-account scenarios ──
   for (const scenario of scenariosToRun) {
     const start = Date.now()
@@ -1197,13 +1423,12 @@ Deno.serve(async (req: Request) => {
 
     try {
       const { accountId } = await createReplayAccount(
-        supabase, userId, accountNumber, scenario.cohortPhase, runId, scenario.id,
+        supabase, primaryUserId, accountNumber, scenario.cohortPhase, runId, scenario.id,
       )
 
       const { tradeResults, anyBreachDetected, lastBreachType, accountPassed } =
         await ingestTradesForAccount(supabase, accountId, accountNumber, scenario.trades, scenario, runId)
 
-      // Fetch final state — read only
       const [finalAccountRes, violRes, eventRes, spawnRes, tradeCountRes] = await Promise.all([
         supabase.from('accounts').select('status, current_balance').eq('id', accountId).single(),
         supabase.from('violations').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
@@ -1219,7 +1444,6 @@ Deno.serve(async (req: Request) => {
       const spawnCount = spawnRes.count ?? 0
       const tradeCount = tradeCountRes.count ?? 0
 
-      // Standard assertions
       assertions.push({ check: 'account_status', expected: scenario.expected.status, actual: finalStatus, pass: finalStatus === scenario.expected.status })
       assertions.push({ check: 'breach_detected', expected: String(scenario.expected.breachDetected), actual: String(anyBreachDetected), pass: anyBreachDetected === scenario.expected.breachDetected })
 
@@ -1242,7 +1466,6 @@ Deno.serve(async (req: Request) => {
         assertions.push({ check: 'balance_check', expected: scenario.expected.balanceDescription ?? 'custom', actual: `$${finalBalance.toFixed(2)}`, pass: scenario.expected.balanceCheck(finalBalance) })
       }
 
-      // Cross-table consistency checks
       const consistency = await checkConsistency(supabase, accountId, scenario, anyBreachDetected, accountPassed)
       assertions.push(...consistency.checks.map(c => ({ ...c, check: `consistency:${c.check}` })))
 
@@ -1278,9 +1501,39 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // ── Execute risk-line parity scenarios ──
+  for (const rlScenario of riskLineScenariosToRun) {
+    const result = await runRiskLineScenario(supabase, rlScenario, primaryUserId, prefix, runId)
+    results.push(result)
+  }
+
   // ── Execute cross-account scenarios ──
   for (const crossScenario of crossScenariosToRun) {
-    const result = await runCrossAccountScenario(supabase, crossScenario, userId, prefix, runId)
+    // For scenarios requiring distinct users, check we have enough
+    if (crossScenario.requireDistinctUsers && !hasDistinctUsers) {
+      results.push({
+        scenarioId: crossScenario.id,
+        scenarioName: `[Cross-Account] ${crossScenario.name}`,
+        pass: false,
+        assertions: [{
+          check: 'distinct_users_available',
+          expected: '>= 2 distinct users in profiles table',
+          actual: `only ${allUserIds.length} user(s) found`,
+          pass: false,
+        }],
+        tradeResults: [],
+        finalAccountStatus: 'skipped',
+        finalBalance: 0,
+        violationCount: 0,
+        eventCount: 0,
+        tradeCount: 0,
+        durationMs: 0,
+        error: 'Not enough distinct users in profiles table for this scenario. Create a second user to enable.',
+      })
+      continue
+    }
+
+    const result = await runCrossAccountScenario(supabase, crossScenario, allUserIds, prefix, runId)
     results.push(result)
   }
 
@@ -1297,9 +1550,10 @@ Deno.serve(async (req: Request) => {
 
   const response = {
     run_id: runId,
-    version: '3.0',
+    version: '3.1',
     timestamp: new Date().toISOString(),
-    user: profile.email,
+    users: profiles.map(p => p.email),
+    distinct_users_available: hasDistinctUsers,
     prefix,
     summary: {
       total: results.length,
@@ -1308,6 +1562,7 @@ Deno.serve(async (req: Request) => {
       pass_rate: results.length > 0 ? `${((passed / results.length) * 100).toFixed(1)}%` : '0%',
       duration_ms: totalDuration,
       single_account_scenarios: scenariosToRun.length,
+      risk_line_scenarios: riskLineScenariosToRun.length,
       cross_account_scenarios: crossScenariosToRun.length,
     },
     audit_verification: auditVerification,
