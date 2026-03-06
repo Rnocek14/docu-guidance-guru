@@ -276,6 +276,7 @@ Deno.serve(async (req) => {
   }
 
   // Auth
+  console.log('authKey present:', !!input.authKey, 'length:', input.authKey?.length)
   const auth = await verifyAuth(req, input.authKey)
   if (!auth.ok) {
     return new Response(
