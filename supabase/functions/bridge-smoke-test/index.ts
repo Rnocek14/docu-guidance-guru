@@ -38,57 +38,49 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-cron-secret',
 }
 
-// ── Auth helper (mirrors scenario-replay) ──
-async function verifyAuth(req: Request): Promise<{ ok: boolean; reason?: string }> {
-  // 1. X-Cron-Secret
-  const cronSecret = req.headers.get('x-cron-secret')
-  if (cronSecret) {
-    const expected = Deno.env.get('CRON_SECRET')
-    if (!expected) {
-      // Fallback to internal_secrets table
-      try {
-        const sb = createClient(
-          Deno.env.get('SUPABASE_URL')!,
-          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-        )
-        const { data } = await sb
-          .from('internal_secrets')
-          .select('value')
-          .eq('key', 'CRON_SECRET')
-          .single()
-        if (data?.value && cronSecret === data.value) return { ok: true }
-      } catch { /* fall through */ }
-      return { ok: false, reason: 'CRON_SECRET not configured' }
-    }
-    if (cronSecret === expected) return { ok: true }
-    return { ok: false, reason: 'Invalid X-Cron-Secret' }
-  }
-
-  // 2. JWT or service_role key — check authorization or apikey header
-  const authHeader = req.headers.get('authorization')
-  const apiKeyHeader = req.headers.get('apikey')
+// ── Auth helper ──
+// Accepts: X-Cron-Secret header, admin JWT, service_role key, or body.authKey
+async function verifyAuth(req: Request, bodyAuthKey?: string): Promise<{ ok: boolean; reason?: string }> {
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-  // Check if apikey header carries the service_role key
+  // Helper to check a candidate against CRON_SECRET (env or DB fallback)
+  async function matchesCronSecret(candidate: string): Promise<boolean> {
+    const envSecret = Deno.env.get('CRON_SECRET')
+    if (envSecret) return candidate === envSecret
+    try {
+      const sb = createClient(Deno.env.get('SUPABASE_URL')!, serviceRoleKey!)
+      const { data } = await sb.from('internal_secrets').select('value').eq('key', 'CRON_SECRET').single()
+      return !!(data?.value && candidate === data.value)
+    } catch { return false }
+  }
+
+  // 1. X-Cron-Secret header
+  const cronHeader = req.headers.get('x-cron-secret')
+  if (cronHeader) {
+    return (await matchesCronSecret(cronHeader))
+      ? { ok: true }
+      : { ok: false, reason: 'Invalid X-Cron-Secret' }
+  }
+
+  // 2. Body-level authKey (for tools that can't set custom headers)
+  if (bodyAuthKey) {
+    if (serviceRoleKey && bodyAuthKey === serviceRoleKey) return { ok: true }
+    if (await matchesCronSecret(bodyAuthKey)) return { ok: true }
+  }
+
+  // 3. Authorization / apikey headers
+  const authHeader = req.headers.get('authorization')
+  const apiKeyHeader = req.headers.get('apikey')
   if (serviceRoleKey && apiKeyHeader === serviceRoleKey) return { ok: true }
 
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7)
-    // Check if this is the service_role key
     if (serviceRoleKey && token === serviceRoleKey) return { ok: true }
-
-    const sb = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      serviceRoleKey!
-    )
+    const sb = createClient(Deno.env.get('SUPABASE_URL')!, serviceRoleKey!)
     const { data: { user }, error } = await sb.auth.getUser(token)
     if (error || !user) return { ok: false, reason: 'Invalid JWT' }
-    const { data: roles } = await sb
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-    const isAdmin = roles?.some(r => r.role === 'admin')
-    if (!isAdmin) return { ok: false, reason: 'Admin role required' }
+    const { data: roles } = await sb.from('user_roles').select('role').eq('user_id', user.id)
+    if (!roles?.some(r => r.role === 'admin')) return { ok: false, reason: 'Admin role required' }
     return { ok: true }
   }
 
