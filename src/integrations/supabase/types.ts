@@ -860,7 +860,7 @@ export type Database = {
         Row: {
           created_at: string
           enabled: boolean
-          expected_interval: unknown
+          expected_interval: string
           jobname: string
           min_expected_runs: number
           red_if_success_rate_below: number
@@ -870,7 +870,7 @@ export type Database = {
         Insert: {
           created_at?: string
           enabled?: boolean
-          expected_interval: unknown
+          expected_interval: string
           jobname: string
           min_expected_runs: number
           red_if_success_rate_below?: number
@@ -880,7 +880,7 @@ export type Database = {
         Update: {
           created_at?: string
           enabled?: boolean
-          expected_interval?: unknown
+          expected_interval?: string
           jobname?: string
           min_expected_runs?: number
           red_if_success_rate_below?: number
