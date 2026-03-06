@@ -294,7 +294,7 @@ Deno.serve(async (req) => {
         console.error('confirm_payout_payment RPC error:', error)
         // Return 500 so Wise retries
         return new Response(
-          JSON.stringify({ error: 'Internal error processing confirmation', details: error.message }),
+          JSON.stringify({ error: 'Internal error processing confirmation' }),
           { status: 500, headers: { 'Content-Type': 'application/json' } }
         )
       }
