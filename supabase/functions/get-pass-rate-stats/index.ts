@@ -49,13 +49,25 @@ Deno.serve(async (req) => {
     }
 
     // 3) Fetch resolved accounts in window (source of truth)
+    // Use passed_at / failed_at for accurate windowing — NOT updated_at
+    // which can change for unrelated reasons (balance updates, etc.)
     const sinceIso = new Date(Date.now() - 30 * 86400000).toISOString();
 
-    const { data: accounts, error: accErr } = await serviceClient
+    const { data: passedAccounts, error: passErr } = await serviceClient
       .from("accounts")
-      .select("cohort_id, status, updated_at")
-      .in("status", ["passed", "failed_confirmed"])
-      .gte("updated_at", sinceIso);
+      .select("cohort_id, status")
+      .eq("status", "passed")
+      .gte("passed_at", sinceIso);
+    if (passErr) throw passErr;
+
+    const { data: failedAccounts, error: failErr } = await serviceClient
+      .from("accounts")
+      .select("cohort_id, status")
+      .eq("status", "failed_confirmed")
+      .gte("failed_at", sinceIso);
+    if (failErr) throw failErr;
+
+    const accounts = [...(passedAccounts ?? []), ...(failedAccounts ?? [])];
     if (accErr) throw accErr;
 
     // 4) Fetch ALL cohorts referenced by those accounts (not filtered by is_active)
