@@ -1,4 +1,4 @@
-// Bridge Smoke Test — v1.0
+// Bridge Smoke Test — v1.1
 //
 // Validates that real broker webhook payloads map cleanly into the canonical
 // trade format used by the replay harness and production ingestion pipeline.
