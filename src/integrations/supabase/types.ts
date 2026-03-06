@@ -3112,6 +3112,10 @@ export type Database = {
             Returns: Json
           }
       emit_cron_health_heartbeat: { Args: never; Returns: undefined }
+      evaluate_cluster_risk: {
+        Args: { _cluster_id: string; _request_id?: string }
+        Returns: Json
+      }
       evaluate_econ_breaker: { Args: never; Returns: undefined }
       fail_payout_payment: {
         Args: {
