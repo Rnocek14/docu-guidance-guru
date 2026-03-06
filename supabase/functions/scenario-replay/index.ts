@@ -1,17 +1,18 @@
 // ============================================================
-// Scenario Replay Runner v3.5
+// Scenario Replay Runner v3.6
 // ============================================================
 // Replays deterministic trade sequences through the canonical
 // ingest_trade_atomic RPC and asserts expected outcomes.
 //
-// v3.5 changes:
-//   - Six-point success criteria for cluster-correlated-abuse:
+// v3.6 changes:
+//   - Seven-point success criteria for cluster-correlated-abuse:
 //     1. cluster formed
 //     2. evaluate_cluster_risk executed
 //     3. fraud review exists (with structured rationale)
 //     4. account flags exist (with structured reason)
 //     5. cluster risk_score / flag_reason updated
 //     6. no duplicates on rerun (idempotency proof)
+//     7. selective backfill: missing flags restored, no new reviews
 //   - Unique constraint on flags(account_id, flag_type)
 //   - evaluate_cluster_risk returns idempotent: true on rerun
 //
