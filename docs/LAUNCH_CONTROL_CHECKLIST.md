@@ -102,4 +102,30 @@
 
 ---
 
+## Day 0 Watchlist
+
+Monitor these continuously for the first 24 hours after go-live:
+
+| Signal | Where to check | Red threshold |
+|--------|---------------|---------------|
+| Fulfillment queue stuck rows | `checkout_fulfillment_queue` WHERE `status = 'queued' AND attempts > 2` | Any row > 15min old |
+| Unknown broker account quarantines | `broker_payload_samples` with no matching `platform_accounts` row | Any new row |
+| Payout approval failures | `audit_logs` WHERE `action = 'payout_rejected'` | Unexpected rejections |
+| Dispute rate alerts | `check-dispute-rate` logs / `chargeback_events` | Rate ≥ 0.20% |
+| Breaker level changes | `econ_breaker_state.breaker_level` | Any value ≠ `normal` |
+| Edge function timeout spikes | Supabase Dashboard → Edge Functions → Logs | Any 504 or execution > 25s |
+| Governor verdict drift | `governor_certifications` latest row | `verdict ≠ 'GO'` |
+| Reconciliation failures | `audit_logs` WHERE `action = 'reconciliation_failed'` | Any in last 6h |
+| Payment rail disablement | `payment_rails` WHERE `is_enabled = false` | Unexpected disable |
+| Risk snapshot staleness | `risk_snapshots` latest `created_at` | > 26h old |
+
+### Escalation protocol
+
+1. **Breaker trips** → Check `econ_breaker_state`, review cause, follow Ops Playbook crisis order (lock inbound → outbound → intake)
+2. **Fulfillment stuck** → Check `retry-fulfillment-queue` logs, verify breaker isn't blocking, manually retry if needed
+3. **Dispute spike** → Review `chargeback_events`, check for fraud pattern, consider pausing riskier traffic
+4. **Governor NO-GO** → Do NOT override; investigate which domain failed, remediate via Mission Control
+
+---
+
 *Generated: 2026-03-06 · Audit version: v1.0 · Rules version: v1.0*
