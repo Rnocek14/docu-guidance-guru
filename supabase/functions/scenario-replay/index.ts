@@ -1284,11 +1284,15 @@ async function runCrossAccountScenario(
       }
     }
 
-    // 4. Fraud review / flag control assertions (v3.4 — production-owned)
-    // The trigger trg_fingerprint_cluster_risk fires when device_fingerprints
-    // are linked to a cluster with 2+ users, calling evaluate_cluster_risk
-    // which creates fraud_reviews and flags. The harness ONLY asserts.
-    if (scenario.expectedFlags.expectFraudReview) {
+    // 4. Production-owned control assertions (v3.5 — hardened)
+    // Six-point success criteria:
+    //   1. cluster formed
+    //   2. evaluate_cluster_risk executed
+    //   3. fraud review exists
+    //   4. account flags exist
+    //   5. cluster risk_score / flag_reason updated
+    //   6. no duplicates on rerun
+    if (scenario.expectedFlags.expectFraudReview || scenario.expectedFlags.expectFlags) {
       const clusterIds = [...new Set(
         (await supabase.from('device_fingerprints')
           .select('cluster_id')
@@ -1296,45 +1300,149 @@ async function runCrossAccountScenario(
           .data?.map(f => f.cluster_id).filter(Boolean) ?? []
       )]
 
+      // ── Criterion 1: Cluster formed ──
+      assertions.push({
+        check: 'ctrl:cluster_formed',
+        expected: '>= 1 identity cluster',
+        actual: `${clusterIds.length} clusters`,
+        pass: clusterIds.length >= 1,
+      })
+
+      // ── Criterion 2: evaluate_cluster_risk executed ──
+      // Call the production RPC (idempotent — safe to call even if trigger already fired)
+      const evalResults: Array<{ action: string; idempotent: boolean }> = []
+      for (const cid of clusterIds) {
+        const { data: evalResult } = await supabase.rpc('evaluate_cluster_risk', {
+          _cluster_id: cid,
+          _request_id: crypto.randomUUID(),
+        })
+        if (evalResult) evalResults.push(evalResult as unknown as { action: string; idempotent: boolean })
+      }
+
+      assertions.push({
+        check: 'ctrl:evaluate_cluster_risk_executed',
+        expected: 'RPC returned action result',
+        actual: evalResults.length > 0
+          ? `${evalResults.length} evaluations (actions: ${evalResults.map(r => r.action).join(', ')})`
+          : 'no evaluations returned',
+        pass: evalResults.length >= 1,
+      })
+
+      // ── Criterion 3: Fraud review exists ──
+      if (scenario.expectedFlags.expectFraudReview) {
+        const { data: fraudReviews } = await supabase.from('fraud_reviews')
+          .select('id, entity_type, entity_id, status, severity, review_type, details')
+          .eq('entity_type', 'identity_cluster')
+          .in('entity_id', clusterIds.length > 0 ? clusterIds : ['none'])
+
+        assertions.push({
+          check: 'ctrl:fraud_review_exists',
+          expected: '>= 1 fraud review for cluster (production-owned)',
+          actual: `${fraudReviews?.length ?? 0} reviews (types: ${[...new Set(fraudReviews?.map(r => r.review_type) ?? [])].join(', ')})`,
+          pass: (fraudReviews?.length ?? 0) >= 1,
+        })
+
+        // Verify review has structured rationale
+        const hasRationale = fraudReviews?.some(r =>
+          r.details && typeof r.details === 'object' && (r.details as Record<string, unknown>).rationale
+        )
+        assertions.push({
+          check: 'ctrl:fraud_review_has_rationale',
+          expected: 'review.details.rationale is populated',
+          actual: hasRationale ? 'rationale present' : 'rationale missing',
+          pass: !!hasRationale,
+        })
+      }
+
+      // ── Criterion 4: Account flags exist ──
+      if (scenario.expectedFlags.expectFlags) {
+        const { data: flagRows } = await supabase.from('flags')
+          .select('id, account_id, flag_type, reason, severity')
+          .in('account_id', accountIds)
+          .eq('flag_type', 'cluster_abuse')
+
+        const flagCount = flagRows?.length ?? 0
+        assertions.push({
+          check: 'ctrl:abuse_flags_exist',
+          expected: `>= 1 cluster_abuse flag on involved accounts`,
+          actual: `${flagCount} flags`,
+          pass: flagCount >= 1,
+        })
+
+        // Verify flags have structured reason
+        const hasReason = flagRows?.some(f => f.reason && f.reason.includes('Cluster'))
+        assertions.push({
+          check: 'ctrl:flags_have_reason',
+          expected: 'flag.reason contains structured rationale',
+          actual: hasReason ? 'structured reason present' : 'missing or generic',
+          pass: !!hasReason,
+        })
+      }
+
+      // ── Criterion 5: Cluster risk_score / flag_reason updated ──
       if (clusterIds.length > 0) {
-        // Explicitly call the production RPC (trigger may have already fired,
-        // but this ensures evaluation runs even if trigger timing is async)
+        const { data: clusterRow } = await supabase.from('identity_clusters')
+          .select('risk_score, is_flagged, flag_reason')
+          .eq('id', clusterIds[0])
+          .single()
+
+        assertions.push({
+          check: 'ctrl:cluster_risk_updated',
+          expected: 'risk_score > 0, is_flagged = true, flag_reason set',
+          actual: clusterRow
+            ? `score=${clusterRow.risk_score}, flagged=${clusterRow.is_flagged}, reason=${(clusterRow.flag_reason ?? '').slice(0, 60)}`
+            : 'cluster not found',
+          pass: !!(clusterRow && clusterRow.risk_score > 0 && clusterRow.is_flagged && clusterRow.flag_reason),
+        })
+      }
+
+      // ── Criterion 6: No duplicates on rerun ──
+      // Call evaluate_cluster_risk again — should be idempotent
+      if (clusterIds.length > 0) {
+        // Count before rerun
+        const { count: reviewsBefore } = await supabase.from('fraud_reviews')
+          .select('*', { count: 'exact', head: true })
+          .eq('entity_type', 'identity_cluster')
+          .in('entity_id', clusterIds)
+
+        const { count: flagsBefore } = await supabase.from('flags')
+          .select('*', { count: 'exact', head: true })
+          .in('account_id', accountIds)
+          .eq('flag_type', 'cluster_abuse')
+
+        // Rerun
         for (const cid of clusterIds) {
           await supabase.rpc('evaluate_cluster_risk', {
             _cluster_id: cid,
             _request_id: crypto.randomUUID(),
           })
         }
+
+        // Count after rerun
+        const { count: reviewsAfter } = await supabase.from('fraud_reviews')
+          .select('*', { count: 'exact', head: true })
+          .eq('entity_type', 'identity_cluster')
+          .in('entity_id', clusterIds)
+
+        const { count: flagsAfter } = await supabase.from('flags')
+          .select('*', { count: 'exact', head: true })
+          .in('account_id', accountIds)
+          .eq('flag_type', 'cluster_abuse')
+
+        assertions.push({
+          check: 'ctrl:no_duplicate_reviews_on_rerun',
+          expected: `review count unchanged after rerun`,
+          actual: `before=${reviewsBefore ?? 0}, after=${reviewsAfter ?? 0}`,
+          pass: (reviewsBefore ?? 0) === (reviewsAfter ?? 0),
+        })
+
+        assertions.push({
+          check: 'ctrl:no_duplicate_flags_on_rerun',
+          expected: `flag count unchanged after rerun`,
+          actual: `before=${flagsBefore ?? 0}, after=${flagsAfter ?? 0}`,
+          pass: (flagsBefore ?? 0) === (flagsAfter ?? 0),
+        })
       }
-
-      // Assert fraud reviews were created by the production RPC
-      const { data: fraudReviews } = await supabase.from('fraud_reviews')
-        .select('id, entity_type, entity_id, status, severity, review_type')
-        .eq('entity_type', 'identity_cluster')
-        .in('entity_id', clusterIds.length > 0 ? clusterIds : ['none'])
-
-      assertions.push({
-        check: 'fraud_review_created',
-        expected: '>= 1 fraud review for cluster (production-owned)',
-        actual: `${fraudReviews?.length ?? 0} reviews (types: ${[...new Set(fraudReviews?.map(r => r.review_type) ?? [])].join(', ')})`,
-        pass: (fraudReviews?.length ?? 0) >= 1,
-      })
-    }
-
-    if (scenario.expectedFlags.expectFlags) {
-      // Assert flags were created by the production evaluate_cluster_risk RPC
-      // No manual flag creation — production path owns this
-      const { count: flagCount } = await supabase.from('flags')
-        .select('*', { count: 'exact', head: true })
-        .in('account_id', accountIds)
-        .eq('flag_type', 'cluster_abuse')
-
-      assertions.push({
-        check: 'abuse_flags_created',
-        expected: `>= 1 cluster_abuse flag on involved accounts (production-owned)`,
-        actual: `${flagCount ?? 0} flags`,
-        pass: (flagCount ?? 0) >= 1,
-      })
     }
 
     const allPass = assertions.every(a => a.pass)
