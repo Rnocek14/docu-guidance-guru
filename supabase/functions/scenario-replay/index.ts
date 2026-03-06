@@ -2181,7 +2181,7 @@ Deno.serve(async (req: Request) => {
 
   const response = {
     run_id: runId,
-    version: '3.2',
+    version: '3.3',
     mode,
     timestamp: new Date().toISOString(),
     users: profiles.map(p => p.email),
