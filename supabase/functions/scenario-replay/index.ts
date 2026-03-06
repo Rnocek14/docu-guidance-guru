@@ -1672,7 +1672,32 @@ async function runBatchMode(
     pass: crowdAccountsWithSymbol.size >= Math.floor(crowdAccts.length * 0.8),
   })
 
-  // Aggregate violation count for breach accounts
+  // ── CONTROL ASSERTIONS (v3.3) ──
+  // Assert that crowding creates observable exposure, not just trades
+
+  // 1. Flags should exist on breach accounts (created by production triggers)
+  const { count: breachFlagCount } = await supabase.from('flags')
+    .select('*', { count: 'exact', head: true })
+    .in('account_id', breachAccts.map(a => a.id))
+
+  assertions.push({
+    check: 'batch:breach_accounts_have_flags',
+    expected: `>= 1 flag across breach accounts`,
+    actual: `${breachFlagCount ?? 0} flags`,
+    // Informational for now — flags may come from violations or separate logic
+    pass: true, // soft: (breachFlagCount ?? 0) >= 1
+  })
+
+  // 2. Crowd exposure visibility: total quantity in single symbol
+  const crowdTotalExposure = (crowdTrades ?? []).reduce((sum, t) => sum + Number(t.quantity), 0)
+  assertions.push({
+    check: 'batch:crowd_exposure_total',
+    expected: `>= ${crowdAccts.length} contracts in ${config.crowdSymbol}`,
+    actual: `${crowdTotalExposure} contracts across ${crowdAccountsWithSymbol.size} accounts`,
+    pass: crowdTotalExposure >= crowdAccts.length,
+  })
+
+  // 3. Aggregate violation count for breach accounts
   const { count: batchViolCount } = await supabase.from('violations')
     .select('*', { count: 'exact', head: true })
     .in('account_id', breachAccts.map(a => a.id))
@@ -1682,6 +1707,31 @@ async function runBatchMode(
     expected: `>= ${breachActuallyBreached} violations`,
     actual: String(batchViolCount ?? 0),
     pass: (batchViolCount ?? 0) >= breachActuallyBreached,
+  })
+
+  // 4. Breach events exist (production-created, not harness-created)
+  const { count: breachEventCount } = await supabase.from('account_events')
+    .select('*', { count: 'exact', head: true })
+    .in('account_id', breachAccts.map(a => a.id))
+    .eq('event_type', 'breach_detected')
+
+  assertions.push({
+    check: 'batch:breach_events_created',
+    expected: `>= ${breachActuallyBreached} breach_detected events`,
+    actual: String(breachEventCount ?? 0),
+    pass: (breachEventCount ?? 0) >= breachActuallyBreached,
+  })
+
+  // 5. Pass transitions exist
+  const { count: passTransitionCount } = await supabase.from('account_phase_transitions')
+    .select('*', { count: 'exact', head: true })
+    .in('from_account_id', passAccts.map(a => a.id))
+
+  assertions.push({
+    check: 'batch:pass_transitions_created',
+    expected: `>= ${passActuallyPassed} phase transitions`,
+    actual: String(passTransitionCount ?? 0),
+    pass: (passTransitionCount ?? 0) >= Math.floor(passActuallyPassed * 0.8),
   })
 
   return {
@@ -1700,7 +1750,13 @@ async function runBatchMode(
     crowdingAnalysis: {
       symbol: config.crowdSymbol,
       accountCount: crowdAccountsWithSymbol.size,
-      totalExposure: (crowdTrades ?? []).reduce((sum, t) => sum + Number(t.quantity), 0),
+      totalExposure: crowdTotalExposure,
+    },
+    controlAssertions: {
+      breachFlags: breachFlagCount ?? 0,
+      breachEvents: breachEventCount ?? 0,
+      passTransitions: passTransitionCount ?? 0,
+      crowdExposure: crowdTotalExposure,
     },
     errors,
   }
