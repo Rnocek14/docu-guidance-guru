@@ -8,17 +8,19 @@
 
 The Meridian platform is architecturally mature with strong idempotency patterns, fail-closed safety gates, and a well-separated concern model. The core pipeline (ingest → breach → pass → payout → payment) is production-grade.
 
-**However, the audit found 7 high-priority issues:**
+**Audit updated 2026-03-06 after remediation pass:**
 
-1. **TIER_CONFIG duplicated in 4 places** with contradictory values (splitPercent, lifetimeCapMultiple, firstPayoutCap differ between files)
-2. **normalizeSymbol duplicated in 3 places** — reconcile-trades has its own copy instead of importing the shared module
-3. **Cluster risk managed by 2 writers** — `collect-fingerprint` EF and `evaluate_cluster_risk` RPC both write to `identity_clusters` with slightly different logic
-4. **constantTimeEqual duplicated in 4 files** — should be a shared utility
-5. **generateDeterministicKey duplicated in 2 files** — identical code in payout-actions and review-actions
-6. **Frontend pricing-data.ts contradicts backend TIER_CONFIG** — lifetimeCapMultiple=10 (frontend) vs 7/9/12 (backend), firstPayoutCap=500 (frontend) vs 300/500/750 (backend)
-7. **get-admin-readiness and get-tier-readiness are near-identical** — ~70% code overlap
+### RESOLVED (previously high-priority):
+1. ~~**TIER_CONFIG duplicated in 4 places**~~ → **FIXED**: Created `_shared/checkout/tier-economics.ts` as canonical source. All 4 consumers now import from it. Values reconciled with DB cohorts (80% split, $500 cap, 10× lifetime for all base tiers).
+2. ~~**normalizeSymbol duplicated in 3 places**~~ → **FIXED**: `reconcile-trades` now imports from `_shared/brokers/normalize-symbol.ts`
+3. ~~**Cluster risk managed by 2 writers**~~ → **FIXED**: `collect-fingerprint` no longer writes `risk_score`/`is_flagged`. `evaluate_cluster_risk` RPC is canonical owner.
+4. **constantTimeEqual duplicated in 4 files** → **SHARED MODULE CREATED** (`_shared/crypto.ts`). Edge functions not yet migrated to import (low-risk, identical logic).
+5. **generateDeterministicKey duplicated in 2 files** → **SHARED MODULE CREATED** (`_shared/crypto.ts`). Edge functions not yet migrated to import (low-risk, identical logic).
+6. ~~**Frontend pricing-data.ts contradicts backend TIER_CONFIG**~~ → **FIXED**: `pricing-data.ts` now matches DB cohorts exactly (80% split, $500 cap, 10× lifetime for all tiers).
+7. **get-admin-readiness and get-tier-readiness are near-identical** — ~70% code overlap. Both now import from shared tier-economics.ts, reducing duplication. Full merge is future debt.
+8. ~~**get-pass-rate-stats uses updated_at for windowing**~~ → **FIXED**: Now uses `passed_at`/`failed_at` timestamps for accurate metrics.
 
-**Verdict: CONDITIONAL GO** — The core pipeline is sound. Fix items #1 and #6 (tier config contradiction) before launch. Items #2-5 are cleanup for code health. Item #7 is debt.
+**Verdict: CONDITIONAL GO → GO** — All launch blockers resolved. Remaining items (#4, #5, #7) are code health debt, not production risks.
 
 ---
 
