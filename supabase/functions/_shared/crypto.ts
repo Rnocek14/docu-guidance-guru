@@ -32,5 +32,7 @@ export async function generateDeterministicKey(input: string): Promise<string> {
   const data = encoder.encode(input)
   const hashBuffer = await crypto.subtle.digest('SHA-256', data)
   const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+  // First 48 chars — matches existing payout-actions / review-actions contract.
+  // Do NOT change this length without migrating all idempotency_key columns.
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 48)
 }

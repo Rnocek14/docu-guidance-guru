@@ -42,15 +42,7 @@ const STATE_TRANSITIONS: Record<string, { from: string[]; to: string }> = {
   },
 }
 
-// Helper: Generate deterministic idempotency key via SHA-256
-async function generateDeterministicKey(input: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(input)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-  return hashHex.slice(0, 48)
-}
+import { generateDeterministicKey } from '../_shared/crypto.ts'
 
 // Helper: Normalize event_type to safe charset (snake_case, collapsed underscores)
 function normalizeEventType(eventType: string): string {
