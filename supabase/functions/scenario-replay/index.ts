@@ -1445,6 +1445,87 @@ async function runCrossAccountScenario(
           actual: `before=${flagsBefore ?? 0}, after=${flagsAfter ?? 0}`,
           pass: (flagsBefore ?? 0) === (flagsAfter ?? 0),
         })
+
+        // ── Criterion 7: Selective backfill ──
+        // Delete ONE flag, rerun, and prove ONLY the missing flag is recreated
+        // while reviews stay unchanged (minimum corrective action semantics)
+        const { data: existingFlags } = await supabase.from('flags')
+          .select('id, account_id')
+          .in('account_id', accountIds)
+          .eq('flag_type', 'cluster_abuse')
+          .limit(1)
+
+        if (existingFlags && existingFlags.length > 0) {
+          const deletedFlagAccountId = existingFlags[0].account_id
+          await supabase.from('flags').delete().eq('id', existingFlags[0].id)
+
+          const { count: flagsAfterDelete } = await supabase.from('flags')
+            .select('*', { count: 'exact', head: true })
+            .in('account_id', accountIds)
+            .eq('flag_type', 'cluster_abuse')
+
+          const { count: reviewsBeforeBackfill } = await supabase.from('fraud_reviews')
+            .select('*', { count: 'exact', head: true })
+            .eq('entity_type', 'identity_cluster')
+            .in('entity_id', clusterIds)
+
+          // Rerun — should backfill only the missing flag
+          for (const cid of clusterIds) {
+            await supabase.rpc('evaluate_cluster_risk', {
+              _cluster_id: cid,
+              _request_id: crypto.randomUUID(),
+            })
+          }
+
+          const { count: flagsAfterBackfill } = await supabase.from('flags')
+            .select('*', { count: 'exact', head: true })
+            .in('account_id', accountIds)
+            .eq('flag_type', 'cluster_abuse')
+
+          const { count: reviewsAfterBackfill } = await supabase.from('fraud_reviews')
+            .select('*', { count: 'exact', head: true })
+            .eq('entity_type', 'identity_cluster')
+            .in('entity_id', clusterIds)
+
+          // Flag count should be restored (backfilled the deleted one)
+          assertions.push({
+            check: 'ctrl:selective_backfill_flag_restored',
+            expected: `flag count restored after deleting one (${flagsAfter ?? 0} → ${(flagsAfterDelete ?? 0)} → ${flagsAfter ?? 0})`,
+            actual: `before_delete=${flagsAfter ?? 0}, after_delete=${flagsAfterDelete ?? 0}, after_backfill=${flagsAfterBackfill ?? 0}`,
+            pass: (flagsAfterBackfill ?? 0) === (flagsAfter ?? 0),
+          })
+
+          // Reviews should NOT increase (existing review still pending/in_review)
+          assertions.push({
+            check: 'ctrl:selective_backfill_no_new_reviews',
+            expected: `review count unchanged during backfill`,
+            actual: `before=${reviewsBeforeBackfill ?? 0}, after=${reviewsAfterBackfill ?? 0}`,
+            pass: (reviewsBeforeBackfill ?? 0) === (reviewsAfterBackfill ?? 0),
+          })
+
+          // Verify the backfilled flag is on the correct account
+          const { data: backfilledFlag } = await supabase.from('flags')
+            .select('id, account_id')
+            .eq('account_id', deletedFlagAccountId)
+            .eq('flag_type', 'cluster_abuse')
+            .limit(1)
+
+          assertions.push({
+            check: 'ctrl:selective_backfill_correct_account',
+            expected: `backfilled flag on account ${deletedFlagAccountId.slice(0, 8)}...`,
+            actual: backfilledFlag && backfilledFlag.length > 0
+              ? `flag restored on ${backfilledFlag[0].account_id.slice(0, 8)}...`
+              : 'flag NOT restored',
+            pass: !!(backfilledFlag && backfilledFlag.length > 0),
+          })
+        } else {
+          assertions.push({
+            check: 'ctrl:selective_backfill_flag_restored',
+            expected: 'selective backfill test (skipped — no flags to delete)',
+            actual: 'no existing flags found',
+            pass: true,
+          })
+        }
       }
     }
 
