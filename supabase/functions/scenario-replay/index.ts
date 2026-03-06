@@ -1,16 +1,19 @@
 // ============================================================
-// Scenario Replay Runner v3.4
+// Scenario Replay Runner v3.5
 // ============================================================
 // Replays deterministic trade sequences through the canonical
 // ingest_trade_atomic RPC and asserts expected outcomes.
 //
-// v3.4 changes:
-//   - Production-owned control generation: fraud_reviews and flags
-//     are now created by the production evaluate_cluster_risk RPC
-//     and trg_fingerprint_cluster_risk trigger, NOT by the harness.
-//     Harness only asserts their existence.
-//   - Removed all manual fraud_review/flag inserts from harness
-//   - Cleanup updated to handle cluster_risk_evaluation review_type
+// v3.5 changes:
+//   - Six-point success criteria for cluster-correlated-abuse:
+//     1. cluster formed
+//     2. evaluate_cluster_risk executed
+//     3. fraud review exists (with structured rationale)
+//     4. account flags exist (with structured reason)
+//     5. cluster risk_score / flag_reason updated
+//     6. no duplicates on rerun (idempotency proof)
+//   - Unique constraint on flags(account_id, flag_type)
+//   - evaluate_cluster_risk returns idempotent: true on rerun
 //
 // POST /scenario-replay
 //   Auth: CRON_SECRET or admin JWT
