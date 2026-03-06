@@ -18,6 +18,21 @@ export interface PricingTier {
   isLive: boolean;
 }
 
+/**
+ * CANONICAL FRONTEND TIER DATA
+ *
+ * These values MUST match the DB cohorts table (Performance phase)
+ * and supabase/functions/_shared/checkout/tier-economics.ts.
+ *
+ * Source of truth chain:
+ *   DB cohorts (Performance phase) → tier-economics.ts → this file
+ *
+ * Base payout economics (Starter ladder, 0 clean payouts):
+ *   - 80% split, $500 first payout cap, 10× lifetime cap, 14d cooldown
+ *
+ * Ladder progression (Pro/Elite tiers) is NOT reflected here —
+ * those upgrades happen server-side at payout evaluation time.
+ */
 export const TIERS: PricingTier[] = [
   {
     id: "starter",

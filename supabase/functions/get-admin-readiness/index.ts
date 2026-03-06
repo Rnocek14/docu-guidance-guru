@@ -1,39 +1,20 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@18.5.0'
+import { TIER_ECONOMICS, TIER_STRIPE } from '../_shared/checkout/tier-economics.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
-// ── Canonical tier config (single source of truth) ──
-const TIER_CONFIG: Record<string, {
-  priceId: string; productId: string; name: string;
-  accountSize: number; entryFee: number; isLive: boolean;
-  firstPayoutCap: number; splitPercent: number; lifetimeCapMultiple: number;
-}> = {
-  starter: {
-    priceId: 'price_1SxvRoLH4HmFKO8KSW3FUPzA',
-    productId: 'prod_Tvn1elGTRKWmdC',
-    name: 'Starter Evaluation',
-    accountSize: 50_000, entryFee: 149, isLive: true,
-    firstPayoutCap: 300, splitPercent: 80, lifetimeCapMultiple: 7,
-  },
-  pro: {
-    priceId: 'price_1SxvRpLH4HmFKO8KfvQtaGTV',
-    productId: 'prod_Tvn1sJVvjM0QoF',
-    name: 'Pro Evaluation',
-    accountSize: 100_000, entryFee: 199, isLive: false,
-    firstPayoutCap: 500, splitPercent: 82, lifetimeCapMultiple: 9,
-  },
-  elite: {
-    priceId: 'price_1SxvRqLH4HmFKO8KwCfeCx1C',
-    productId: 'prod_Tvn1vcoJGH3uwR',
-    name: 'Elite Evaluation',
-    accountSize: 200_000, entryFee: 349, isLive: false,
-    firstPayoutCap: 750, splitPercent: 85, lifetimeCapMultiple: 12,
-  },
-}
+// Merged config for internal use (economics + stripe)
+const TIER_CONFIG = Object.fromEntries(
+  Object.entries(TIER_ECONOMICS).map(([id, econ]) => [id, {
+    ...econ,
+    priceId: TIER_STRIPE[id]?.priceId ?? '',
+    productId: TIER_STRIPE[id]?.productId ?? '',
+  }])
+)
 
 interface CheckResult { ok: boolean; detail: string; verifyUnavailable?: boolean }
 interface Blocker { key: string; severity: 'warning' | 'blocking'; detail: string }

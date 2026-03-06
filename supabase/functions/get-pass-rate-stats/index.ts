@@ -68,8 +68,6 @@ Deno.serve(async (req) => {
     if (failErr) throw failErr;
 
     const accounts = [...(passedAccounts ?? []), ...(failedAccounts ?? [])];
-    if (accErr) throw accErr;
-
     // 4) Fetch ALL cohorts referenced by those accounts (not filtered by is_active)
     const referencedCohortIds = [...new Set((accounts ?? []).map((a) => a.cohort_id))];
 

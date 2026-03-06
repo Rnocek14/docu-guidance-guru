@@ -1,42 +1,25 @@
 // ============================================================
-// Provider-independent tier configuration
-// Stripe price IDs, Paddle product IDs, etc. are stored
-// per-provider, NOT here. This is the canonical source of truth
-// for tier definitions.
+// Checkout-specific config — re-exports from canonical source.
+// This file exists for backward compatibility with
+// create-checkout-session and stripe-webhook imports.
 // ============================================================
 
+import { TIER_ECONOMICS, TIER_COHORT_MAP, RULES_VERSION } from './tier-economics.ts'
 import type { CheckoutTierConfig } from './types.ts'
 
-export const TIERS: Record<string, CheckoutTierConfig> = {
-  starter: {
-    tierId: 'starter',
-    name: 'Starter Evaluation',
-    accountSize: 50_000,
-    entryFee: 149,
-    isLive: true,
-  },
-  pro: {
-    tierId: 'pro',
-    name: 'Pro Evaluation',
-    accountSize: 100_000,
-    entryFee: 199,
-    isLive: false,
-  },
-  elite: {
-    tierId: 'elite',
-    name: 'Elite Evaluation',
-    accountSize: 200_000,
-    entryFee: 349,
-    isLive: false,
-  },
-}
+// Re-export canonical values
+export { TIER_COHORT_MAP, RULES_VERSION }
 
-// Tier → Cohort mapping for fulfillment (provider-independent)
-export const TIER_COHORT_MAP: Record<string, { accountSize: number; cohortName: string }> = {
-  starter: { accountSize: 50_000, cohortName: 'Starter' },
-  pro: { accountSize: 100_000, cohortName: 'Pro' },
-  elite: { accountSize: 200_000, cohortName: 'Elite' },
-}
-
-// Server-authoritative rules version — never trust client value
-export const RULES_VERSION = 'v1.0'
+/**
+ * TIERS map used by create-checkout-session.
+ * Derived from TIER_ECONOMICS — do NOT add values here.
+ */
+export const TIERS: Record<string, CheckoutTierConfig> = Object.fromEntries(
+  Object.entries(TIER_ECONOMICS).map(([id, t]) => [id, {
+    tierId: t.tierId,
+    name: t.name,
+    accountSize: t.accountSize,
+    entryFee: t.entryFee,
+    isLive: t.isLive,
+  }])
+)

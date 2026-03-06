@@ -1,56 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@18.5.0'
+import { TIER_ECONOMICS, TIER_STRIPE } from '../_shared/checkout/tier-economics.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
-}
-
-// ── Canonical tier config (mirrors create-checkout-session) ──────────
-const TIER_CONFIG: Record<string, {
-  priceId: string
-  productId: string
-  name: string
-  accountSize: number
-  entryFee: number
-  isLive: boolean
-  firstPayoutCap: number
-  splitPercent: number
-  lifetimeCapMultiple: number
-}> = {
-  starter: {
-    priceId: 'price_1SxvRoLH4HmFKO8KSW3FUPzA',
-    productId: 'prod_Tvn1elGTRKWmdC',
-    name: 'Starter Evaluation',
-    accountSize: 50_000,
-    entryFee: 149,
-    isLive: true,
-    firstPayoutCap: 300,
-    splitPercent: 80,
-    lifetimeCapMultiple: 7,
-  },
-  pro: {
-    priceId: 'price_1SxvRpLH4HmFKO8KfvQtaGTV',
-    productId: 'prod_Tvn1sJVvjM0QoF',
-    name: 'Pro Evaluation',
-    accountSize: 100_000,
-    entryFee: 199,
-    isLive: false,
-    firstPayoutCap: 500,
-    splitPercent: 82,
-    lifetimeCapMultiple: 9,
-  },
-  elite: {
-    priceId: 'price_1SxvRqLH4HmFKO8KwCfeCx1C',
-    productId: 'prod_Tvn1vcoJGH3uwR',
-    name: 'Elite Evaluation',
-    accountSize: 200_000,
-    entryFee: 349,
-    isLive: false,
-    firstPayoutCap: 750,
-    splitPercent: 85,
-    lifetimeCapMultiple: 12,
-  },
 }
 
 interface CheckResult {
@@ -101,7 +55,6 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     )
 
-    // Use getUser() — canonical JWT verification
     const { data: userData, error: userErr } = await supabase.auth.getUser()
     if (userErr || !userData?.user?.id) {
       return json(401, { error: 'Invalid token' })
@@ -109,7 +62,6 @@ Deno.serve(async (req) => {
 
     const userId = userData.user.id
 
-    // Check admin role
     const { data: roleRow, error: roleErr } = await supabase
       .from('user_roles')
       .select('role')
@@ -131,7 +83,6 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Fetch all active cohorts
     const { data: cohorts, error: cohortQueryErr } = await serviceClient
       .from('cohorts')
       .select('id, name, cohort_phase, is_active, entry_fee, tier_id')
@@ -139,7 +90,6 @@ Deno.serve(async (req) => {
 
     const activeCohorts = cohorts || []
 
-    // Check Stripe key presence
     const stripeKey = Deno.env.get('STRIPE_SECRET_KEY')
     const stripeKeyPresent = !!stripeKey && stripeKey.length > 10
 
@@ -148,11 +98,11 @@ Deno.serve(async (req) => {
     if (deep && stripeKeyPresent) {
       try {
         const stripe = new Stripe(stripeKey!)
-        for (const [id, cfg] of Object.entries(TIER_CONFIG)) {
+        for (const [id, stripeCfg] of Object.entries(TIER_STRIPE)) {
           try {
             const [price, product] = await Promise.all([
-              stripe.prices.retrieve(cfg.priceId).catch(() => null),
-              stripe.products.retrieve(cfg.productId).catch(() => null),
+              stripe.prices.retrieve(stripeCfg.priceId).catch(() => null),
+              stripe.products.retrieve(stripeCfg.productId).catch(() => null),
             ])
             const priceProductId = price
               ? (typeof price.product === 'string' ? price.product : (price.product as { id: string })?.id)
@@ -160,7 +110,7 @@ Deno.serve(async (req) => {
             stripeDeepResults[id] = {
               priceValid: !!price && price.active === true,
               productValid: !!product,
-              priceMatchesProduct: priceProductId === cfg.productId,
+              priceMatchesProduct: priceProductId === stripeCfg.productId,
               observedPriceProductId: priceProductId,
             }
           } catch (e) {
@@ -178,16 +128,18 @@ Deno.serve(async (req) => {
     }
 
     // ── Build per-tier readiness ─────────────────────────────
-    const tiers: TierReadiness[] = Object.entries(TIER_CONFIG).map(([id, cfg]) => {
+    const tiers: TierReadiness[] = Object.entries(TIER_ECONOMICS).map(([id, econ]) => {
+      const stripeCfg = TIER_STRIPE[id]
+
       // Purchasable check
       const purchasable = {
-        ok: cfg.isLive,
-        detail: cfg.isLive ? 'Tier is live' : 'isLive = false — blocked in UI and server',
+        ok: econ.isLive,
+        detail: econ.isLive ? 'Tier is live' : 'isLive = false — blocked in UI and server',
       }
 
       // Stripe wired check
-      const hasPriceId = !!cfg.priceId && cfg.priceId.startsWith('price_')
-      const hasProductId = !!cfg.productId && cfg.productId.startsWith('prod_')
+      const hasPriceId = !!stripeCfg?.priceId && stripeCfg.priceId.startsWith('price_')
+      const hasProductId = !!stripeCfg?.productId && stripeCfg.productId.startsWith('prod_')
 
       let stripeDetail: string
       let stripeOk: boolean
@@ -206,7 +158,7 @@ Deno.serve(async (req) => {
         } else if (!dr.productValid) {
           stripeDetail = 'Product not found or inactive in Stripe'
         } else if (!dr.priceMatchesProduct) {
-          stripeDetail = `Mismatch: price.product=${dr.observedPriceProductId} but expected ${cfg.productId}`
+          stripeDetail = `Mismatch: price.product=${dr.observedPriceProductId} but expected ${stripeCfg.productId}`
         } else {
           stripeDetail = 'Price and product verified active in Stripe'
         }
@@ -223,9 +175,9 @@ Deno.serve(async (req) => {
         stripeWired = { ok: stripeOk, detail: stripeDetail }
       }
 
-      // Cohort ready check — prefer tier_id match, fallback to entry_fee
+      // Cohort ready check
       const matchingCohort = activeCohorts.find(
-        (c) => (c.tier_id === id) || (!c.tier_id && c.entry_fee === cfg.entryFee)
+        (c) => (c.tier_id === id) || (!c.tier_id && c.entry_fee === econ.entryFee)
       )
       const cohortReady = {
         ok: !!matchingCohort,
@@ -236,17 +188,17 @@ Deno.serve(async (req) => {
             : `No active cohort found for tier "${id}"`,
       }
 
-      // Server gate check — uses deep Stripe results when available
+      // Server gate check
       const deepResult = deep ? stripeDeepResults[id] : null
       const deepStripeOk = deepResult
         ? deepResult.priceValid && deepResult.productValid && deepResult.priceMatchesProduct
         : null
       const deepVerifyUnavailable = !!deepResult?.error
       const gateStripeOk = deepStripeOk !== null ? deepStripeOk : (hasPriceId && hasProductId && stripeKeyPresent)
-      const gateInputsPresent = cfg.isLive && gateStripeOk
+      const gateInputsPresent = econ.isLive && gateStripeOk
       const serverGateOk: CheckResult = {
         ok: gateInputsPresent,
-        detail: !cfg.isLive
+        detail: !econ.isLive
           ? 'Server returns 400: TIER_NOT_LIVE'
           : !stripeKeyPresent
             ? 'Server will fail: STRIPE_CONFIG_MISSING'
@@ -264,13 +216,13 @@ Deno.serve(async (req) => {
 
       return {
         id,
-        name: cfg.name,
-        isLive: cfg.isLive,
-        entryFee: cfg.entryFee,
-        accountSize: cfg.accountSize,
-        firstPayoutCap: cfg.firstPayoutCap,
-        splitPercent: cfg.splitPercent,
-        lifetimeCapMultiple: cfg.lifetimeCapMultiple,
+        name: econ.name,
+        isLive: econ.isLive,
+        entryFee: econ.entryFee,
+        accountSize: econ.accountSize,
+        firstPayoutCap: econ.firstPayoutCap,
+        splitPercent: econ.splitPercent,
+        lifetimeCapMultiple: econ.lifetimeCapMultiple,
         checks: { purchasable, stripeWired, cohortReady, serverGateOk },
       }
     })
