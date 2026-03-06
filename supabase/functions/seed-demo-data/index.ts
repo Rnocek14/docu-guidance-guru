@@ -995,7 +995,7 @@ Deno.serve(async (req: Request) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     err(`Fatal: ${msg}`)
-    return new Response(JSON.stringify({ success: false, error: msg, log, errors }), {
+    return new Response(JSON.stringify({ success: false, error: 'Internal server error', log, errors }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

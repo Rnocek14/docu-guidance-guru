@@ -421,7 +421,7 @@ Deno.serve(async (req) => {
     console.error('Reconciliation error:', error)
     
     return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error', request_id: requestId }),
+      JSON.stringify({ error: 'Internal server error', request_id: requestId }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }

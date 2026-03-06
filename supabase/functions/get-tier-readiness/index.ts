@@ -231,6 +231,6 @@ Deno.serve(async (req) => {
   } catch (err) {
     const error = err as Error
     console.error('get-tier-readiness error:', error)
-    return json(500, { error: error.message })
+    return json(500, { error: 'Internal server error' })
   }
 })

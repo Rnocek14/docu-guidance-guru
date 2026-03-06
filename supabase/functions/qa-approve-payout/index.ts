@@ -180,6 +180,6 @@ Deno.serve(async (req) => {
     }, null, 2), { status: 200, headers })
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: 'Unexpected error', details: String(err) }), { status: 500, headers })
+    return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500, headers })
   }
 })

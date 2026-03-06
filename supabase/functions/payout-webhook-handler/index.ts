@@ -395,7 +395,7 @@ Deno.serve(async (req) => {
     console.error('Webhook handler error:', error)
     // Return 500 so Wise retries (could be transient)
     return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error' }),
+      JSON.stringify({ error: 'Internal server error' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }

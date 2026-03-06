@@ -383,6 +383,6 @@ Deno.serve(async (req) => {
     })
   } catch (err) {
     console.error('get-admin-readiness error:', err)
-    return json(500, { error: (err as Error).message })
+    return json(500, { error: 'Internal server error' })
   }
 })
