@@ -64,12 +64,17 @@ async function verifyAuth(req: Request): Promise<{ ok: boolean; reason?: string 
     return { ok: false, reason: 'Invalid X-Cron-Secret' }
   }
 
-  // 2. JWT — check service_role or admin user
+  // 2. JWT or service_role key — check authorization or apikey header
   const authHeader = req.headers.get('authorization')
+  const apiKeyHeader = req.headers.get('apikey')
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+
+  // Check if apikey header carries the service_role key
+  if (serviceRoleKey && apiKeyHeader === serviceRoleKey) return { ok: true }
+
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7)
-    // Check if this is the service_role key (matches env var)
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    // Check if this is the service_role key
     if (serviceRoleKey && token === serviceRoleKey) return { ok: true }
 
     const sb = createClient(
