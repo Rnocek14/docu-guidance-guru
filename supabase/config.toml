@@ -92,3 +92,6 @@ verify_jwt = false
 
 [functions.scenario-replay]
 verify_jwt = false
+
+[functions.bridge-smoke-test]
+verify_jwt = false
