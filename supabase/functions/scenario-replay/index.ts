@@ -1,14 +1,17 @@
 // ============================================================
-// Scenario Replay Runner v3.2
+// Scenario Replay Runner v3.3
 // ============================================================
 // Replays deterministic trade sequences through the canonical
 // ingest_trade_atomic RPC and asserts expected outcomes.
 //
-// v3.2 changes:
-//   - Batch stress mode: 30 accounts with mixed normal/abusive behavior
-//   - Same-symbol crowding detection (20+ accounts in ES)
-//   - Linked-user cluster batch (4 users sharing fingerprint)
-//   - Launch certification scorecard with GO/NO-GO gate
+// v3.3 changes:
+//   - Batch control assertions: flags, fraud_reviews, exposure alerts
+//     for crowd/breach accounts (not just visibility)
+//   - Cluster-level correlation: fingerprint cluster + mirrored
+//     trades across distinct users
+//   - Latency metrics: per-scenario timing in scorecard
+//   - Severity-graded scorecard: 'required_for_launch' vs
+//     'recommended_before_scale' blocker levels
 //
 // POST /scenario-replay
 //   Auth: CRON_SECRET or admin JWT
