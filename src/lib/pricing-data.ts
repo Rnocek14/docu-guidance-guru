@@ -68,7 +68,6 @@ export const TIERS: PricingTier[] = [
     lifetimeCapMultiple: 10,
     lifetimeCapAmount: 1_990,
     resetFee: 99,
-    resetFee: 99,
     isLive: false,
   },
   {
