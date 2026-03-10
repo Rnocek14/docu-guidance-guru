@@ -95,3 +95,6 @@ verify_jwt = false
 
 [functions.bridge-smoke-test]
 verify_jwt = false
+
+[functions.capacity-monitor]
+verify_jwt = false
