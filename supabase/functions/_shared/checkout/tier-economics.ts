@@ -104,6 +104,24 @@ export const TIER_ECONOMICS: Record<string, TierEconomics> = {
     maxTotalDrawdownPercent: 10,
     minTradingDays: 5,
   },
+  founders: {
+    tierId: 'founders',
+    name: "Founder's Edition",
+    accountSize: 50_000,
+    entryFee: 199,
+    isLive: true,
+    // Proven-safe economics: tighter caps than Starter
+    splitPercent: 80,
+    firstPayoutCap: 300,
+    lifetimeCapMultiple: 7,
+    lifetimeCapAmount: 1_393,  // 199 × 7
+    payoutCooldownDays: 14,
+    resetFee: 99,
+    profitTargetPercent: 10,
+    maxDailyLossPercent: 5,
+    maxTotalDrawdownPercent: 10,
+    minTradingDays: 5,
+  },
 }
 
 /**
@@ -124,6 +142,10 @@ export const TIER_STRIPE: Record<string, TierStripeConfig> = {
     priceId: 'price_1SxvRqLH4HmFKO8KwCfeCx1C',
     productId: 'prod_Tvn1vcoJGH3uwR',
   },
+  founders: {
+    priceId: 'price_1T9XmhLH4HmFKO8KTdwnuSPL',
+    productId: 'prod_U7nNSpm3mImjr0',
+  },
 }
 
 /** Tier → Cohort mapping for fulfillment */
@@ -131,6 +153,7 @@ export const TIER_COHORT_MAP: Record<string, { accountSize: number; cohortName: 
   starter: { accountSize: 50_000, cohortName: 'Starter' },
   pro: { accountSize: 100_000, cohortName: 'Pro' },
   elite: { accountSize: 200_000, cohortName: 'Elite' },
+  founders: { accountSize: 50_000, cohortName: "Founder's Edition" },
 }
 
 /** Server-authoritative rules version — never trust client value */

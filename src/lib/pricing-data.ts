@@ -68,7 +68,6 @@ export const TIERS: PricingTier[] = [
     lifetimeCapMultiple: 10,
     lifetimeCapAmount: 1_990,
     resetFee: 99,
-    popular: true,
     isLive: false,
   },
   {
@@ -88,6 +87,25 @@ export const TIERS: PricingTier[] = [
     lifetimeCapAmount: 3_490,
     resetFee: 99,
     isLive: false,
+  },
+  {
+    id: "founders",
+    name: "Founder's Edition",
+    price: 199,
+    accountSize: "$50,000",
+    accountSizeNum: 50_000,
+    profitTarget: 10,
+    maxDailyLoss: 5,
+    maxTotalDrawdown: 10,
+    minTradingDays: 5,
+    payoutCooldown: 14,
+    firstPayoutCap: 300,
+    splitPercent: 80,
+    lifetimeCapMultiple: 7,
+    lifetimeCapAmount: 1_393,
+    resetFee: 99,
+    popular: true,
+    isLive: true,
   },
 ];
 
