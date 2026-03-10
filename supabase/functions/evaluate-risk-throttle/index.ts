@@ -139,34 +139,37 @@ Deno.serve(async (req) => {
 
     const now = new Date()
 
-    // Calculate pass rates for 7d, 14d, 30d windows
-    const windows = [7, 14, 30]
+    // Calculate pass rates for 7d, 14d, 30d windows — parallelized for scale
+    const windows = [7, 14, 30] as const
+    const windowStarts = windows.map(days => {
+      const d = new Date(now)
+      d.setDate(d.getDate() - days)
+      return d.toISOString()
+    })
+
+    // Fire all 6 queries in parallel (2 per window) instead of sequential
+    const [
+      { count: passed7 }, { count: failed7 },
+      { count: passed14 }, { count: failed14 },
+      { count: passed30 }, { count: failed30 },
+    ] = await Promise.all([
+      supabase.from('accounts').select('*', { count: 'exact', head: true }).eq('status', 'passed').gte('passed_at', windowStarts[0]),
+      supabase.from('accounts').select('*', { count: 'exact', head: true }).eq('status', 'failed_confirmed').gte('failed_at', windowStarts[0]),
+      supabase.from('accounts').select('*', { count: 'exact', head: true }).eq('status', 'passed').gte('passed_at', windowStarts[1]),
+      supabase.from('accounts').select('*', { count: 'exact', head: true }).eq('status', 'failed_confirmed').gte('failed_at', windowStarts[1]),
+      supabase.from('accounts').select('*', { count: 'exact', head: true }).eq('status', 'passed').gte('passed_at', windowStarts[2]),
+      supabase.from('accounts').select('*', { count: 'exact', head: true }).eq('status', 'failed_confirmed').gte('failed_at', windowStarts[2]),
+    ])
+
     const rates: Record<number, { passed: number; total: number; rate: number }> = {}
-
-    for (const days of windows) {
-      const windowStart = new Date(now)
-      windowStart.setDate(windowStart.getDate() - days)
-
-      // Count resolved accounts using resolution timestamps (not updated_at which drifts)
-      // Passed: use passed_at; Failed: use failed_at
-      const { count: passedCount } = await supabase
-        .from('accounts')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'passed')
-        .gte('passed_at', windowStart.toISOString())
-
-      const { count: failedCount } = await supabase
-        .from('accounts')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'failed_confirmed')
-        .gte('failed_at', windowStart.toISOString())
-
-      const passed = passedCount ?? 0
-      const failed = failedCount ?? 0
+    const windowCounts = [
+      [7, passed7 ?? 0, failed7 ?? 0],
+      [14, passed14 ?? 0, failed14 ?? 0],
+      [30, passed30 ?? 0, failed30 ?? 0],
+    ] as const
+    for (const [days, passed, failed] of windowCounts) {
       const total = passed + failed
-      const rate = total > 0 ? (passed / total) * 100 : 0
-
-      rates[days] = { passed, total, rate }
+      rates[days] = { passed, total, rate: total > 0 ? (passed / total) * 100 : 0 }
     }
 
     const passRate7d = rates[7].rate
