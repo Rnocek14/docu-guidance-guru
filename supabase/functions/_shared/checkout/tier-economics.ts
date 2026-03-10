@@ -104,6 +104,24 @@ export const TIER_ECONOMICS: Record<string, TierEconomics> = {
     maxTotalDrawdownPercent: 10,
     minTradingDays: 5,
   },
+  founders: {
+    tierId: 'founders',
+    name: "Founder's Edition",
+    accountSize: 50_000,
+    entryFee: 199,
+    isLive: true,
+    // Proven-safe economics: tighter caps than Starter
+    splitPercent: 80,
+    firstPayoutCap: 300,
+    lifetimeCapMultiple: 7,
+    lifetimeCapAmount: 1_393,  // 199 × 7
+    payoutCooldownDays: 14,
+    resetFee: 99,
+    profitTargetPercent: 10,
+    maxDailyLossPercent: 5,
+    maxTotalDrawdownPercent: 10,
+    minTradingDays: 5,
+  },
 }
 
 /**
