@@ -55,11 +55,7 @@ function RuleList({ rules }: { rules: { label: string; description: string }[] }
 export default function Rules() {
   const tracked = useRef(false);
   useEffect(() => {
-    const root = document.documentElement;
-    const hadDark = root.classList.contains('dark');
-    root.classList.add('dark');
     if (!tracked.current) { tracked.current = true; track('rules_view'); }
-    return () => { if (!hadDark) root.classList.remove('dark'); };
   }, []);
 
   return (
