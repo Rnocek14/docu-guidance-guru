@@ -281,8 +281,8 @@ export const traderNavItems: NavItem[] = [
   { label: 'Trades', href: '/trader/trades', icon: <Activity className="h-5 w-5" /> },
   { label: 'Payouts', href: '/trader/payouts', icon: <CreditCard className="h-5 w-5" /> },
   { label: 'Buy New Account', href: '/checkout', icon: <CreditCard className="h-5 w-5" />, external: true },
-  { label: 'Rules', href: '/rules', icon: <FileText className="h-5 w-5" />, external: true },
-  { label: 'Help & FAQ', href: '/#faq', icon: <Shield className="h-5 w-5" />, external: true },
+  { label: 'Rules', href: '/rules', icon: <FileText className="h-5 w-5" /> },
+  { label: 'Help & FAQ', href: '/#faq', icon: <Shield className="h-5 w-5" /> },
 ];
 
 export const riskNavItems: NavItem[] = [
