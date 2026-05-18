@@ -97,6 +97,21 @@ export function PayoutReadinessCard({ eligibility, isLoading, accountId }: Payou
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Next-payout dollar line (eligible / waiting only — never for blocked). */}
+        {(state === 'eligible' || state === 'waiting') && typeof eligibility.max_eligible_amount === 'number' && eligibility.max_eligible_amount > 0 && (
+          <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              {state === 'eligible' ? 'Next payout' : 'Estimated next payout'}
+            </p>
+            <p className="text-lg font-semibold tabular-nums">
+              up to ${eligibility.max_eligible_amount.toLocaleString()}
+              {state === 'waiting' && (
+                <span className="text-xs font-normal text-muted-foreground ml-1.5">when window opens</span>
+              )}
+            </p>
+          </div>
+        )}
+
         {/* Top blocker or summary */}
         {topBlocker ? (
           <div className="space-y-1">
