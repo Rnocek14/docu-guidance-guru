@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -55,7 +55,7 @@ export function ServerSimulationPanel() {
       if (!session) throw new Error('Not authenticated');
 
       const response = await fetch(
-        `https://sfxmgwkrjwuerfkqxokq.supabase.co/functions/v1/run-simulation`,
+        `${SUPABASE_FUNCTIONS_URL}/run-simulation`,
         {
           method: 'POST',
           headers: {
