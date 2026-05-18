@@ -8,6 +8,14 @@
 -- either side, this test deadlocks (SQLSTATE 40P01) within ~5 seconds.
 --
 -- ─── HOW TO RUN (2-session, manual orchestration) ───────────
+--
+-- COVERAGE: this variant catches a regression in handle_charge_refunded's
+-- internal lock order (Tab B calls the real RPC; Tab A is hardcoded to
+-- the canonical payouts → accounts order). To also catch a regression on
+-- the approve side, a follow-up variant should replace Tab A's manual
+-- sequence with `SELECT approve_payout_atomic(<payout_id>, ...)` so both
+-- sides of the lock-order contract are exercised against real RPCs.
+--
 -- This requires real concurrent transactions, so it cannot run inside
 -- a single DO block. Run from two separate SQL Editor tabs as
 -- service_role.
