@@ -149,7 +149,7 @@ export default function Checkout() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {CHECKOUT_TIERS.map((t) => (
+            {LIVE_CHECKOUT_TIERS.map((t) => (
               <TierCard
                 key={t.id}
                 tier={t}
