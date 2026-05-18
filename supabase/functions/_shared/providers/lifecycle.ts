@@ -73,12 +73,16 @@ export async function provisionAccount(
       provider_metadata: result.providerMetadata ?? {},
     }).eq('id', req.accountId).catch(() => {});
 
-    // Also create platform_accounts mapping for trade ingestion
+    // Also create platform_accounts mapping for trade ingestion.
+    // Unique constraint in DB is (platform_account_id, platform_name) — the
+    // onConflict target MUST match an existing unique index or the upsert
+    // throws. Using ignoreDuplicates so re-provisions (rare, but possible on
+    // retry) are a no-op rather than an error.
     await ctx.supabase.from('platform_accounts').upsert({
       account_id: req.accountId,
       platform_name: adapter.id,
       platform_account_id: result.externalAccountId,
-    }, { onConflict: 'account_id,platform_name', ignoreDuplicates: true }).catch(() => {});
+    }, { onConflict: 'platform_account_id,platform_name', ignoreDuplicates: true }).catch(() => {});
   }
 
   return result;
