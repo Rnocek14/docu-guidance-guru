@@ -44,6 +44,7 @@ const AdminReadiness = lazy(() => import("./pages/admin/AdminReadiness"));
 const GovernorDashboard = lazy(() => import("./pages/admin/GovernorDashboard"));
 const QaScanRunner = lazy(() => import("./pages/admin/QaScanRunner"));
 const SupportEmails = lazy(() => import("./pages/admin/SupportEmails"));
+const WealthChartsIntegration = lazy(() => import("./pages/admin/WealthChartsIntegration"));
 const SupportDashboard = lazy(() => import("./pages/support/SupportDashboard"));
 
 function PageLoader() {
@@ -278,6 +279,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <SupportEmails />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/wealthcharts"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <WealthChartsIntegration />
                 </ProtectedRoute>
               }
             />
