@@ -60,6 +60,13 @@ registerAdapter('tradovate', async () => {
   return TradovateAdapter;
 });
 
+// Register WealthCharts adapter (currently a stub; replace adapter file when
+// vendor webhook spec is available — no other changes required).
+registerAdapter('wealthcharts', async () => {
+  const { WealthChartsAdapter } = await import('../brokers/wealthcharts/adapter.ts');
+  return WealthChartsAdapter;
+});
+
 // Register new broker adapters here as integrations are built:
 // registerAdapter('ninjatrader', async () => {
 //   const { NinjaTraderAdapter } = await import('../brokers/ninjatrader/adapter.ts');
