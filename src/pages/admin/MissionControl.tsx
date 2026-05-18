@@ -448,9 +448,84 @@ export default function MissionControl() {
   const isAllClear = gov?.verdict === 'safe' && items.length === 0 &&
     (['capital', 'processor', 'cohort', 'riskEngine'] as const).every(d => gov[d]?.signal !== 'red');
 
+  // ── Autopilot rollup: one-line "is the light green?" digest ──
+  const redCount = items.filter(i => i.severity === 'red').length;
+  const yellowCount = items.filter(i => i.severity === 'yellow').length;
+  const govBad = !!gov && gov.verdict !== 'safe';
+  const disputeBad = !!m && m.disputeLevel && m.disputeLevel !== 'ok';
+  const breakerBad = !!m && m.breakerLevel && m.breakerLevel !== 'normal';
+  const autopilotGreen = !govBad && !disputeBad && !breakerBad && redCount === 0 && yellowCount === 0;
+  const autopilotTone: 'green' | 'yellow' | 'red' =
+    govBad || disputeBad || breakerBad || redCount > 0 ? 'red'
+    : yellowCount > 0 ? 'yellow'
+    : 'green';
+  const firstActionLink = items[0]?.link;
+  const autopilotChips: Array<{ label: string; tone: 'green' | 'yellow' | 'red' }> = [
+    { label: govBad ? `Governor: ${gov?.verdict ?? '—'}` : 'Governor', tone: govBad ? 'red' : 'green' },
+    { label: disputeBad ? `Disputes: ${m?.disputeLevel}` : 'Disputes', tone: disputeBad ? (m?.disputeLevel === 'critical' ? 'red' : 'yellow') : 'green' },
+    { label: breakerBad ? `Breaker: ${m?.breakerLevel}` : 'Breaker', tone: breakerBad ? 'red' : 'green' },
+    { label: redCount > 0 ? `${redCount} urgent` : yellowCount > 0 ? `${yellowCount} review` : 'Queue clear', tone: redCount > 0 ? 'red' : yellowCount > 0 ? 'yellow' : 'green' },
+  ];
+
   return (
     <DashboardLayout title="Mission Control" navItems={missionControlNavItems}>
       <div className="space-y-6 max-w-5xl">
+        {/* ── Autopilot status strip — the "is the light green?" line ── */}
+        <div
+          className={`flex flex-wrap items-center gap-3 rounded-lg border px-4 py-2.5 text-sm ${
+            autopilotTone === 'green'
+              ? 'border-success/40 bg-success/5 text-success'
+              : autopilotTone === 'yellow'
+              ? 'border-warning/40 bg-warning/5 text-warning'
+              : 'border-destructive/40 bg-destructive/5 text-destructive'
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          {autopilotTone === 'green' ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+          ) : autopilotTone === 'yellow' ? (
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+          ) : (
+            <XCircle className="h-4 w-4 shrink-0" />
+          )}
+          <span className="font-semibold">
+            {autopilotGreen
+              ? 'Autopilot — all systems green. Close the laptop.'
+              : redCount + yellowCount > 0
+              ? `${redCount + yellowCount} item${redCount + yellowCount === 1 ? '' : 's'} need you`
+              : 'Attention needed — see status below'}
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5 ml-auto">
+            {autopilotChips.map((c) => (
+              <span
+                key={c.label}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${
+                  c.tone === 'green'
+                    ? 'border-success/30 bg-success/10 text-success'
+                    : c.tone === 'yellow'
+                    ? 'border-warning/30 bg-warning/10 text-warning'
+                    : 'border-destructive/30 bg-destructive/10 text-destructive'
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    c.tone === 'green' ? 'bg-success' : c.tone === 'yellow' ? 'bg-warning' : 'bg-destructive'
+                  }`}
+                />
+                {c.label}
+              </span>
+            ))}
+            {!autopilotGreen && firstActionLink && (
+              <Button asChild size="sm" variant="outline" className="h-7 ml-1">
+                <Link to={firstActionLink}>
+                  Jump to action <ChevronRight className="h-3 w-3 ml-0.5" />
+                </Link>
+              </Button>
+            )}
+          </div>
+        </div>
+
         {/* ── GO / NO-GO Banner ── */}
         {gov ? (
           <Card className={`border-2 ${gov.verdict === 'safe' ? 'border-success/50 bg-success/5' : 'border-destructive/50 bg-destructive/5'}`}>
