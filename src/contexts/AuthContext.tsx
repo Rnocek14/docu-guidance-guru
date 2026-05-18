@@ -87,16 +87,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('Auth event:', event);
 
         if (newSession?.user) {
+          setIsLoading(true);
           setSession(newSession);
           setUser(newSession.user);
           
           // Use setTimeout to avoid potential Supabase deadlock
           setTimeout(async () => {
             if (!isMounted) return;
-            const userData = await loadUserData(newSession.user.id);
-            if (isMounted) {
-              setProfile(userData.profile);
-              setRoles(userData.roles);
+            try {
+              const userData = await loadUserData(newSession.user.id);
+              if (isMounted) {
+                setProfile(userData.profile);
+                setRoles(userData.roles);
+              }
+            } finally {
+              if (isMounted) {
+                setIsLoading(false);
+              }
             }
             
             // Collect device fingerprint on sign-in (non-blocking)
@@ -112,6 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(null);
           setProfile(null);
           setRoles([]);
+          setIsLoading(false);
         }
       }
     );
