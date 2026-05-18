@@ -130,9 +130,12 @@ export async function handleCheckoutCompleted(
     return
   }
 
-  // ── Step 2: Claim the queue row atomically ──
+  // ── Step 2: Claim the queue row atomically (v2 RPC, provider-agnostic) ──
   const { data: claimed, error: claimError } = await supabase
-    .rpc('claim_checkout_fulfillment', { p_session_id: session.id })
+    .rpc('claim_checkout_fulfillment_v2', {
+      p_provider: 'stripe',
+      p_provider_session_id: session.id,
+    })
 
   if (claimError) {
     console.error(`Claim RPC failed: ${claimError.message}`, { sessionId: session.id })
@@ -145,14 +148,15 @@ export async function handleCheckoutCompleted(
     return
   }
 
-  // ── Step 3: Atomic fulfillment via DB RPC ──
+  // ── Step 3: Atomic fulfillment via v2 DB RPC ──
   // Cohort resolution + snapshot + account + txn + queue update all in one transaction.
   const { data: accountId, error: fulfillError } = await supabase
-    .rpc('fulfill_checkout_session', {
+    .rpc('fulfill_checkout_session_v2', {
       p_queue_id: claimRow.id,
       p_user_id: userId,
-      p_stripe_session_id: session.id,
-      p_payment_intent: (session.payment_intent as string) || '',
+      p_provider: 'stripe',
+      p_provider_session_id: session.id,
+      p_provider_payment_id: (session.payment_intent as string) || '',
       p_amount_cents: session.amount_total || 0,
       p_currency: session.currency || 'usd',
       p_tier_id: tierId,
@@ -167,21 +171,29 @@ export async function handleCheckoutCompleted(
     const errorMsg = fulfillError.message || 'Unknown fulfillment error'
     const retryable = isRetryable(errorMsg)
 
-    // Classify: retryable → back to queued; terminal → failed
-    await markQueueError(supabase, claimRow.id, errorMsg, retryable)
+    // Classify: retryable → back to queued; terminal → failed; cap-exhausted → failed_retryable_exhausted.
+    // The DB enforces the cap so an edge-function bug can't re-introduce an infinite loop.
+    const { data: markResult } = await markQueueError(supabase, claimRow.id, errorMsg, retryable)
+    const exhausted = (markResult as { exhausted?: boolean } | null)?.exhausted === true
 
     console.error(
-      `FULFILLMENT_${retryable ? 'BLOCKED' : 'FAILED'}: ${errorMsg}. ` +
-      `session=${session.id} user=${userId}. ${retryable ? 'Queued for retry.' : 'Marked as failed.'}`
+      `FULFILLMENT_${exhausted ? 'EXHAUSTED' : retryable ? 'BLOCKED' : 'FAILED'}: ${errorMsg}. ` +
+      `session=${session.id} user=${userId}. ` +
+      `${exhausted ? 'Retry cap reached — marked failed_retryable_exhausted.' : retryable ? 'Queued for retry.' : 'Marked as failed.'}`
     )
 
     // Staff notification (idempotent per session)
-    await supabase.from('staff_notifications').insert({
-      notification_type: retryable ? 'intake_blocked' : 'intake_failed',
-      title: retryable
+    const notifType = exhausted ? 'intake_retry_exhausted' : retryable ? 'intake_blocked' : 'intake_failed'
+    const notifTitle = exhausted
+      ? '⛔ Checkout retry cap reached — manual review required'
+      : retryable
         ? '🚨 Paid checkout blocked by breaker'
-        : '❌ Checkout fulfillment permanently failed',
-      body: `User ${userId} paid for tier ${tierId}. Reason: ${errorMsg}. Session: ${session.id}. ${retryable ? 'Queued for retry.' : 'Requires manual intervention.'}`,
+        : '❌ Checkout fulfillment permanently failed'
+    await supabase.from('staff_notifications').insert({
+      notification_type: notifType,
+      title: notifTitle,
+      body: `User ${userId} paid for tier ${tierId}. Reason: ${errorMsg}. Session: ${session.id}. ` +
+        `${exhausted ? 'Retry cap exhausted — re-queue manually after fixing root cause.' : retryable ? 'Queued for retry.' : 'Requires manual intervention.'}`,
       data: {
         user_id: userId,
         tier_id: tierId,
@@ -189,8 +201,9 @@ export async function handleCheckoutCompleted(
         block_reason: errorMsg,
         queue_id: claimRow.id,
         retryable,
+        exhausted,
       },
-      idempotency_key: `${retryable ? 'intake_blocked' : 'intake_failed'}:${session.id}`,
+      idempotency_key: `${notifType}:${session.id}`,
     }).catch(notifErr => {
       console.error('Failed to insert notification:', (notifErr as Error).message)
     })
@@ -261,9 +274,12 @@ export async function handleCheckoutCompleted(
 }
 
 /**
- * Mark a queue row with error info.
- * Retryable errors → back to 'queued' for later retry.
- * Terminal errors → 'failed' to stop retry loops.
+ * Mark a queue row with error info via the atomic mark_queue_error_v2 RPC.
+ * The DB enforces the retry cap (default 24 ≈ 2 hours at 5-min cron cadence):
+ *   - retryable + below cap → 'queued'
+ *   - retryable + at/above cap → 'failed_retryable_exhausted' (distinct terminal)
+ *   - non-retryable → 'failed'
+ * The cap is server-side so an edge-function bug cannot re-create an infinite loop.
  */
 async function markQueueError(
   supabase: ReturnType<typeof createClient>,
@@ -271,12 +287,10 @@ async function markQueueError(
   error: string,
   retryable: boolean
 ) {
-  await supabase
-    .from('checkout_fulfillment_queue')
-    .update({
-      status: retryable ? 'queued' : 'failed',
-      last_error: error,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', queueId)
+  return await supabase.rpc('mark_queue_error_v2', {
+    p_queue_id: queueId,
+    p_error: error,
+    p_retryable: retryable,
+    p_cap: 24,
+  })
 }

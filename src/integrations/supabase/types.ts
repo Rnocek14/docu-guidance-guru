@@ -3452,6 +3452,15 @@ export type Database = {
         }
         Returns: Json
       }
+      mark_queue_error_v2: {
+        Args: {
+          p_cap?: number
+          p_error: string
+          p_queue_id: string
+          p_retryable: boolean
+        }
+        Returns: Json
+      }
       normalize_legal_name: { Args: { input: string }; Returns: string }
       process_chargeback_event: {
         Args: {
