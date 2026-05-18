@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Copy, Check, ExternalLink, KeyRound, Webhook, Link2, FileJson, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Copy, Check, ExternalLink, KeyRound, Webhook, Link2, FileJson, ShieldCheck, AlertTriangle, BookOpen, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 
 const SUPABASE_URL = 'https://sfxmgwkrjwuerfkqxokq.supabase.co';
@@ -247,6 +247,76 @@ export default function WealthChartsIntegration() {
             <Button onClick={exportJson}>Export JSON</Button>
           </div>
         </div>
+
+        {/* Plain-English overview */}
+        <Card className="border-primary/30 bg-primary/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <BookOpen className="h-4 w-4" /> Start here — what this page is for
+            </CardTitle>
+            <CardDescription>
+              Read this once. It explains the whole integration in plain English.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm leading-relaxed">
+            <p>
+              <strong>Meridian</strong> (this app) needs to talk to <strong>WealthCharts</strong>{' '}
+              (the trading platform that hosts the sim accounts your traders use). Two things
+              have to happen:
+            </p>
+            <ol className="ml-5 list-decimal space-y-1.5">
+              <li>
+                <strong>They send us trades.</strong> Every time a trader places a fill,
+                WealthCharts pushes a webhook to our <code>ingest-trade</code> URL so we can
+                score the account, enforce drawdown, and gate payouts.
+              </li>
+              <li>
+                <strong>We send them commands.</strong> When a trader buys an account, passes,
+                or breaches a rule, we call WealthCharts to provision, reset, or freeze the
+                sim account.
+              </li>
+            </ol>
+            <p>
+              To wire those two flows up, we need a handful of values from WealthCharts (URLs,
+              header names, an API key) and we need to hand back a few URLs to them. This page
+              collects all of that in one place.
+            </p>
+            <div className="grid gap-2 pt-2 md:grid-cols-3">
+              <div className="rounded-md border bg-background p-3">
+                <div className="flex items-center gap-2 text-xs font-semibold">
+                  <KeyRound className="h-3.5 w-3.5" /> Inputs
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  What you collect FROM WealthCharts on your onboarding call.
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <div className="flex items-center gap-2 text-xs font-semibold">
+                  <Webhook className="h-3.5 w-3.5" /> Outputs
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  What you hand BACK to WealthCharts (URLs, signature scheme).
+                </p>
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <div className="flex items-center gap-2 text-xs font-semibold">
+                  <ShieldCheck className="h-3.5 w-3.5" /> Secrets & Go-Live
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Where the API key + webhook secret go, and the launch checklist.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+              <span>
+                <strong>Suggested order:</strong> Inputs tab during the WealthCharts call{' '}
+                <ArrowRight className="inline h-3 w-3" /> Outputs tab to email them back{' '}
+                <ArrowRight className="inline h-3 w-3" /> Secrets tab to flip the switch.
+              </span>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Progress */}
         <Card>
