@@ -91,7 +91,7 @@ export const TIERS: PricingTier[] = [
   {
     id: "founders",
     name: "Founder's Edition",
-    price: 199,
+    price: 99,
     accountSize: "$50,000",
     accountSizeNum: 50_000,
     profitTarget: 10,
@@ -102,7 +102,7 @@ export const TIERS: PricingTier[] = [
     firstPayoutCap: 300,
     splitPercent: 80,
     lifetimeCapMultiple: 7,
-    lifetimeCapAmount: 1_393,
+    lifetimeCapAmount: 693,
     resetFee: 99,
     popular: true,
     isLive: true,

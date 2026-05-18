@@ -32,7 +32,7 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
     >
       {isPopular && (
         <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-4">
-          Most Popular
+          {tier.id === 'founders' ? 'Launch Price — First 100 Seats' : 'Most Popular'}
         </Badge>
       )}
       {isUpcoming && (
