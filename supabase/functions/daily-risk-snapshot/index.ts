@@ -412,9 +412,10 @@ Deno.serve(async (req) => {
         let drift = 0
         let errors = 0
 
+        const reconRequestId = `recon:${new Date().toISOString()}`
         for (const row of rows) {
           const result = await getAccountStatus(
-            { supabase: db, requestId: `recon:${snapshotIdPlaceholder()}` },
+            { supabase: db, requestId: reconRequestId },
             activeProvider,
             row.id,
             row.external_account_id
@@ -497,6 +498,7 @@ Deno.serve(async (req) => {
         auto_tightening_attempted: shouldAttemptAutoTighten,
         auto_tightening_proposals_pending: proposalResult?.proposals_pending ?? 0,
         pending_pass_velocity: pendingPassVelocity ?? null,
+        provider_reconciliation: providerReconciliation,
       }),
     })
 
