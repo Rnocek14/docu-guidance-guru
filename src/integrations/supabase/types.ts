@@ -3244,6 +3244,15 @@ export type Database = {
         Args: { p_action: string; p_locked_by?: string; p_reason?: string }
         Returns: Json
       }
+      handle_charge_refunded: {
+        Args: {
+          p_charge_id: string
+          p_currency: string
+          p_payment_intent_id: string
+          p_refund_amount_cents: number
+        }
+        Returns: Json
+      }
       has_any_role: {
         Args: {
           _roles: Database["public"]["Enums"]["app_role"][]
