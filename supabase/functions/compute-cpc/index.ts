@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { constantTimeEqual } from '../_shared/crypto.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -68,9 +69,12 @@ Deno.serve(async (req) => {
     let source: 'manual' | 'cron' = 'manual'
     let isAuthorized = false
 
-    if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
-      isAuthorized = true
-      source = 'cron'
+    if (cronSecret && authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.slice(7)
+      if (await constantTimeEqual(token, cronSecret)) {
+        isAuthorized = true
+        source = 'cron'
+      }
     }
 
     if (!isAuthorized && authHeader?.startsWith('Bearer ')) {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -128,7 +128,7 @@ export function QueueCardActions({
       }
 
       const response = await fetch(
-        `https://sfxmgwkrjwuerfkqxokq.supabase.co/functions/v1/review-actions`,
+        `${SUPABASE_FUNCTIONS_URL}/review-actions`,
         {
           method: 'POST',
           headers: {

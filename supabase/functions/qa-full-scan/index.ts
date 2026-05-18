@@ -21,10 +21,11 @@ Deno.serve(async (req) => {
 
   const headers = { ...corsHeaders, 'Content-Type': 'application/json' }
 
-  // Environment guard
+  // Environment guard — gated on explicit env flag, not project-ID match.
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const appEnv = Deno.env.get('APP_ENV') ?? ''
-  if (appEnv === 'production' || (!supabaseUrl.includes('sfxmgwkrjwuerfkqxokq') && appEnv !== 'test')) {
+  const qaAllowed = Deno.env.get('QA_ENDPOINTS_ALLOWED') === 'true'
+  if (appEnv === 'production' || !qaAllowed) {
     return new Response(JSON.stringify({ error: 'QA endpoint disabled in production' }), { status: 403, headers })
   }
 

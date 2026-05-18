@@ -18,7 +18,7 @@ export default function AdminDashboard() {
   const { data: stats } = useQuery({
     queryKey: ['admin-stats'],
     queryFn: async () => {
-      const [usersRes, accountsRes, payoutsRes, evalAccountsRes, paidPayoutsRes, pendingPayoutsAmtRes] = await Promise.all([
+      const [usersRes, accountsRes, payoutsRes, evalAccountsRes, paidPayoutsRes, pendingPayoutsAmtRes, resetRevenueRes] = await Promise.all([
         supabase.from('profiles').select('id', { count: 'exact' }),
         supabase.from('accounts').select('status', { count: 'exact' }),
         supabase.from('payouts').select('status', { count: 'exact' }).eq('status', 'pending'),
@@ -26,13 +26,20 @@ export default function AdminDashboard() {
         supabase.from('accounts').select('id, cohorts!inner(entry_fee, cohort_phase)').not('cohorts.entry_fee', 'is', null),
         supabase.from('payouts').select('amount').in('status', ['paid', 'paid_confirmed']),
         supabase.from('payouts').select('amount').eq('status', 'pending'),
+        // Reset fees — accounting SSOT: totalRevenue = entry_fees + reset_fees
+        supabase.from('payment_transactions').select('amount').eq('purpose', 'reset_fee').eq('status', 'completed'),
       ]);
 
-      // Revenue = sum of entry fees from accounts whose cohort has an entry_fee (eval phase)
-      const totalRevenue = (evalAccountsRes.data || []).reduce((sum, a) => {
+      // Revenue = entry fees + reset fees (matches simulation accounting)
+      const entryRevenue = (evalAccountsRes.data || []).reduce((sum, a) => {
         const fee = Number((a.cohorts as any)?.entry_fee || 0);
         return sum + fee;
       }, 0);
+      const resetRevenue = (resetRevenueRes.data || []).reduce(
+        (sum, t) => sum + Number(t.amount || 0),
+        0
+      );
+      const totalRevenue = entryRevenue + resetRevenue;
       const totalPaid = (paidPayoutsRes.data || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
       const totalPendingAmt = (pendingPayoutsAmtRes.data || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
@@ -41,6 +48,8 @@ export default function AdminDashboard() {
         totalAccounts: accountsRes.count || 0,
         pendingPayouts: payoutsRes.count || 0,
         totalRevenue,
+        entryRevenue,
+        resetRevenue,
         totalPaid,
         totalPendingAmt,
       };
@@ -187,7 +196,7 @@ export default function AdminDashboard() {
               <div className="text-2xl font-bold">
                 ${(stats?.totalRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              <p className="text-xs text-muted-foreground">Entry fees collected</p>
+              <p className="text-xs text-muted-foreground">Entry + reset fees collected</p>
             </CardContent>
           </Card>
 

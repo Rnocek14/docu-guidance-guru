@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { constantTimeEqual } from '../_shared/crypto.ts'
 
 // ============================================================
 // Payout SLA Escalation Cron
@@ -85,7 +86,8 @@ Deno.serve(async (req) => {
       headers: { 'Content-Type': 'application/json' },
     })
   }
-  if (authHeader !== `Bearer ${cronSecret}`) {
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  if (!token || !(await constantTimeEqual(token, cronSecret))) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },

@@ -13,9 +13,12 @@ Deno.serve(async (req) => {
   const headers = { ...corsHeaders, 'Content-Type': 'application/json' }
 
   // ── Environment guard: never run in production ──
+  // Gate on explicit env flag rather than a project-ID magic string so a
+  // deploy to a new Supabase project can't accidentally enable QA endpoints.
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const appEnv = Deno.env.get('APP_ENV') ?? ''
-  if (appEnv === 'production' || (!supabaseUrl.includes('sfxmgwkrjwuerfkqxokq') && appEnv !== 'test')) {
+  const qaAllowed = Deno.env.get('QA_ENDPOINTS_ALLOWED') === 'true'
+  if (appEnv === 'production' || !qaAllowed) {
     return new Response(JSON.stringify({ error: 'QA endpoint disabled in production' }), { status: 403, headers })
   }
 
