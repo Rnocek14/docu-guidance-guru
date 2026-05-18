@@ -1,194 +1,49 @@
+# Next Batch — P0/P1 Hardening
 
-# Launch Configuration — Locked v1.5
+Scope interpreted from "make it best we can": treat resets as **v1 launch-blocker** and ship the reset endpoint alongside the audit fixes so P1-6 becomes a real fix, not just forward-compatible. If resets are actually post-launch, say so and I'll drop step 5.
 
-## Payout Pacing Knobs (v1.5 — validated 2026-03-03)
+## 1. P0-2 — Atomic refund RPC
+- **New migration**: `handle_charge_refunded(p_charge_id, p_refund_id, p_amount, p_reason)` SECURITY DEFINER RPC.
+  - `FOR UPDATE` on `payment_transactions` row by charge id.
+  - Inside txn: mark transaction refunded, invalidate evaluation accounts created from it, write `audit_logs` entry (hash-chained), return `{ payouts_in_transit: int, account_ids: uuid[] }`.
+  - Idempotent via unique constraint on `(charge_id, refund_id)`.
+- **Rewrite `supabase/functions/refund-handler/index.ts`** as a thin wrapper:
+  - Verify Stripe webhook signature → call RPC → if `payouts_in_transit > 0`, fire ops notification **outside** the RPC (Claude's correct callout: human-action signal, not DB state).
+  - Mask 500s with generic message per INFO_LEAKAGE rule.
 
-| Knob | Value | Rationale |
-|------|-------|-----------|
-| `targetPayRevSoft` | **0.45** | Lowest budget that clears deferral < 15% while keeping margin > 20% |
-| `payRevEngageThreshold` | **0.38** | Ratio-based engagement; only clamps months trending hot |
+## 2. P1-3 — Retry cap in `markQueueError`
+- Cap at 8 attempts. At the cap, transition to **`failed_retryable_exhausted`** (distinct terminal state — preserves operator visibility per recommendation).
+- Add column/enum value via migration if needed; otherwise reuse existing status with a flag.
+- Update operator queue UI filters to surface this state.
 
-### Validation Results (seed 42, 15-month horizon, 200 accts/mo)
+## 3. P1-1 + P1-2 — Migrate to `_v2` RPCs
+- `checkout-handler.ts` → `fulfill_checkout_v2`.
+- `retry-fulfillment-queue/index.ts` → `retry_fulfillment_v2`.
+- Keep v1 callable for one prod cycle. **Drop-v1 migration is a separate PR** — not in this batch.
 
-| Scenario | Pay/Rev P95 | Deferral | Margin | Reserve Breach | Worst Month |
-|----------|-------------|----------|--------|----------------|-------------|
-| Baseline (attack=0) | 45.0% | 14.0% | 20.7% | 0% | $1,604 |
-| Clustered (attack=0.5) | 45.0% | 37.4% (info) | 16.0% | 0% | $1,060 |
+## 4. P1-8 — Tests (priority order)
+1. Refund idempotency under concurrent invocation (two webhook deliveries, one row mutation).
+2. Fulfillment retry classification (retryable vs terminal vs exhausted).
+3. Wise webhook signature verification + state mapping.
+4. WealthCharts adapter rejection contract.
+5. CI guard: `tier-economics.ts` constants vs DB `cohort_configs` diff.
 
-### Acceptance Criteria (all met ✅)
-- Baseline: Pay/Rev P95 ≤ 45%, Deferral ≤ 15%, Margin ≥ 20%
-- Clustered: Margin ≥ 15%, Reserve breach < 15%, Worst month > -$15k
+## 5. (Conditional, launch-blocker scope) Reset purchase endpoint
+- **New edge function**: `checkout-reset` — Stripe Checkout session for `resetFee: 99` from `tier-economics.ts`.
+- Writes `payment_transactions` with `purpose = 'reset_fee'` (matches the schema enum P1-6 already queries).
+- Idempotency: 48-char deterministic key via `generateDeterministicKey` keyed on `(account_id, attempt_n)`.
+- Re-arms the failed evaluation account; audit-logged.
+- Test: asserts the row is written with exactly `purpose = 'reset_fee'` so P1-6's dashboard query lights up.
 
-### Architecture
-- **Layer 1 (Soft Pacing)**: Monthly budget at 45% pay/rev, engages at 0.38 ratio, defers excess to next cycle
-- **Layer 2 (Hard Breaker)**: Emergency freeze for adversarial events (unchanged)
-- Engagement uses running pay/rev ratio (not absolute dollars) — prevents premature triggering
+## Technical notes
+- All new SQL via `supabase--migration`. Money-moving rows use `FOR UPDATE`; policy-state reads use `FOR SHARE`.
+- Edge functions: `verify_jwt = false` defaults preserved; Stripe + cron paths use `constantTimeEqual` for any shared-secret compares.
+- No `service_role_key` ever crosses to the client.
+- Cron auth path: `X-Cron-Secret` + constant-time; admin JWT fallback unchanged.
 
-### What NOT to change at launch
-- Do not raise baseline split to 85% (kills upgrade incentive)
-- Do not remove first payout cap (structural defense against fraud)
-- Do not lower engage threshold below 0.38 (causes always-on pacing → high deferrals)
+## Sequencing
+Step 1 → 2 → 3 → 5 (if in scope) → 4. Tests last so they exercise final shapes. Each step is committed independently so we can bisect if anything regresses.
 
----
-
-## Ramp Guard — Formation-Phase Protection
-
-### Problem
-MES is ~300 accounts/mo. At N=200 (likely launch volume), worst month is -$4.4k and P(Loss) is 52%. Not fatal with reserves, but creates psychological risk (panic → bad decisions).
-
-### Solution: Light Ramp Guard + Moderate Reserve
-- **First payout cap**: $300 for first 3 payouts per account
-- **Reserve hold**: $40k–$50k cash
-- **Auto-unlock**: Guard lifts when monthly accounts ≥ 300 OR monthly revenue ≥ $45k
-
-### Why combined
-- Reserve alone: still exposes to -$4k+ variance spikes
-- Cap alone: doesn't absorb tail events
-- Combined: cap reduces spike amplitude, reserve absorbs remainder
-
-### Auto-unlock logic (to implement in cohort config or governor)
-```
-IF monthly_new_accounts >= 300 OR monthly_revenue >= 45000:
-  SET first_payout_cap = NULL  (or raise to normal)
-  LOG "ramp guard lifted" to audit_logs
-```
-
-### What this does NOT change
-- Payout split stays at 80%
-- Pacing stays at 0.45/0.38
-- Lifetime cap unchanged
-- Only first 3 payouts per account are affected
-
----
-
-
-# Multi-Account Trader Dashboard Redesign
-
-## Problem
-
-With 12 seeded accounts across all lifecycle states, the current dashboard only shows a single "active" account (the first one found). Traders have no way to switch between accounts, see a portfolio overview, or filter trades/payouts by account. This is worse than every competitor.
-
-## Design: Account Switcher + Portfolio Overview
-
-### Core UX Pattern: Persistent Account Selector
-
-A compact account switcher appears at the top of the Dashboard, Trades, and Payouts pages. The Dashboard page also gets a new "Portfolio Overview" section above the single-account detail view.
-
-```text
-+-----------------------------------------------+
-|  Dashboard                                     |
-+-----------------------------------------------+
-|  Portfolio Overview (all accounts)             |
-|  [3 Active] [2 Passed] [4 Failed] [1 Payout]  |
-|  Total Balance: $423,500  |  Total P&L: +$18k |
-+-----------------------------------------------+
-|  [ Account Switcher Tabs / Dropdown ]          |
-|  DEMO-EVAL-01 (Active) | DEMO-PERF-01 (PA)   |
-+-----------------------------------------------+
-|  (existing single-account detail view below)   |
-|  Phase indicator, stats, equity curve, etc.    |
-+-----------------------------------------------+
-```
-
-### 1. Portfolio Overview Strip (Dashboard only)
-
-A summary card at the top showing aggregate stats across ALL accounts:
-- Account counts by status (active / passed / failed / payout)
-- Total combined balance across active accounts
-- Total lifetime P&L
-- Total payouts received
-
-This gives traders an instant "how am I doing overall" answer -- something no competitor shows.
-
-### 2. Account Switcher Component
-
-A new `AccountSwitcher` component used on the Dashboard page. It renders as:
-- **Desktop**: Horizontal scrollable tab-style pills showing account number + phase badge + P&L
-- **Mobile**: A dropdown/select showing the same info
-
-Clicking an account updates the dashboard to show that account's full detail view (equity curve, rule health, what's next, etc.).
-
-The selected account ID is stored in URL search params (`?account=uuid`) so it's shareable and survives refresh.
-
-### 3. Trades Page: Account Filter
-
-Add an account filter dropdown at the top of the Trades page. Options:
-- "All Accounts" (default -- current behavior)
-- Each account listed by number + phase
-
-### 4. Payouts Page: Account Filter
-
-Same filter pattern as Trades. Already shows account numbers in the table, but filtering lets traders focus.
-
-### 5. Sidebar Enhancement
-
-Add a small account count badge next to "Accounts" in the sidebar nav showing total active accounts.
-
-## Files to Create/Modify
-
-| File | Change |
-|------|--------|
-| `src/components/trader/PortfolioOverview.tsx` | **New** -- aggregate stats strip |
-| `src/components/trader/AccountSwitcher.tsx` | **New** -- tab/dropdown account selector |
-| `src/pages/trader/TraderDashboard.tsx` | Add PortfolioOverview + AccountSwitcher; replace `activeAccount` logic with URL-param-driven selection |
-| `src/pages/trader/TraderTrades.tsx` | Add account filter dropdown |
-| `src/pages/trader/TraderPayouts.tsx` | Add account filter dropdown |
-| `src/components/layout/DashboardLayout.tsx` | No change needed (nav items are static) |
-
-## Technical Details
-
-### Account Switcher State Management
-
-```typescript
-// In TraderDashboard.tsx
-const [searchParams, setSearchParams] = useSearchParams();
-const selectedAccountId = searchParams.get('account');
-
-// Default to first "best" account (active > passed > payout > others)
-const sortedAccounts = useMemo(() => {
-  const priority = { active: 0, passed: 1, payout_requested: 2, ... };
-  return [...(accounts ?? [])].sort((a, b) => 
-    (priority[a.status] ?? 99) - (priority[b.status] ?? 99)
-  );
-}, [accounts]);
-
-const selectedAccount = selectedAccountId 
-  ? accounts?.find(a => a.id === selectedAccountId) 
-  : sortedAccounts[0];
-```
-
-### Portfolio Overview Component
-
-Shows 4 stat cards in a compact row:
-- Active Accounts count (with phase breakdown tooltip)
-- Combined Balance (sum of all active/passed account balances)
-- Lifetime P&L (sum of total_pnl across all accounts)
-- Total Payouts (query payouts table for paid totals)
-
-### Account Switcher Component
-
-Each pill/tab shows:
-- Account number (e.g., `#DEMO-EVAL-01`)
-- Phase badge (Eval / Veri / PA) with color coding
-- P&L as a compact +$X.Xk or -$X.Xk
-- Status indicator dot (green = active, yellow = review, red = failed, blue = passed)
-
-### Trades/Payouts Filter
-
-Simple `Select` component from shadcn with options populated from the accounts query. Filters the existing query by adding `.eq('account_id', selectedId)` when not "all".
-
-### What This Looks Like vs Competitors
-
-Most prop firm dashboards:
-- Show one account at a time
-- Require navigating to a separate "accounts list" page
-- No portfolio-level view
-- No cross-account filtering
-
-Meridian after this change:
-- Portfolio overview showing holistic trader health
-- Instant account switching without page navigation
-- Account-filtered trades and payouts
-- URL-shareable account views
-- Phase-aware visual design (eval = blue, veri = purple, PA = green, failed = red)
-
+## What I need from you
+- **Reset scope confirmation**: launch-blocker (do step 5) or post-launch (skip step 5, leave P1-6 forward-compatible)?
+- That's it — everything else is mechanical.
