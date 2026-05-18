@@ -163,6 +163,16 @@ export default function CohortProjection() {
 
   const result = useMemo(() => project(inp), [inp]);
 
+  // Compute fixed-horizon comparisons that ignore monthsToProject (so 3 vs 6 vs 12 are always live)
+  const horizons = useMemo(() => {
+    const make = (months: number) => project({ ...inp, monthsToProject: months });
+    return {
+      m3: make(3),
+      m6: make(6),
+      m12: make(12),
+    };
+  }, [inp]);
+
   return (
     <DashboardLayout title="Cohort Projection" navItems={missionControlNavItems}>
       <div className="space-y-6">
@@ -215,15 +225,82 @@ export default function CohortProjection() {
           </CardContent>
         </Card>
 
-        {/* HEADLINE */}
+        {/* HORIZON COMPARISON — always live, always shows 3/6/12 side-by-side */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Horizon comparison</CardTitle>
+            <CardDescription>
+              3-mo, 6-mo, and 12-mo totals computed in parallel from the same assumptions.
+              They WILL differ — if they don't, the payout tail isn't compounding yet at your scale.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="py-2 pr-3 text-left">Metric</th>
+                    <th className="py-2 pr-3 text-right">3 months</th>
+                    <th className="py-2 pr-3 text-right">6 months</th>
+                    <th className="py-2 pr-3 text-right">12 months</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b">
+                    <td className="py-2 pr-3 text-muted-foreground">Total revenue</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt(horizons.m3.totals.revenue)}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt(horizons.m6.totals.revenue)}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt(horizons.m12.totals.revenue)}</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-2 pr-3 text-muted-foreground">Trader payouts</td>
+                    <td className="py-2 pr-3 text-right font-mono text-destructive">{fmt(horizons.m3.totals.payouts)}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-destructive">{fmt(horizons.m6.totals.payouts)}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-destructive">{fmt(horizons.m12.totals.payouts)}</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-2 pr-3 text-muted-foreground">CAC</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt(horizons.m3.totals.cac)}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt(horizons.m6.totals.cac)}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt(horizons.m12.totals.cac)}</td>
+                  </tr>
+                  <tr className="border-b bg-muted/40 font-semibold">
+                    <td className="py-2 pr-3">Net</td>
+                    <td className={`py-2 pr-3 text-right font-mono ${horizons.m3.totals.net >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>{fmt(horizons.m3.totals.net)}</td>
+                    <td className={`py-2 pr-3 text-right font-mono ${horizons.m6.totals.net >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>{fmt(horizons.m6.totals.net)}</td>
+                    <td className={`py-2 pr-3 text-right font-mono ${horizons.m12.totals.net >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>{fmt(horizons.m12.totals.net)}</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-2 pr-3 text-muted-foreground">Avg net / month</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt(Math.round(horizons.m3.totals.net / 3))}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt(Math.round(horizons.m6.totals.net / 6))}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt(Math.round(horizons.m12.totals.net / 12))}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-3 text-muted-foreground">Avg Pay/Rev</td>
+                    <td className="py-2 pr-3 text-right font-mono">{horizons.m3.avgPayRev.toFixed(1)}%</td>
+                    <td className="py-2 pr-3 text-right font-mono">{horizons.m6.avgPayRev.toFixed(1)}%</td>
+                    <td className="py-2 pr-3 text-right font-mono">{horizons.m12.avgPayRev.toFixed(1)}%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Watch the <strong>Avg net / month</strong> row — it should DROP from 3-mo → 12-mo as the payout tail compounds.
+              If 3-mo and 12-mo avg net are the same, your pass rate or payout sizes are unrealistically low.
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* HEADLINE for the configurable horizon (drives the chart/table below) */}
         <div className="grid gap-4 md:grid-cols-4">
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground"><DollarSign className="h-3.5 w-3.5" />Total revenue ({inp.monthsToProject} mo)</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground"><DollarSign className="h-3.5 w-3.5" />Revenue ({inp.monthsToProject} mo)</CardTitle></CardHeader>
             <CardContent><div className="text-2xl font-bold">{fmt(result.totals.revenue)}</div></CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground"><TrendingUp className="h-3.5 w-3.5" />Net ({inp.monthsToProject} mo)</CardTitle></CardHeader>
-            <CardContent><div className={`text-2xl font-bold ${result.totals.net >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>{fmt(result.totals.net)}</div><p className="text-xs text-muted-foreground">≈ {fmt(Math.round(result.totals.net / inp.monthsToProject))}/mo avg</p></CardContent>
+            <CardContent><div className={`text-2xl font-bold ${result.totals.net >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>{fmt(result.totals.net)}</div><p className="text-xs text-muted-foreground">≈ {fmt(Math.round(result.totals.net / inp.monthsToProject))}/mo</p></CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-xs uppercase tracking-wide text-muted-foreground">Avg Pay/Rev</CardTitle></CardHeader>
