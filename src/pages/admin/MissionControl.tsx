@@ -460,12 +460,17 @@ export default function MissionControl() {
     : yellowCount > 0 ? 'yellow'
     : 'green';
   const firstActionLink = items[0]?.link;
-  const autopilotChips: Array<{ label: string; tone: 'green' | 'yellow' | 'red' }> = [
-    { label: govBad ? `Governor: ${gov?.verdict ?? '—'}` : 'Governor', tone: govBad ? 'red' : 'green' },
-    { label: disputeBad ? `Disputes: ${m?.disputeLevel}` : 'Disputes', tone: disputeBad ? (m?.disputeLevel === 'critical' ? 'red' : 'yellow') : 'green' },
-    { label: breakerBad ? `Breaker: ${m?.breakerLevel}` : 'Breaker', tone: breakerBad ? 'red' : 'green' },
-    { label: redCount > 0 ? `${redCount} urgent` : yellowCount > 0 ? `${yellowCount} review` : 'Queue clear', tone: redCount > 0 ? 'red' : yellowCount > 0 ? 'yellow' : 'green' },
-  ];
+  // Single queue chip — domain health (Governor/Disputes/Breaker) is owned by the GO/NO-GO banner below.
+  const totalCount = redCount + yellowCount;
+  const queueChipLabel = totalCount === 0
+    ? 'Queue clear'
+    : redCount > 0 && yellowCount > 0
+    ? `${totalCount} items · ${redCount} urgent`
+    : redCount > 0
+    ? `${redCount} urgent`
+    : `${yellowCount} review`;
+  const queueChipTone: 'green' | 'yellow' | 'red' =
+    redCount > 0 ? 'red' : yellowCount > 0 ? 'yellow' : 'green';
 
   return (
     <DashboardLayout title="Mission Control" navItems={missionControlNavItems}>
@@ -497,25 +502,22 @@ export default function MissionControl() {
               : 'Attention needed — see status below'}
           </span>
           <div className="flex flex-wrap items-center gap-1.5 ml-auto">
-            {autopilotChips.map((c) => (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${
+                queueChipTone === 'green'
+                  ? 'border-success/30 bg-success/10 text-success'
+                  : queueChipTone === 'yellow'
+                  ? 'border-warning/30 bg-warning/10 text-warning'
+                  : 'border-destructive/30 bg-destructive/10 text-destructive'
+              }`}
+            >
               <span
-                key={c.label}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${
-                  c.tone === 'green'
-                    ? 'border-success/30 bg-success/10 text-success'
-                    : c.tone === 'yellow'
-                    ? 'border-warning/30 bg-warning/10 text-warning'
-                    : 'border-destructive/30 bg-destructive/10 text-destructive'
+                className={`h-1.5 w-1.5 rounded-full ${
+                  queueChipTone === 'green' ? 'bg-success' : queueChipTone === 'yellow' ? 'bg-warning' : 'bg-destructive'
                 }`}
-              >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    c.tone === 'green' ? 'bg-success' : c.tone === 'yellow' ? 'bg-warning' : 'bg-destructive'
-                  }`}
-                />
-                {c.label}
-              </span>
-            ))}
+              />
+              {queueChipLabel}
+            </span>
             {!autopilotGreen && firstActionLink && (
               <Button asChild size="sm" variant="outline" className="h-7 ml-1">
                 <Link to={firstActionLink}>
