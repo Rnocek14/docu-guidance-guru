@@ -27,9 +27,11 @@ import { TierStatusCard } from '@/components/trader/TierStatusCard';
 import { UnlockRoadmap } from '@/components/trader/UnlockRoadmap';
 import { CleanPayoutChecklist } from '@/components/trader/CleanPayoutChecklist';
 import { RecentPayoutsTable } from '@/components/trader/RecentPayoutsTable';
+import { useRealtimeAccounts } from '@/hooks/use-realtime-accounts';
 
 export default function TraderDashboard() {
   const { user } = useAuth();
+  useRealtimeAccounts(user?.id);
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedAccountId = searchParams.get('account');
 
