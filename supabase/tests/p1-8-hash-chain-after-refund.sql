@@ -11,8 +11,20 @@
 --   2. Inserts a matching payment_transactions row (purpose =
 --      'evaluation_purchase', metadata.account_id set).
 --   3. Calls handle_charge_refunded() — should cancel both payouts.
---   4. Runs verify_audit_chain() over the window covering the refund;
---      asserts valid = true.
+  --   4. Runs verify_audit_chain() over the ENTIRE table; asserts
+  --      valid = true.
+  --
+  -- NOTE on windowing: verify_audit_chain seeds v_expected_prev_hash with
+  -- NULL and compares against the first row inside the window. If the
+  -- window starts AFTER any pre-existing audit rows, the first in-window
+  -- row's actual prev_hash is the row_hash of the previous-out-of-window
+  -- row (or 'GENESIS' if the chain is empty) — never NULL — so a windowed
+  -- call would always report a spurious prev_hash_mismatch on the boundary
+  -- and break this test on a healthy chain. Full-table verification side-
+  -- steps the boundary problem; because we run inside BEGIN/ROLLBACK the
+  -- only rows that move are the refund's, and pre-existing chain rows are
+  -- unchanged. If verify says valid=true with our refund rows appended,
+  -- the refund preserved hash-chain integrity end-to-end.
 --
 -- HOW TO RUN: paste into the Supabase SQL Editor as the service_role.
 --   Wrap in BEGIN; ... ROLLBACK; to avoid leaving test fixtures behind.
@@ -30,7 +42,6 @@ DECLARE
   _charge_id text := 'ch_p18_hashchain_' || substr(gen_random_uuid()::text, 1, 8);
   _pi_id text := 'pi_p18_hashchain_' || substr(gen_random_uuid()::text, 1, 8);
   _session_id text := 'cs_p18_hashchain_' || substr(gen_random_uuid()::text, 1, 8);
-  _window_start timestamptz := now();
   _refund_result jsonb;
   _verify_result jsonb;
 BEGIN
@@ -73,7 +84,7 @@ BEGIN
   END IF;
 
   -- The big assertion: chain still valid across the refund window.
-  _verify_result := verify_audit_chain(_window_start, now());
+  _verify_result := verify_audit_chain();
 
   IF (_verify_result ->> 'valid')::boolean IS NOT TRUE THEN
     RAISE EXCEPTION 'verify_audit_chain INVALID after refund: %', _verify_result;
