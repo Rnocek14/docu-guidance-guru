@@ -13,7 +13,7 @@ import {
   TrendingUp, TrendingDown, AlertTriangle, Shield, Zap, Info, Play, ShieldCheck, ShieldAlert, Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { SimulationControls, type SimOverrides } from '@/components/admin/SimulationControls';
 import { RiskReportTab } from '@/components/admin/RiskReportTab';
 import { CustomerGrowthTab } from '@/components/admin/CustomerGrowthTab';
@@ -150,7 +150,7 @@ export default function MonteCarloAnalytics() {
       if (!session) throw new Error('Not authenticated');
 
       const response = await fetch(
-        `https://sfxmgwkrjwuerfkqxokq.supabase.co/functions/v1/run-simulation`,
+        `${SUPABASE_FUNCTIONS_URL}/run-simulation`,
         {
           method: 'POST',
           headers: {

@@ -30,7 +30,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Settings, Users, Lock, Clock, AlertTriangle, Info } from 'lucide-react';
 import { useState } from 'react';
@@ -176,7 +176,7 @@ export default function CohortsManagement() {
           ?? `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
         
         try {
-          await fetch('https://sfxmgwkrjwuerfkqxokq.supabase.co/functions/v1/admin-actions', {
+          await fetch(`${SUPABASE_FUNCTIONS_URL}/admin-actions`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
