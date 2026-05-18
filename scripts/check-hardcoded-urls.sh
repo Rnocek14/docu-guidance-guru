@@ -12,6 +12,14 @@ if grep -rn 'https://sfxmgwkrjwuerfkqxokq\.supabase\.co' supabase/functions/ --i
   ERRORS=$((ERRORS + 1))
 fi
 
+# Pattern 1b: Hardcoded Supabase project URL in frontend (should import SUPABASE_FUNCTIONS_URL)
+# Allow the canonical client.ts since it's the single source of truth.
+if grep -rn 'https://sfxmgwkrjwuerfkqxokq\.supabase\.co' src/ --include='*.ts' --include='*.tsx' 2>/dev/null \
+   | grep -v 'src/integrations/supabase/client.ts'; then
+  echo "❌ FAIL: Hardcoded Supabase URL found in src/. Import SUPABASE_FUNCTIONS_URL from '@/integrations/supabase/client' instead."
+  ERRORS=$((ERRORS + 1))
+fi
+
 # Pattern 2: Lovable preview domain (never route money here)
 if grep -rn 'id-preview--' supabase/functions/ --include='*.ts' 2>/dev/null; then
   echo "❌ FAIL: Preview domain reference found in edge functions. Remove all preview URL fallbacks."

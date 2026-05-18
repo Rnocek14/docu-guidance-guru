@@ -40,7 +40,12 @@ export function useRealtimeAccounts(userId: string | undefined) {
                 (k === 'trader-accounts' ||
                   k === 'account-details' ||
                   k === 'trader-total-paid' ||
-                  k === 'account-payout')
+                  k === 'account-payout' ||
+                  k === 'account-violations' ||
+                  k === 'account-daily-stats' ||
+                  k === 'account-consistency' ||
+                  k === 'payout-eligibility' ||
+                  k === 'clean-payout-count')
               );
             },
           });
