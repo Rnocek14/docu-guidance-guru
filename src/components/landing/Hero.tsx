@@ -42,16 +42,16 @@ export function Hero() {
           </div>
 
           <h1 className="text-4xl sm:text-5xl lg:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-delay:300ms]">
-            Simulated Trading
-            <br />
             <span className="bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-              Evaluation Done Right
+              Get Paid to Trade.
             </span>
+            <br />
+            On a Simulated Account.
           </h1>
 
           <p className="text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto mb-10 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-delay:450ms]">
-            Prove your skill on a simulated account. Meet the rules. Earn performance-based rewards.
-            Published rules, disclosed caps, staff-reviewed decisions.
+            Pass a rules-based evaluation and earn performance rewards in real cash.
+            Your trading is simulated — your skill, and your payouts, are real.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-delay:600ms]">
