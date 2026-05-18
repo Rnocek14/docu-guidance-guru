@@ -19,6 +19,8 @@ import { ArrowLeft, DollarSign, CheckCircle2, XCircle, Download } from 'lucide-r
 import { useAuth } from '@/contexts/AuthContext';
 import type { Account, Violation } from '@/lib/types';
 import { format } from 'date-fns';
+import { useRealtimeAccounts } from '@/hooks/use-realtime-accounts';
+import { ProvisioningBadge } from '@/components/trader/ProvisioningBadge';
 
 interface RuleSnapshot {
   cohort_id: string;
