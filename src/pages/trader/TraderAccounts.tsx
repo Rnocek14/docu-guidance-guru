@@ -8,9 +8,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { Eye, TrendingUp, TrendingDown, Calendar } from 'lucide-react';
 import type { Account, Cohort } from '@/lib/types';
+import { useRealtimeAccounts } from '@/hooks/use-realtime-accounts';
+import { ProvisioningBadge } from '@/components/trader/ProvisioningBadge';
 
 export default function TraderAccounts() {
   const { user } = useAuth();
+  useRealtimeAccounts(user?.id);
 
   const { data: accounts, isLoading } = useQuery({
     queryKey: ['trader-accounts', user?.id],
@@ -87,6 +90,7 @@ export default function TraderAccounts() {
                     </div>
                     {getStatusBadge(account.status)}
                   </div>
+                  <ProvisioningBadge account={account} />
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-2 gap-4 text-sm">

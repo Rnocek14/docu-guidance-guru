@@ -19,6 +19,8 @@ import { ArrowLeft, DollarSign, CheckCircle2, XCircle, Download } from 'lucide-r
 import { useAuth } from '@/contexts/AuthContext';
 import type { Account, Violation } from '@/lib/types';
 import { format } from 'date-fns';
+import { useRealtimeAccounts } from '@/hooks/use-realtime-accounts';
+import { ProvisioningBadge } from '@/components/trader/ProvisioningBadge';
 
 interface RuleSnapshot {
   cohort_id: string;
@@ -50,6 +52,7 @@ const statusLabels: Record<string, { label: string; variant: 'default' | 'second
 export default function AccountDetails() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  useRealtimeAccounts(user?.id);
 
   // Fetch account details
   const { data: account, isLoading: accountLoading, error: accountError } = useQuery({
@@ -209,6 +212,9 @@ export default function AccountDetails() {
               Balance: ${account.current_balance.toLocaleString()} | 
               Total P&L: {account.total_pnl >= 0 ? '+' : ''}${account.total_pnl.toLocaleString()}
             </p>
+            <div className="max-w-md">
+              <ProvisioningBadge account={account as never} />
+            </div>
           </div>
           {showPayoutButton && (
             <Button asChild>
