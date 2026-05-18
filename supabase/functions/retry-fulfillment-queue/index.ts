@@ -105,23 +105,24 @@ Deno.serve(async (req) => {
     for (const row of rows) {
       const tierConfig = TIER_COHORT_MAP[row.tier_id]
       if (!tierConfig) {
-        // Terminal: unknown tier — mark as failed, don't retry forever
-        await supabase
-          .from('checkout_fulfillment_queue')
-          .update({
-            status: 'failed',
-            last_error: `Unknown tier_id: ${row.tier_id}`,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', row.id)
+        // Terminal: unknown tier — mark as failed via atomic RPC (retryable=false)
+        await supabase.rpc('mark_queue_error_v2', {
+          p_queue_id: row.id,
+          p_error: `Unknown tier_id: ${row.tier_id}`,
+          p_retryable: false,
+          p_cap: 24,
+        })
 
         results.push({ session_id: row.stripe_session_id, status: 'failed', error: `Unknown tier: ${row.tier_id}` })
         continue
       }
 
-      // Claim atomically
+      // Claim atomically (v2 RPC, provider-agnostic)
       const { data: claimed, error: claimErr } = await supabase
-        .rpc('claim_checkout_fulfillment', { p_session_id: row.stripe_session_id })
+        .rpc('claim_checkout_fulfillment_v2', {
+          p_provider: 'stripe',
+          p_provider_session_id: row.stripe_session_id,
+        })
 
       if (claimErr) {
         console.error(`Claim failed for ${row.stripe_session_id}: ${claimErr.message}`)
@@ -131,18 +132,19 @@ Deno.serve(async (req) => {
 
       const claimRow = Array.isArray(claimed) ? claimed[0] : claimed
       if (!claimRow) {
-        // Already fulfilled or processing — skip
+        // Already fulfilled, processing, or terminal (incl. failed_retryable_exhausted) — skip
         results.push({ session_id: row.stripe_session_id, status: 'skipped' })
         continue
       }
 
-      // Fulfill atomically
+      // Fulfill atomically (v2 RPC, provider-agnostic)
       const { data: accountId, error: fulfillErr } = await supabase
-        .rpc('fulfill_checkout_session', {
+        .rpc('fulfill_checkout_session_v2', {
           p_queue_id: claimRow.id,
           p_user_id: row.user_id,
-          p_stripe_session_id: row.stripe_session_id,
-          p_payment_intent: row.payment_intent || '',
+          p_provider: 'stripe',
+          p_provider_session_id: row.stripe_session_id,
+          p_provider_payment_id: row.payment_intent || '',
           p_amount_cents: row.amount_cents || 0,
           p_currency: row.currency || 'usd',
           p_tier_id: row.tier_id,
@@ -157,19 +159,19 @@ Deno.serve(async (req) => {
         const errorMsg = fulfillErr.message || 'Unknown fulfillment error'
         const isRetryable = isRetryableError(errorMsg)
 
-        // Revert to queued if retryable, or mark failed if terminal
-        await supabase
-          .from('checkout_fulfillment_queue')
-          .update({
-            status: isRetryable ? 'queued' : 'failed',
-            last_error: errorMsg,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', claimRow.id)
+        // DB-enforced cap: retryable → 'queued' until cap, then 'failed_retryable_exhausted'.
+        // Non-retryable → 'failed' immediately.
+        const { data: markResult } = await supabase.rpc('mark_queue_error_v2', {
+          p_queue_id: claimRow.id,
+          p_error: errorMsg,
+          p_retryable: isRetryable,
+          p_cap: 24,
+        })
+        const exhausted = (markResult as { exhausted?: boolean } | null)?.exhausted === true
 
         results.push({
           session_id: row.stripe_session_id,
-          status: isRetryable ? 'blocked' : 'failed',
+          status: exhausted ? 'failed' : isRetryable ? 'blocked' : 'failed',
           error: errorMsg,
         })
         continue
