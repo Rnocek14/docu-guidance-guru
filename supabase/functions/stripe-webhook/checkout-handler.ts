@@ -1,6 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@18.5.0'
 import { TIER_COHORT_MAP } from '../_shared/checkout/config.ts'
+import { getActiveProvider } from '../_shared/providers/adapter.ts'
+import { provisionAccount } from '../_shared/providers/lifecycle.ts'
 
 function generateAccountNumber(): string {
   const date = new Date()
@@ -197,6 +199,65 @@ export async function handleCheckoutCompleted(
   }
 
   console.log(`Account created atomically: id=${accountId} tier=${tierId} user=${userId} session=${session.id}`)
+
+  // ── Step 4: Provision sim account at active provider (best-effort) ──
+  // This call is intentionally NON-blocking to checkout completion:
+  //   - Trader's payment succeeded and their account row exists.
+  //   - If provisioning fails (or no provider is configured), lifecycle.ts
+  //     raises a staff_notifications row so ops can manually intervene.
+  //   - `external_status` stays NULL until provisioning succeeds, which the
+  //     reconciliation pass in daily-risk-snapshot will also surface.
+  try {
+    const provider = await getActiveProvider()
+    if (provider && accountId) {
+      const result = await provisionAccount(
+        { supabase, requestId: `checkout:${session.id}` },
+        provider,
+        {
+          accountId: accountId as string,
+          startingBalance: tierConfig.accountSize,
+          tierLabel: tierConfig.cohortName,
+          metadata: {
+            stripe_session_id: session.id,
+            tier_id: tierId,
+          },
+        }
+      )
+      if (!result.ok) {
+        console.error(
+          `Provider provisioning failed: account=${accountId} provider=${provider.id} error=${result.error}`
+        )
+        // Staff notification — provisioning failure requires manual action
+        await supabase.from('staff_notifications').insert({
+          notification_type: 'provider_provision_failed',
+          title: '🚨 Provider account provisioning failed',
+          body: `Account ${accountId} (tier ${tierId}) was created in our DB but the provider (${provider.id}) did not provision a sim account. Error: ${result.error}. MANUAL ACTION REQUIRED — provision the account or refund the trader.`,
+          data: {
+            account_id: accountId,
+            provider: provider.id,
+            tier_id: tierId,
+            stripe_session_id: session.id,
+            error: result.error,
+          },
+          idempotency_key: `provider_provision_failed:${accountId}`,
+        }).catch(() => { /* best-effort */ })
+      } else {
+        console.log(`Provider provisioned: account=${accountId} provider=${provider.id} external=${result.externalAccountId}`)
+      }
+    } else if (!provider) {
+      console.log(`No active provider configured; skipping provisioning for account=${accountId}`)
+    }
+  } catch (provErr) {
+    // Never fail the checkout because of provisioning issues — log + alert only.
+    console.error('Provider provisioning threw:', (provErr as Error).message)
+    await supabase.from('staff_notifications').insert({
+      notification_type: 'provider_provision_failed',
+      title: '🚨 Provider provisioning crashed',
+      body: `Account ${accountId} provisioning threw an unexpected error: ${(provErr as Error).message}. MANUAL ACTION REQUIRED.`,
+      data: { account_id: accountId, stripe_session_id: session.id },
+      idempotency_key: `provider_provision_crashed:${accountId}`,
+    }).catch(() => {})
+  }
 }
 
 /**

@@ -1,4 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getActiveProvider } from '../_shared/providers/adapter.ts'
+import { disableAccount } from '../_shared/providers/lifecycle.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -188,7 +190,7 @@ Deno.serve(async (req) => {
     // Get current account state
     const { data: account, error: accountError } = await supabaseAdmin
       .from('accounts')
-      .select('id, status, user_id, account_number')
+      .select('id, status, user_id, account_number, external_provider, external_account_id')
       .eq('id', body.account_id)
       .single()
 
@@ -342,6 +344,50 @@ Deno.serve(async (req) => {
             })
             .eq('account_id', body.account_id)
             .is('confirmed_at', null)
+
+          // ── Disable the sim account at the broker/provider ──
+          // Must be fast (<5s SLA) — lifecycle.disableAccount logs the call
+          // to provider_api_calls, updates accounts.external_status on
+          // success, and raises a staff_notifications alert on failure so a
+          // human can intervene before the trader incurs further losses.
+          //
+          // We only attempt this when both an active provider is configured
+          // AND the account has been provisioned externally. Anything else
+          // is logged and skipped — never blocking the breach confirmation.
+          // deno-lint-ignore no-explicit-any
+          const acct = account as any
+          if (acct.external_account_id) {
+            try {
+              const provider = await getActiveProvider()
+              if (provider) {
+                const disableResult = await disableAccount(
+                  { supabase: supabaseAdmin, requestId },
+                  provider,
+                  {
+                    accountId: body.account_id,
+                    externalAccountId: acct.external_account_id as string,
+                    reason: 'breach',
+                    breachType: body.reason,
+                  }
+                )
+                console.log(
+                  `Provider disable: account=${body.account_id} provider=${provider.id} ok=${disableResult.ok} confirmed=${disableResult.confirmed} latency=${disableResult.latencyMs}ms`
+                )
+              } else {
+                console.warn(
+                  `confirm_failure: account=${body.account_id} has external_account_id but no ACTIVE_PROVIDER is configured`
+                )
+              }
+            } catch (provErr) {
+              // Never fail the review action because of provider issues — lifecycle
+              // already alerts staff. Just log here for observability.
+              console.error('Provider disable threw:', (provErr as Error).message)
+            }
+          } else {
+            console.log(
+              `confirm_failure: account=${body.account_id} has no external_account_id — nothing to disable`
+            )
+          }
         }
 
         result = { ...result, previous_status: previousStatus, new_status: newStatus, deduplicated: wasDuplicate, audit_deduplicated: !auditResult.inserted, event_deduplicated: !eventResult.inserted, audit_idempotency_key: effectiveIdempotencyKey, event_idempotency_key: eventIdempotencyKey, event_type: eventTypeNorm }

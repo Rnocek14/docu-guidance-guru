@@ -1,5 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { constantTimeEqual } from '../_shared/crypto.ts'
+import { getActiveProvider } from '../_shared/providers/adapter.ts'
+import { getAccountStatus } from '../_shared/providers/lifecycle.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -366,6 +368,111 @@ Deno.serve(async (req) => {
       }
     }
 
+    // =========================================================================
+    // 9b. PROVIDER RECONCILIATION (drift detection)
+    // =========================================================================
+    // Catches out-of-band state changes between Meridian and the broker:
+    //   - Account active in our DB but disabled at provider (e.g. vendor
+    //     fraud team intervened directly) → trader thinks they can trade
+    //     but orders will reject.
+    //   - Account marked disabled in our DB but still active at provider →
+    //     trader can still rack up losses after a breach.
+    //
+    // Bounded to 200 accounts per run to keep latency predictable and avoid
+    // hammering the vendor API. Older accounts are picked up over subsequent
+    // runs via `last_reconciled_at` ordering (NULLS FIRST).
+    let providerReconciliation: {
+      checked: number
+      drift: number
+      errors: number
+      skipped_no_provider: boolean
+    } | null = null
+
+    try {
+      const activeProvider = await getActiveProvider()
+      if (!activeProvider) {
+        providerReconciliation = { checked: 0, drift: 0, errors: 0, skipped_no_provider: true }
+      } else {
+        const RECONCILE_BATCH = 200
+        const { data: accountsToCheck } = await db
+          .from('accounts')
+          .select('id, external_account_id, external_status, status')
+          .eq('external_provider', activeProvider.id)
+          .not('external_account_id', 'is', null)
+          .in('external_status', ['active', 'disabled'])
+          .limit(RECONCILE_BATCH)
+
+        const rows = (accountsToCheck ?? []) as Array<{
+          id: string
+          external_account_id: string
+          external_status: string
+          status: string
+        }>
+
+        let drift = 0
+        let errors = 0
+
+        const reconRequestId = `recon:${new Date().toISOString()}`
+        for (const row of rows) {
+          const result = await getAccountStatus(
+            { supabase: db, requestId: reconRequestId },
+            activeProvider,
+            row.id,
+            row.external_account_id
+          )
+
+          if (!result.ok) {
+            errors++
+            continue
+          }
+
+          // Drift: our internal status disagrees with the provider's tradeable signal.
+          const internalActive = row.external_status === 'active'
+          const providerActive = result.isTradeable === true
+          if (internalActive !== providerActive) {
+            drift++
+            await db.from('staff_notifications').upsert(
+              {
+                notification_type: 'provider_state_drift',
+                title: '⚠️ Provider state drift detected',
+                body: `Account ${row.id} (ext: ${row.external_account_id}) is ${row.external_status} in Meridian but ${result.externalStatus ?? 'unknown'} at ${activeProvider.id}. Investigate.`,
+                data: {
+                  account_id: row.id,
+                  provider: activeProvider.id,
+                  external_account_id: row.external_account_id,
+                  internal_external_status: row.external_status,
+                  provider_status: result.externalStatus ?? null,
+                  provider_tradeable: providerActive,
+                },
+                idempotency_key: `provider_drift:${row.id}:${new Date().toISOString().slice(0, 10)}`,
+              },
+              { onConflict: 'idempotency_key', ignoreDuplicates: true }
+            ).catch(() => {})
+          }
+        }
+
+        providerReconciliation = {
+          checked: rows.length,
+          drift,
+          errors,
+          skipped_no_provider: false,
+        }
+
+        if (drift > 0) {
+          alarms.push({
+            code: 'PROVIDER_STATE_DRIFT',
+            level: drift > 5 ? 'high' : 'warning',
+            message: `${drift} accounts have provider state drift (${activeProvider.id})`,
+            value: drift,
+            threshold: 0,
+          })
+        }
+      }
+    } catch (reconErr) {
+      console.error('Provider reconciliation error:', (reconErr as Error).message)
+      providerReconciliation = { checked: 0, drift: 0, errors: 1, skipped_no_provider: false }
+    }
+
     // 10. Write snapshot
     const { data: snapshotId, error: snapshotError } = await db.rpc('create_risk_snapshot', {
       _pass_rate: passRate,
@@ -391,6 +498,7 @@ Deno.serve(async (req) => {
         auto_tightening_attempted: shouldAttemptAutoTighten,
         auto_tightening_proposals_pending: proposalResult?.proposals_pending ?? 0,
         pending_pass_velocity: pendingPassVelocity ?? null,
+        provider_reconciliation: providerReconciliation,
       }),
     })
 
