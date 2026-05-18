@@ -143,6 +143,8 @@ function detectBroker(req: Request): BrokerId | null {
   if (explicit) return explicit as BrokerId
   // Tradovate canonical headers (auto-detect)
   if (req.headers.get('x-tv-signature') && req.headers.get('x-tv-timestamp')) return 'tradovate'
+  // WealthCharts canonical headers (auto-detect)
+  if (req.headers.get('x-wl-signature') && req.headers.get('x-wl-timestamp')) return 'wealthcharts'
   // Unknown broker — do NOT default
   return null
 }
