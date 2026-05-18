@@ -212,6 +212,9 @@ export default function AccountDetails() {
               Balance: ${account.current_balance.toLocaleString()} | 
               Total P&L: {account.total_pnl >= 0 ? '+' : ''}${account.total_pnl.toLocaleString()}
             </p>
+            <div className="max-w-md">
+              <ProvisioningBadge account={account as never} />
+            </div>
           </div>
           {showPayoutButton && (
             <Button asChild>
