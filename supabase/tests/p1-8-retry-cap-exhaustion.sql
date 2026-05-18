@@ -2,10 +2,14 @@
 -- P1-8 Test #3 — Retry cap exhaustion (P1-3 regression guard)
 --
 -- Asserts:
---   - With cap=24, mark_queue_error_v2 keeps the row in 'queued' for
---     attempts 1..24 (retryable error path).
---   - The 25th retryable call (attempts crosses to 25, >= cap) transitions
---     the row to 'failed_retryable_exhausted' and returns exhausted=true.
+  --   - With cap=24, mark_queue_error_v2 keeps the row in 'queued' for
+  --     attempts 1..23 (retryable error path).
+  --   - The 24th retryable call (attempts = cap, comparison is attempts
+  --     >= cap) transitions the row to 'failed_retryable_exhausted' and
+  --     returns exhausted=true. This is the canonical semantic: cap=24
+  --     means "up to 23 retries permitted, exhaust on the 24th attempt"
+  --     ≈ 24 × 5min cron cadence ≈ ~2 hours of breaker tolerance.
+  --     (Matches the docstring in checkout-handler.ts:278.)
 --   - claim_checkout_fulfillment_v2 refuses to re-pick exhausted rows.
 --   - Once terminal, mark_queue_error_v2 returns no_op=true and does not
 --     mutate status.
@@ -40,12 +44,12 @@ BEGIN
     id, user_id, tier_id, stripe_session_id, provider, provider_session_id,
     status, attempts, processing_started_at
   ) VALUES (
-    _queue_id, _user_id, 'starter_25k', _session_id, 'stripe', _session_id,
+    _queue_id, _user_id, 'starter', _session_id, 'stripe', _session_id,
     'processing', 0, now()
   );
 
-  -- Attempts 1..24 — should stay retryable (queued)
-  FOR i IN 1..24 LOOP
+  -- Attempts 1..23 — should stay retryable (queued); exhaustion fires AT cap.
+  FOR i IN 1..23 LOOP
     UPDATE checkout_fulfillment_queue
        SET attempts = i, status = 'processing', processing_started_at = now()
      WHERE id = _queue_id;
@@ -60,18 +64,18 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- Attempt 25 — crosses cap, must exhaust
+  -- Attempt 24 — first call where attempts >= cap, must exhaust.
   UPDATE checkout_fulfillment_queue
-     SET attempts = 25, status = 'processing', processing_started_at = now()
+     SET attempts = 24, status = 'processing', processing_started_at = now()
    WHERE id = _queue_id;
 
   _result := mark_queue_error_v2(_queue_id, 'EVALUATIONS_FROZEN', true, 24);
 
   IF (_result ->> 'exhausted')::boolean IS NOT TRUE THEN
-    RAISE EXCEPTION 'Attempt 25 (>=cap=24) MUST exhaust, got %', _result;
+    RAISE EXCEPTION 'Attempt 24 (>=cap=24) MUST exhaust, got %', _result;
   END IF;
   IF (_result ->> 'next_status') <> 'failed_retryable_exhausted' THEN
-    RAISE EXCEPTION 'Attempt 25 expected failed_retryable_exhausted, got %', _result;
+    RAISE EXCEPTION 'Attempt 24 expected failed_retryable_exhausted, got %', _result;
   END IF;
 
   SELECT status, attempts INTO _status, _attempts
@@ -92,7 +96,7 @@ BEGIN
     RAISE EXCEPTION 'Expected no_op=true on terminal row, got %', _replay;
   END IF;
 
-  RAISE NOTICE 'PASS — cap exhausts at attempt 25, claim refuses, terminal no-op holds.';
+  RAISE NOTICE 'PASS — cap exhausts at attempt 24, claim refuses, terminal no-op holds.';
 END $$;
 
 ROLLBACK;
