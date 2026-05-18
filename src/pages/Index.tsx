@@ -120,9 +120,9 @@ export default function Index() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button asChild size="lg" className="gap-2 h-12 px-8 text-base font-semibold" onClick={() => track('lp_click_cta', { cta: 'final_primary', tier: 'pro' })}>
-              <Link to="/checkout?tier=pro">
-                Start Pro Evaluation <ArrowRight className="h-4 w-4" />
+            <Button asChild size="lg" className="gap-2 h-12 px-8 text-base font-semibold" onClick={() => track('lp_click_cta', { cta: 'final_primary', tier: 'founders' })}>
+              <Link to="/checkout?tier=founders">
+                Start Founder's Evaluation <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="h-12 px-8 text-base">
