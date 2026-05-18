@@ -20,7 +20,7 @@ export function PromoBanner() {
       <div className="container mx-auto px-4 py-2.5 flex items-center justify-center gap-2 text-sm">
         <Sparkles className="h-4 w-4 text-primary shrink-0" />
         <span className="text-foreground font-medium">
-          Now Open — Pass the evaluation, get paid. Real cash, simulated accounts.
+          Now Open — A fair, rules-based evaluation for serious traders.
         </span>
         <a
           href="#pricing"
