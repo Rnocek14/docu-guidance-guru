@@ -108,13 +108,14 @@ export const TIER_ECONOMICS: Record<string, TierEconomics> = {
     tierId: 'founders',
     name: "Founder's Edition",
     accountSize: 50_000,
-    entryFee: 199,
+    entryFee: 99,
     isLive: true,
-    // Proven-safe economics: tighter caps than Starter
+    // Launch pricing: discounted entry with tighter caps while we build payout history.
+    // Limited to the first 100 seats — capacity enforced at fulfillment.
     splitPercent: 80,
     firstPayoutCap: 300,
     lifetimeCapMultiple: 7,
-    lifetimeCapAmount: 1_393,  // 199 × 7
+    lifetimeCapAmount: 693,  // 99 × 7
     payoutCooldownDays: 14,
     resetFee: 99,
     profitTargetPercent: 10,
@@ -143,8 +144,8 @@ export const TIER_STRIPE: Record<string, TierStripeConfig> = {
     productId: 'prod_Tvn1vcoJGH3uwR',
   },
   founders: {
-    priceId: 'price_1T9XmhLH4HmFKO8KTdwnuSPL',
-    productId: 'prod_U7nNSpm3mImjr0',
+    priceId: 'price_1TYVSBLH4HmFKO8K9JUlT9PS',
+    productId: 'prod_UXaddfOod6ZNCv',
   },
 }
 
