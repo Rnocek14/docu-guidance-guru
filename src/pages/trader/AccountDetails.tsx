@@ -52,6 +52,7 @@ const statusLabels: Record<string, { label: string; variant: 'default' | 'second
 export default function AccountDetails() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  useRealtimeAccounts(user?.id);
 
   // Fetch account details
   const { data: account, isLoading: accountLoading, error: accountError } = useQuery({
