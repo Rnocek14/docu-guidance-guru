@@ -1,5 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { constantTimeEqual } from '../_shared/crypto.ts'
+import { getActiveProvider } from '../_shared/providers/adapter.ts'
+import { getAccountStatus } from '../_shared/providers/lifecycle.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
