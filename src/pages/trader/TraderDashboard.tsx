@@ -24,7 +24,6 @@ import { PortfolioOverview } from '@/components/trader/PortfolioOverview';
 import { AccountSwitcher, sortAccounts } from '@/components/trader/AccountSwitcher';
 import { SmartGreeting } from '@/components/trader/SmartGreeting';
 import { TierStatusCard } from '@/components/trader/TierStatusCard';
-import { UnlockRoadmap } from '@/components/trader/UnlockRoadmap';
 import { CleanPayoutChecklist } from '@/components/trader/CleanPayoutChecklist';
 import { RecentPayoutsTable } from '@/components/trader/RecentPayoutsTable';
 import { useRealtimeAccounts } from '@/hooks/use-realtime-accounts';
@@ -174,7 +173,15 @@ export default function TraderDashboard() {
         ) : accounts?.length ? (
           <>
             {/* Portfolio Overview */}
-            <PortfolioOverview accounts={accounts} totalPaidOut={totalPaidOut ?? 0} />
+            <PortfolioOverview
+              accounts={accounts}
+              totalPaidOut={totalPaidOut ?? 0}
+              activeAccountHeadroomPct={
+                eligibility?.lifetime_cap_amount && eligibility.lifetime_cap_amount > 0
+                  ? ((eligibility.lifetime_paid_total ?? 0) / eligibility.lifetime_cap_amount) * 100
+                  : null
+              }
+            />
 
             {/* Account Switcher */}
             <AccountSwitcher
@@ -205,9 +212,8 @@ export default function TraderDashboard() {
                 {/* PA-only: Ladder Progression */}
                 {isPerformanceAccount && (
                   <>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid gap-4 md:grid-cols-2">
                       <TierStatusCard progress={ladderProgress} />
-                      <UnlockRoadmap progress={ladderProgress} />
                       <CleanPayoutChecklist />
                     </div>
                     <RecentPayoutsTable accountId={activeAccount.id} highlightTierUp={!!tierUpEvent} />
