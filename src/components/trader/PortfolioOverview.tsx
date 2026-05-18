@@ -3,13 +3,16 @@ import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DollarSign, TrendingUp, BarChart3, Wallet } from 'lucide-react';
 import type { Account, Cohort } from '@/lib/types';
+import { getHeadroomBand } from '@/lib/headroom-band';
 
 interface PortfolioOverviewProps {
   accounts: (Account & { cohort: Cohort })[];
   totalPaidOut?: number;
+  /** Lifetime cap usage % for the currently-selected account (0–100). Optional. */
+  activeAccountHeadroomPct?: number | null;
 }
 
-export function PortfolioOverview({ accounts, totalPaidOut = 0 }: PortfolioOverviewProps) {
+export function PortfolioOverview({ accounts, totalPaidOut = 0, activeAccountHeadroomPct = null }: PortfolioOverviewProps) {
   const statusCounts = accounts.reduce(
     (acc, a) => {
       if (a.status === 'active') acc.active++;
@@ -117,7 +120,20 @@ export function PortfolioOverview({ accounts, totalPaidOut = 0 }: PortfolioOverv
           <div className="text-xl font-bold text-success">
             ${totalPaidOut.toLocaleString()}
           </div>
-          <p className="text-[10px] text-muted-foreground">Lifetime received</p>
+          {(() => {
+            const band = getHeadroomBand(activeAccountHeadroomPct);
+            if (!band) {
+              return <p className="text-[10px] text-muted-foreground">Lifetime received</p>;
+            }
+            return (
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[10px] text-muted-foreground">Received ·</span>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                  {band.label}
+                </Badge>
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
     </div>
