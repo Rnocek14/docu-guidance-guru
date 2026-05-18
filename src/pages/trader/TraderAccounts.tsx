@@ -6,9 +6,10 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
-import { Eye, TrendingUp, TrendingDown, Calendar, Loader2, AlertTriangle } from 'lucide-react';
+import { Eye, TrendingUp, TrendingDown, Calendar } from 'lucide-react';
 import type { Account, Cohort } from '@/lib/types';
 import { useRealtimeAccounts } from '@/hooks/use-realtime-accounts';
+import { ProvisioningBadge } from '@/components/trader/ProvisioningBadge';
 
 export default function TraderAccounts() {
   const { user } = useAuth();
