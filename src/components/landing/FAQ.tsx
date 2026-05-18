@@ -32,7 +32,7 @@ const faqs = [
   },
   {
     q: 'What is the lifetime payout limit?',
-    a: 'Each tier has a maximum lifetime earnings amount, expressed as a multiple of your entry fee (e.g., up to 7\u00D7 on the Starter tier). This is disclosed on the pricing page before purchase.',
+    a: 'Each tier has a maximum lifetime earnings amount, expressed as a multiple of your entry fee (e.g., up to 10\u00D7 on the Starter tier and 7\u00D7 on the Founder\u2019s Edition). This is disclosed on the pricing page before purchase.',
   },
   {
     q: 'How fast are payouts processed?',
@@ -40,7 +40,7 @@ const faqs = [
   },
   {
     q: 'When can I request rewards?',
-    a: 'After a 14-day eligibility period, meeting the minimum trading days and winning days requirements, maintaining the profit buffer, and completing the 30-day cooling period. Full details are on the Rules page.',
+    a: 'Your first payout becomes eligible 7 days after entering the Performance phase. Subsequent payouts follow a 14-day cooldown, plus the minimum trading days, winning days, and profit buffer requirements. Full details are on the Rules page.',
   },
   {
     q: 'Why are there caps?',
