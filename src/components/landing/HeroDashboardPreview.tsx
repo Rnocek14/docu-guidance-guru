@@ -9,25 +9,35 @@ import {
 export function HeroDashboardPreview() {
   // Mock equity curve (realistic shape: steady climb with pullbacks)
   const equityPoints = [
-    100000, 100250, 100800, 100400, 101200, 101900, 101500, 102400, 103100, 
+    100000, 100250, 100800, 100400, 101200, 101900, 101500, 102400, 103100,
     102600, 103500, 104200, 104800, 104100, 105000, 105600, 106200, 105700,
     106500, 107100, 106700, 107450,
   ];
   const minY = 99000;
   const maxY = 108500;
-  
+
+  // ViewBox matches the real EquityCurveChart aspect-[16/6] so circles stay
+  // circular and the line slope reads the same on the landing preview.
+  const VB_W = 160;
+  const VB_H = 60;
+  const PAD_L = 4;
+  const PAD_R = 4;
+  const PAD_T = 3;
+  const PAD_B = 3;
+  const innerW = VB_W - PAD_L - PAD_R;
+  const innerH = VB_H - PAD_T - PAD_B;
+
+  const xAt = (i: number) => PAD_L + (i / (equityPoints.length - 1)) * innerW;
+  const yAt = (v: number) => PAD_T + (1 - (v - minY) / (maxY - minY)) * innerH;
+
   const pathD = equityPoints
-    .map((y, i) => {
-      const x = (i / (equityPoints.length - 1)) * 100;
-      const yNorm = 100 - ((y - minY) / (maxY - minY)) * 100;
-      return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${yNorm.toFixed(1)}`;
-    })
+    .map((y, i) => `${i === 0 ? 'M' : 'L'} ${xAt(i).toFixed(2)} ${yAt(y).toFixed(2)}`)
     .join(' ');
 
-  // Drawdown limit line
-  const drawdownY = 100 - ((90000 - minY) / (maxY - minY)) * 100;
-  // Profit target line  
-  const targetY = 100 - ((110000 - minY) / (maxY - minY)) * 100;
+  const drawdownY = yAt(90000);
+  const targetY = yAt(110000);
+  const lastX = xAt(equityPoints.length - 1);
+  const lastY = yAt(equityPoints[equityPoints.length - 1]);
 
   return (
     <div className="relative mx-auto max-w-5xl mt-4 sm:mt-6 animate-in fade-in slide-in-from-bottom-6 duration-1000 [animation-delay:800ms]">
@@ -135,39 +145,38 @@ export function HeroDashboardPreview() {
                 </span>
               </div>
             </div>
-            <svg viewBox="0 0 100 100" className="w-full h-28 sm:h-32" preserveAspectRatio="none">
-              {/* Grid */}
-              {[20, 40, 60, 80].map((y) => (
-                <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="hsl(var(--border))" strokeWidth="0.2" strokeDasharray="1 2" />
-              ))}
-              {/* Drawdown limit */}
-              <line x1="0" y1={drawdownY} x2="100" y2={drawdownY} stroke="hsl(var(--destructive))" strokeWidth="0.4" strokeDasharray="2 2" opacity="0.4" />
-              {/* Profit target */}
-              <line x1="0" y1={targetY} x2="100" y2={targetY} stroke="hsl(var(--primary))" strokeWidth="0.4" strokeDasharray="2 2" opacity="0.4" />
-              {/* Fill */}
-              <defs>
-                <linearGradient id="heroEqGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.2" />
-                  <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path d={`${pathD} L 100 100 L 0 100 Z`} fill="url(#heroEqGrad)" />
-              {/* Line */}
-              <path d={pathD} fill="none" stroke="hsl(var(--primary))" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-              {/* Current price dot — pulsing halo conveys "live" */}
-              {(() => {
-                const cy = (100 - ((equityPoints[equityPoints.length - 1] - minY) / (maxY - minY)) * 100).toFixed(1);
-                return (
-                  <g>
-                    <circle cx="100" cy={cy} r="2" fill="hsl(var(--primary))" opacity="0.35">
-                      <animate attributeName="r" values="2;6;2" dur="2.4s" repeatCount="indefinite" />
-                      <animate attributeName="opacity" values="0.45;0;0.45" dur="2.4s" repeatCount="indefinite" />
-                    </circle>
-                    <circle cx="100" cy={cy} r="1.6" fill="hsl(var(--primary))" />
-                  </g>
-                );
-              })()}
-            </svg>
+            <div className="relative w-full h-32 sm:h-36">
+              <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+                {/* Grid */}
+                {[0.2, 0.4, 0.6, 0.8].map((f) => (
+                  <line key={f} x1={PAD_L} y1={PAD_T + f * innerH} x2={VB_W - PAD_R} y2={PAD_T + f * innerH} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" strokeDasharray="2 4" />
+                ))}
+                {/* Drawdown limit */}
+                <line x1={PAD_L} y1={drawdownY} x2={VB_W - PAD_R} y2={drawdownY} stroke="hsl(var(--destructive))" strokeWidth="1.25" vectorEffect="non-scaling-stroke" strokeDasharray="4 4" opacity="0.5" />
+                {/* Profit target */}
+                <line x1={PAD_L} y1={targetY} x2={VB_W - PAD_R} y2={targetY} stroke="hsl(var(--primary))" strokeWidth="1.25" vectorEffect="non-scaling-stroke" strokeDasharray="4 4" opacity="0.5" />
+                {/* Fill */}
+                <defs>
+                  <linearGradient id="heroEqGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.3" />
+                    <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <path d={`${pathD} L ${VB_W - PAD_R} ${VB_H - PAD_B} L ${PAD_L} ${VB_H - PAD_B} Z`} fill="url(#heroEqGrad)" />
+                {/* Line */}
+                <path d={pathD} fill="none" stroke="hsl(var(--primary))" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {/* Current price dot — rendered as HTML so it stays a true circle */}
+              <div
+                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                style={{ left: `${(lastX / VB_W) * 100}%`, top: `${(lastY / VB_H) * 100}%` }}
+              >
+                <span className="relative flex items-center justify-center">
+                  <span className="absolute h-4 w-4 rounded-full bg-primary/40 animate-ping" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-background border-2 border-primary" />
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* 3-column grid: Rule Health / What's Next / Review Readiness — matches real layout */}
