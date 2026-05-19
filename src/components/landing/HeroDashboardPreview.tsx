@@ -145,7 +145,7 @@ export function HeroDashboardPreview() {
                 </span>
               </div>
             </div>
-            <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full aspect-[16/6]" preserveAspectRatio="xMidYMid meet">
+            <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full h-32 sm:h-36" preserveAspectRatio="none">
               {/* Grid */}
               {[0.2, 0.4, 0.6, 0.8].map((f) => (
                 <line key={f} x1={PAD_L} y1={PAD_T + f * innerH} x2={VB_W - PAD_R} y2={PAD_T + f * innerH} stroke="hsl(var(--border))" strokeWidth="0.15" strokeDasharray="0.6 1.2" />
