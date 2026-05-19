@@ -56,7 +56,7 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
             <>
               <RuleRow label="Profit Target" value={`${tier.profitTarget}%`} />
               <RuleRow label="Max Daily Loss" value={`${tier.maxDailyLoss}%`} />
-              <RuleRow label="Max Drawdown" value={`${tier.maxTotalDrawdown}%`} />
+              <RuleRow label="Max Drawdown (EOD trailing)" value={`${tier.maxTotalDrawdown}%`} />
               <RuleRow label="Min Trading Days" value={`${tier.minTradingDays}`} />
               <RuleRow label="Reset Fee" value={`$${tier.resetFee}`} />
             </>

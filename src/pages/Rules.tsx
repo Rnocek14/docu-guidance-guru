@@ -12,7 +12,7 @@ import { Footer } from '@/components/landing/Footer';
 const evaluationRules = [
   { label: 'Profit Target', description: 'You must reach the profit target percentage on your simulated account to pass the evaluation.' },
   { label: 'Max Daily Loss', description: 'Your daily simulated P&L cannot fall below the max daily loss threshold on any single day.' },
-  { label: 'Max Total Drawdown', description: 'Your account equity cannot drawdown below the maximum total drawdown threshold from your highest balance.' },
+  { label: 'Max Drawdown (EOD Trailing, locks at start)', description: 'Trails your highest end-of-day balance upward only — once it reaches your starting balance, it locks there permanently. Intraday equity swings do not move the threshold; only end-of-day closing equity does.' },
   { label: 'Minimum Trading Days', description: 'You must trade on at least the minimum number of distinct trading days before you are eligible to pass.' },
 ];
 

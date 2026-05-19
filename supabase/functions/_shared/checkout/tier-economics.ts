@@ -114,8 +114,8 @@ export const TIER_ECONOMICS: Record<string, TierEconomics> = {
     // Limited to the first 100 seats — capacity enforced at fulfillment.
     splitPercent: 80,
     firstPayoutCap: 300,
-    lifetimeCapMultiple: 7,
-    lifetimeCapAmount: 693,  // 99 × 7
+    lifetimeCapMultiple: 10,
+    lifetimeCapAmount: 990,  // 99 × 10
     payoutCooldownDays: 14,
     resetFee: 99,
     profitTargetPercent: 10,
