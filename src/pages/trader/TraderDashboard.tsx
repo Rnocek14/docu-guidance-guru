@@ -26,6 +26,7 @@ import { SmartGreeting } from '@/components/trader/SmartGreeting';
 import { TierStatusCard } from '@/components/trader/TierStatusCard';
 import { CleanPayoutChecklist } from '@/components/trader/CleanPayoutChecklist';
 import { RecentPayoutsTable } from '@/components/trader/RecentPayoutsTable';
+import { ResetHistoryStrip } from '@/components/trader/ResetHistoryStrip';
 import { useRealtimeAccounts } from '@/hooks/use-realtime-accounts';
 
 export default function TraderDashboard() {
@@ -217,6 +218,7 @@ export default function TraderDashboard() {
                       <CleanPayoutChecklist />
                     </div>
                     <RecentPayoutsTable accountId={activeAccount.id} highlightTierUp={!!tierUpEvent} />
+                    <ResetHistoryStrip />
                   </>
                 )}
 

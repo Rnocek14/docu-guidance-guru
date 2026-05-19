@@ -6,6 +6,7 @@ import { RuleSnapshotCard } from '@/components/trader/RuleSnapshotCard';
 import { AccountTimeline } from '@/components/trader/AccountTimeline';
 import { ProgressGauges } from '@/components/trader/ProgressGauges';
 import { BreachExplainer } from '@/components/trader/BreachExplainer';
+import { ResetOfferCard } from '@/components/trader/ResetOfferCard';
 import { ConsistencyBestDayCard } from '@/components/trader/ConsistencyBestDayCard';
 import { ConsistencyProfitableDaysCard } from '@/components/trader/ConsistencyProfitableDaysCard';
 import { ReconciliationHistory } from '@/components/risk/ReconciliationHistory';
@@ -229,6 +230,21 @@ export default function AccountDetails() {
         {/* Breach Explainer (if violations exist) */}
         {violations && violations.length > 0 && (
           <BreachExplainer violations={violations} accountStatus={account.status} />
+        )}
+
+        {/* Reset offer — surfaced at breach moment */}
+        {(account.status === 'breached_detected' ||
+          account.status === 'under_review' ||
+          account.status === 'failed_confirmed') && (
+          <ResetOfferCard
+            accountId={account.id}
+            accountNumber={account.account_number}
+            breachDetectedAt={
+              violations && violations.length > 0
+                ? violations[0].detected_at
+                : null
+            }
+          />
         )}
 
         {/* Equity Curve */}

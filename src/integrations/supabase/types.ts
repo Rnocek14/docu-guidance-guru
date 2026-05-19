@@ -2227,6 +2227,68 @@ export type Database = {
           },
         ]
       }
+      reset_purchases: {
+        Row: {
+          account_id: string
+          amount_paid_cents: number
+          bundle_id: string
+          created_at: string
+          id: string
+          metadata: Json
+          paid_at: string | null
+          provider: string | null
+          provider_session_id: string | null
+          resets_remaining: number
+          resets_total: number
+          status: string
+          updated_at: string
+          urgency_window_active: boolean
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          amount_paid_cents: number
+          bundle_id: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          paid_at?: string | null
+          provider?: string | null
+          provider_session_id?: string | null
+          resets_remaining: number
+          resets_total: number
+          status?: string
+          updated_at?: string
+          urgency_window_active?: boolean
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          amount_paid_cents?: number
+          bundle_id?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          paid_at?: string | null
+          provider?: string | null
+          provider_session_id?: string | null
+          resets_remaining?: number
+          resets_total?: number
+          status?: string
+          updated_at?: string
+          urgency_window_active?: boolean
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reset_purchases_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       risk_scores: {
         Row: {
           abuse_factors: Json | null

@@ -101,3 +101,15 @@ Then stop building and spend 30 days on distribution: outreach, content, Discord
 ---
 
 **Confirm this ordering and I'll start with workstream 1 (Payout Proof). Or tell me which workstream to start with if you want a different order.**
+
+## Workstream 2 — Reset Funnel (shipped)
+- `src/lib/reset-bundles.ts` + `supabase/functions/_shared/reset-bundles.ts` — bundle SSOT (single $99, urgency $79, 3-pack $199), 24h urgency window helpers.
+- `ResetOfferCard` — breach-moment CTA mounted in `AccountDetails` after `BreachExplainer`. Live countdown when urgency window is open.
+- `/reset/:accountId` page (`ResetCheckout.tsx`) — bundle picker + order summary, calls `create-reset-checkout`.
+- `create-reset-checkout` edge function — Stripe checkout session (price_data, no product lookup); pre-persists `pending` row in `reset_purchases`; server-side urgency-window enforcement.
+- `reset_purchases` table — RLS: traders read own, admins/risk read all; no client writes.
+- `ResetHistoryStrip` on trader dashboard — banked + recent reset bundles.
+
+Deferred (Workstream 2b):
+- Webhook handler to flip `pending → paid` and trigger reset application (will extend existing payment-webhook).
+- Breach-trigger email sequence (rolls into email infra workstream).
