@@ -27,6 +27,9 @@ import { TierStatusCard } from '@/components/trader/TierStatusCard';
 import { CleanPayoutChecklist } from '@/components/trader/CleanPayoutChecklist';
 import { RecentPayoutsTable } from '@/components/trader/RecentPayoutsTable';
 import { ResetHistoryStrip } from '@/components/trader/ResetHistoryStrip';
+import { PayoutTrackerBar } from '@/components/trader/PayoutTrackerBar';
+import { RulesAtAGlanceCard } from '@/components/trader/RulesAtAGlanceCard';
+import { LivePayoutTicker } from '@/components/trader/LivePayoutTicker';
 import { useRealtimeAccounts } from '@/hooks/use-realtime-accounts';
 
 export default function TraderDashboard() {
@@ -184,6 +187,15 @@ export default function TraderDashboard() {
               }
             />
 
+            {/* Payout tracker bar — paid → first cap → lifetime cap */}
+            {activeAccount && (
+              <PayoutTrackerBar
+                paidTotal={totalPaidOut ?? 0}
+                firstPayoutCap={activeAccount.cohort?.first_payout_cap_amount ?? 500}
+                lifetimeCap={eligibility?.lifetime_cap_amount ?? 1490}
+              />
+            )}
+
             {/* Account Switcher */}
             <AccountSwitcher
               accounts={accounts}
@@ -193,6 +205,9 @@ export default function TraderDashboard() {
 
             {activeAccount && (
               <>
+                {/* Rules at a glance — dismissible per account */}
+                <RulesAtAGlanceCard account={activeAccount} />
+
                 {/* Phase Indicator */}
                 <AccountPhaseIndicator 
                   status={activeAccount.status} 
@@ -269,6 +284,9 @@ export default function TraderDashboard() {
             </CardContent>
           </Card>
         )}
+
+        {/* Live payout ticker — social proof inside the product */}
+        <LivePayoutTicker />
       </div>
     </DashboardLayout>
   );
