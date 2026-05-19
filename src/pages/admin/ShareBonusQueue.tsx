@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { missionControlNavItems } from "@/components/layout/AdminNav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -65,7 +66,7 @@ export default function ShareBonusQueue() {
   });
 
   return (
-    <DashboardLayout title="Share Bonus Queue" navItems={[]}>
+    <DashboardLayout title="Share Bonus Queue" navItems={missionControlNavItems}>
       <div className="space-y-4">
         <div className="flex gap-2">
           {STATUSES.map((s) => (
