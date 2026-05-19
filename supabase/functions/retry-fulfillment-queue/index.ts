@@ -74,11 +74,17 @@ Deno.serve(async (req) => {
 
   try {
     // ── Step 1: Find retryable rows ──────────────────────────────
+    // Pick anything queued for >60s, regardless of attempts. This covers:
+    //   (a) rows blocked by the breaker (attempts > 0), AND
+    //   (b) rows that never got their first fulfilment pass because the
+    //       webhook crashed before claim/fulfill — without this, paid
+    //       traders would never receive an account ("paid but got nothing").
+    const staleThreshold = new Date(Date.now() - 60_000).toISOString()
     const { data: rows, error: selectErr } = await supabase
       .from('checkout_fulfillment_queue')
       .select('id, stripe_session_id, user_id, tier_id, payment_intent, amount_cents, currency, attempts')
       .eq('status', 'queued')
-      .gt('attempts', 0) // Only previously-attempted rows (blocked by breaker)
+      .lt('created_at', staleThreshold)
       .order('created_at', { ascending: true })
       .limit(BATCH_LIMIT)
 
