@@ -679,6 +679,7 @@ Deno.serve(async (req) => {
       successParadoxMonthlyDelta: Number(body.successParadoxMonthlyDelta ?? 0.003),
       trials: Number(body.trials ?? 100),
       behavior: body.behavior ?? {},
+      costMode: (body.costMode as 'lean' | 'staffed' | 'scaled' | undefined) ?? 'lean',
     }
 
     // Bounds
