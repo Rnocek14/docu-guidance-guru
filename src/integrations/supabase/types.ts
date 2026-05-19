@@ -1089,12 +1089,20 @@ export type Database = {
           evaluations_frozen: boolean
           id: string
           last_evaluated_at: string
+          last_transition_at: string | null
+          last_transition_reason: string | null
           net_buffer: number | null
           payouts_blocked: boolean
+          payrev_level: string
+          payrev_payouts_30d: number
+          payrev_release_streak: number
+          payrev_revenue_30d: number
+          payrev_window_days: number
           pending_liability: number
           previous_level: string | null
           rolling_pass_count: number
           rolling_pass_rate: number
+          rolling_payrev_ratio: number
           rolling_total_count: number
           triggered_by: string | null
           updated_at: string
@@ -1105,12 +1113,20 @@ export type Database = {
           evaluations_frozen?: boolean
           id?: string
           last_evaluated_at?: string
+          last_transition_at?: string | null
+          last_transition_reason?: string | null
           net_buffer?: number | null
           payouts_blocked?: boolean
+          payrev_level?: string
+          payrev_payouts_30d?: number
+          payrev_release_streak?: number
+          payrev_revenue_30d?: number
+          payrev_window_days?: number
           pending_liability?: number
           previous_level?: string | null
           rolling_pass_count?: number
           rolling_pass_rate?: number
+          rolling_payrev_ratio?: number
           rolling_total_count?: number
           triggered_by?: string | null
           updated_at?: string
@@ -1121,12 +1137,20 @@ export type Database = {
           evaluations_frozen?: boolean
           id?: string
           last_evaluated_at?: string
+          last_transition_at?: string | null
+          last_transition_reason?: string | null
           net_buffer?: number | null
           payouts_blocked?: boolean
+          payrev_level?: string
+          payrev_payouts_30d?: number
+          payrev_release_streak?: number
+          payrev_revenue_30d?: number
+          payrev_window_days?: number
           pending_liability?: number
           previous_level?: string | null
           rolling_pass_count?: number
           rolling_pass_rate?: number
+          rolling_payrev_ratio?: number
           rolling_total_count?: number
           triggered_by?: string | null
           updated_at?: string
@@ -3535,12 +3559,20 @@ export type Database = {
           breaker_level: string
           evaluations_frozen: boolean
           last_evaluated_at: string
+          last_transition_at: string
+          last_transition_reason: string
           net_buffer: number
           payouts_blocked: boolean
+          payrev_level: string
+          payrev_payouts_30d: number
+          payrev_release_streak: number
+          payrev_revenue_30d: number
+          payrev_window_days: number
           pending_liability: number
           previous_level: string
           rolling_pass_count: number
           rolling_pass_rate: number
+          rolling_payrev_ratio: number
           rolling_total_count: number
           triggered_by: string
         }[]
@@ -4084,6 +4116,7 @@ export type Database = {
         | "ingest_quarantined"
         | "ingest_error"
         | "ingest_rejected"
+        | "breaker_transition"
       flag_status: "pending" | "cleared" | "escalated" | "resolved"
       payout_status:
         | "pending"
@@ -4300,6 +4333,7 @@ export const Constants = {
         "ingest_quarantined",
         "ingest_error",
         "ingest_rejected",
+        "breaker_transition",
       ],
       flag_status: ["pending", "cleared", "escalated", "resolved"],
       payout_status: [
