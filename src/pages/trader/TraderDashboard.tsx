@@ -224,8 +224,8 @@ export default function TraderDashboard() {
                   {/* TODAY — trader cockpit: what matters right now */}
                   <TabsContent value="today" className="space-y-6 mt-6">
                     {/* Equity Curve promoted to top — emotional anchor */}
-                    <div className="grid gap-4 lg:grid-cols-5">
-                      <div className="lg:col-span-3">
+                    <div className="grid gap-4 lg:grid-cols-5 items-stretch">
+                      <div className="lg:col-span-3 [&>*]:h-full">
                         <EquityCurveChart
                           accountId={activeAccount.id}
                           startingBalance={activeAccount.starting_balance}
@@ -235,7 +235,7 @@ export default function TraderDashboard() {
                           minTradingDays={activeAccount.cohort?.min_trading_days ?? 5}
                         />
                       </div>
-                      <div className="lg:col-span-2">
+                      <div className="lg:col-span-2 [&>*]:h-full">
                         <RuleHealthCard account={activeAccount} />
                       </div>
                     </div>
