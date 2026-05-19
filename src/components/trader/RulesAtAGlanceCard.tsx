@@ -36,9 +36,9 @@ export function RulesAtAGlanceCard({ account }: RulesAtAGlanceCardProps) {
     { label: 'Max daily loss', value: `${c?.max_daily_loss_percent ?? 5}% of starting balance` },
     { label: 'Max drawdown', value: `${c?.max_total_drawdown_percent ?? 10}% trailing EOD floor` },
     { label: 'Min trading days', value: `${c?.min_trading_days ?? 5} days before passing` },
-    { label: 'Payout split', value: `${c?.payout_split_percent ?? 80}% to you` },
-    { label: 'First payout cap', value: `Up to $${(c?.first_payout_cap ?? 500).toLocaleString()}` },
-    { label: 'Cooldown', value: `${c?.payout_cooldown_days ?? 14} days between payouts` },
+    { label: 'Payout split', value: `80% to you (Starter ladder)` },
+    { label: 'First payout cap', value: `Up to $${(c?.first_payout_cap_amount ?? 500).toLocaleString()}` },
+    { label: 'Cooldown', value: `14 days between payouts` },
   ];
 
   return (
