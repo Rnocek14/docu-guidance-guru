@@ -20,6 +20,7 @@ interface TradePoint {
   fullDate: string;
   iso: string;
   balance: number;
+  floor: number;
   symbol?: string;
   side?: string;
   pnl?: number;
@@ -100,7 +101,13 @@ export function EquityCurveChart({ accountId, startingBalance, currentBalance: c
   const chartData = useMemo(() => {
     if (!trades?.length) return [];
 
-    const points: TradePoint[] = [{ date: 'Start', fullDate: '', iso: '', balance: startingBalance }];
+    const points: TradePoint[] = [{
+      date: 'Start',
+      fullDate: '',
+      iso: '',
+      balance: startingBalance,
+      floor: startingBalance,
+    }];
     let cumulative = startingBalance;
     let peakBalance = startingBalance;
     let drawdown50Fired = false;
@@ -152,6 +159,9 @@ export function EquityCurveChart({ accountId, startingBalance, currentBalance: c
         fullDate: format(closedDate, 'MMM d, h:mma'),
         iso: trade.closed_at!,
         balance: Math.round(cumulative * 100) / 100,
+        floor: Math.round(
+          Math.max(startingBalance, peakBalance * (1 - maxDrawdownPct / 100)) * 100,
+        ) / 100,
         symbol: trade.symbol,
         side: trade.side === 'buy' ? 'Buy' : 'Sell',
         pnl,
@@ -279,6 +289,18 @@ export function EquityCurveChart({ accountId, startingBalance, currentBalance: c
               strokeDasharray="4 4"
               strokeOpacity={0.5}
               label={{ value: 'Start', position: 'left', fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+            />
+            <Area
+              type="stepAfter"
+              dataKey="floor"
+              stroke="hsl(var(--destructive))"
+              strokeWidth={1.5}
+              strokeDasharray="5 4"
+              fill="none"
+              dot={false}
+              activeDot={false}
+              isAnimationActive={false}
+              name="Drawdown floor"
             />
             <Area
               type="monotone"
