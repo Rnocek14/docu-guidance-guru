@@ -1,6 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@18.5.0'
-import { handleCheckoutCompleted } from './checkout-handler.ts'
 import { handleChargeRefunded } from './refund-handler.ts'
 import { handleResetBundleCompleted } from './reset-handler.ts'
 
