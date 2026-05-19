@@ -60,11 +60,14 @@ Deno.serve(async (req) => {
   }
 
   // Auth: cron secret only
-  const authHeader = req.headers.get('Authorization')
+  const authHeader = req.headers.get('Authorization') ?? ''
+  const cronSecretHeader = req.headers.get('X-Cron-Secret') ?? ''
 
   // Resolve CRON_SECRET: prefer env var, fallback to internal_secrets table
   let cronSecret = Deno.env.get('CRON_SECRET') ?? ''
-  if (!cronSecret) {
+  const envLen = cronSecret.length
+  if (!cronSecret || cronSecret.length < 16) {
+    console.warn('payout-sla-check: CRON_SECRET env missing/short, fallback to internal_secrets')
     try {
       const sbLookup = createClient(
         Deno.env.get('SUPABASE_URL')!,
@@ -78,6 +81,7 @@ Deno.serve(async (req) => {
       cronSecret = data?.value ?? ''
     } catch { /* best effort */ }
   }
+  console.log('payout-sla-check auth-debug', { envLen, finalLen: cronSecret.length, headerLen: (req.headers.get('X-Cron-Secret') ?? '').length, bearerLen: (req.headers.get('Authorization') ?? '').length })
 
   if (!cronSecret) {
     console.error('CRON_SECRET not configured')
@@ -86,8 +90,11 @@ Deno.serve(async (req) => {
       headers: { 'Content-Type': 'application/json' },
     })
   }
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
-  if (!token || !(await constantTimeEqual(token, cronSecret))) {
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  const isCron =
+    (cronSecretHeader && await constantTimeEqual(cronSecretHeader, cronSecret)) ||
+    (bearerToken && await constantTimeEqual(bearerToken, cronSecret))
+  if (!isCron) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },

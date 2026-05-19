@@ -64,12 +64,37 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization')
-    const cronSecret = Deno.env.get('CRON_SECRET')
+    const authHeader = req.headers.get('Authorization') ?? ''
+    const cronSecretHeader = req.headers.get('X-Cron-Secret') ?? ''
+
+    // Resolve CRON_SECRET: prefer env var, fallback to internal_secrets table
+    let cronSecret = Deno.env.get('CRON_SECRET') ?? ''
+    const envLen = cronSecret.length
+    if (!cronSecret || cronSecret.length < 16) {
+      console.warn('compute-cpc: CRON_SECRET env missing/short, fallback to internal_secrets')
+      try {
+        const sbLookup = createClient(
+          Deno.env.get('SUPABASE_URL')!,
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+        )
+        const { data } = await sbLookup
+          .from('internal_secrets')
+          .select('value')
+          .eq('key', 'CRON_SECRET')
+          .single()
+        cronSecret = data?.value ?? ''
+      } catch { /* best effort */ }
+    }
+    console.log('compute-cpc auth-debug', { envLen, finalLen: cronSecret.length, hasHeader: !!cronSecretHeader, headerLen: cronSecretHeader.length })
     let source: 'manual' | 'cron' = 'manual'
     let isAuthorized = false
 
-    if (cronSecret && authHeader && authHeader.startsWith('Bearer ')) {
+    if (cronSecret && cronSecretHeader && await constantTimeEqual(cronSecretHeader, cronSecret)) {
+      isAuthorized = true
+      source = 'cron'
+    }
+
+    if (!isAuthorized && cronSecret && authHeader.startsWith('Bearer ')) {
       const token = authHeader.slice(7)
       if (await constantTimeEqual(token, cronSecret)) {
         isAuthorized = true
