@@ -32,11 +32,15 @@ const faqs = [
   },
   {
     q: 'What is the lifetime payout limit?',
-    a: 'Each tier has a maximum lifetime earnings amount, expressed as a multiple of your entry fee (e.g., up to 10\u00D7 on the Starter tier and 7\u00D7 on the Founder\u2019s Edition). This is disclosed on the pricing page before purchase.',
+    a: 'Each tier has a maximum lifetime earnings amount, expressed as a multiple of your entry fee (up to 10\u00D7 on every tier, including the Founder\u2019s Edition). The exact dollar cap is disclosed on the pricing page before purchase.',
   },
   {
     q: 'How fast are payouts processed?',
-    a: 'Payout requests are typically reviewed within 3\u20135 business days. Once approved, payment is usually processed within 1\u20135 business days depending on your payout method.',
+    a: 'Payout requests are typically reviewed within 1\u20133 business days (max 5 if flagged for additional review). Once approved, payment is usually processed within 1\u20135 business days depending on your payout method.',
+  },
+  {
+    q: 'How does the drawdown work?',
+    a: 'All tiers use a 10% end-of-day trailing drawdown that locks at your starting balance. It trails your highest end-of-day balance upward only \u2014 once it reaches your starting balance, it locks there permanently. Intraday equity swings do not move the threshold; only end-of-day closing equity does.',
   },
   {
     q: 'When can I request rewards?',
