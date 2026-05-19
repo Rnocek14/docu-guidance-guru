@@ -136,7 +136,7 @@ export default function Rules() {
                     { label: 'Entry Fee', render: (t: typeof TIERS[0]) => `$${t.price}` },
                     { label: 'Profit Target', render: (t: typeof TIERS[0]) => `${t.profitTarget}%` },
                     { label: 'Max Daily Loss', render: (t: typeof TIERS[0]) => `${t.maxDailyLoss}%` },
-                    { label: 'Max Drawdown', render: (t: typeof TIERS[0]) => `${t.maxTotalDrawdown}%` },
+                    { label: 'Max Drawdown (EOD trailing)', render: (t: typeof TIERS[0]) => `${t.maxTotalDrawdown}%` },
                     { label: 'Min Trading Days', render: (t: typeof TIERS[0]) => `${t.minTradingDays}` },
                     { label: 'Payout Split', render: (t: typeof TIERS[0]) => `${t.splitPercent}%` },
                     { label: 'First Payout Cap', render: (t: typeof TIERS[0]) => `$${t.firstPayoutCap}` },
