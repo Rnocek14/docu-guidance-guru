@@ -14,6 +14,7 @@ import { ComparisonTable } from '@/components/landing/ComparisonTable';
 import { TrustStrip } from '@/components/landing/TrustStrip';
 import { Testimonials } from '@/components/landing/Testimonials';
 import { PlatformLogos } from '@/components/landing/PlatformLogos';
+import { HeroCredibility } from '@/components/landing/HeroCredibility';
 import { FAQ } from '@/components/landing/FAQ';
 import { Footer } from '@/components/landing/Footer';
 
@@ -58,6 +59,7 @@ export default function Index() {
       </header>
 
       <Hero />
+      <HeroCredibility />
       <StatsCounter />
       <HowItWorks />
       <PricingSection />
