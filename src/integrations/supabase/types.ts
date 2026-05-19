@@ -3532,6 +3532,10 @@ export type Database = {
             Returns: Json
           }
       emit_cron_health_heartbeat: { Args: never; Returns: undefined }
+      estimate_stripe_fee_cents: {
+        Args: { p_amount_cents: number }
+        Returns: number
+      }
       evaluate_cluster_risk: {
         Args: { _cluster_id: string; _request_id?: string }
         Returns: Json
@@ -3679,7 +3683,6 @@ export type Database = {
           display_name: string
           paid_at: string
           short_id: string
-          tier_name: string
         }[]
       }
       get_recent_public_payouts: {
@@ -3689,7 +3692,6 @@ export type Database = {
           display_name: string
           paid_at: string
           short_id: string
-          tier_name: string
         }[]
       }
       get_rolling_pass_rate: { Args: { _window_days?: number }; Returns: Json }
@@ -3724,6 +3726,14 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      heal_missing_affiliate_attributions: {
+        Args: { p_lookback_hours?: number }
+        Returns: {
+          attribution_id: string
+          source: string
+          source_id: string
+        }[]
       }
       http: {
         Args: { request: Database["public"]["CompositeTypes"]["http_request"] }
