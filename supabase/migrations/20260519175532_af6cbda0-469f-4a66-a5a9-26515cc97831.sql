@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS public._pa_validate();

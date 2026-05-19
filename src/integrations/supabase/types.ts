@@ -3353,7 +3353,6 @@ export type Database = {
       }
     }
     Functions: {
-      _pa_validate: { Args: never; Returns: string[] }
       apply_for_affiliate: {
         Args: { p_code: string; p_payout_method?: string }
         Returns: {
