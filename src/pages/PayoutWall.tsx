@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, ArrowRight, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -11,7 +10,6 @@ type PublicPayout = {
   short_id: string;
   display_name: string;
   amount: number;
-  tier_name: string;
   paid_at: string | null;
 };
 
@@ -83,14 +81,11 @@ export default function PayoutWall() {
                   <CardContent className="p-5 flex items-center justify-between gap-4">
                     <div className="space-y-1 min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">{p.display_name}</p>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary" className="text-xs">{p.tier_name}</Badge>
-                        {p.paid_at && (
-                          <span className="text-xs text-muted-foreground">
-                            {formatDistanceToNow(new Date(p.paid_at), { addSuffix: true })}
-                          </span>
-                        )}
-                      </div>
+                      {p.paid_at && (
+                        <span className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(p.paid_at), { addSuffix: true })}
+                        </span>
+                      )}
                     </div>
                     <div className="text-right">
                       <p className="text-2xl font-bold tabular-nums text-foreground">

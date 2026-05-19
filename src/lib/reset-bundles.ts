@@ -1,12 +1,11 @@
 /**
- * Reset bundle pricing.
+ * Reset bundle pricing (client view).
  *
- * SSOT: base reset fee lives in src/lib/pricing-data.ts (PricingTier.resetFee = $99).
- * Bundles are marketing-layer products that wrap N resets with discount.
+ * Price/count/urgency SSOT lives at supabase/functions/_shared/reset-bundles.ts
+ * (used to set Stripe line-item amounts). This file adds the marketing-only
+ * presentation fields. Parity is enforced by reset-bundles-ssot.test.ts.
  *
  * Urgency window: 24h from breach detection. After expiry, single reset reverts to $99.
- *
- * Server-side mirror: supabase/functions/_shared/reset-bundles.ts must match.
  */
 export type ResetBundleId = 'single' | 'urgency_single' | 'three_pack';
 
