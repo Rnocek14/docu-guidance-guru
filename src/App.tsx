@@ -27,6 +27,7 @@ const TraderTrades = lazy(() => import("./pages/trader/TraderTrades"));
 const TraderPayouts = lazy(() => import("./pages/trader/TraderPayouts"));
 const PayoutRequest = lazy(() => import("./pages/trader/PayoutRequest"));
 const AccountDetails = lazy(() => import("./pages/trader/AccountDetails"));
+const ResetCheckout = lazy(() => import("./pages/ResetCheckout"));
 
 const RiskDashboard = lazy(() => import("./pages/risk/RiskDashboard"));
 const ReviewQueue = lazy(() => import("./pages/risk/ReviewQueue"));
@@ -121,6 +122,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['trader', 'admin']}>
                   <PayoutRequest />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/reset/:accountId"
+              element={
+                <ProtectedRoute allowedRoles={['trader', 'admin']}>
+                  <ResetCheckout />
                 </ProtectedRoute>
               }
             />
