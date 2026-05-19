@@ -5,6 +5,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { DashboardLayout, traderNavItems } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -37,6 +38,13 @@ export default function TraderDashboard() {
   useRealtimeAccounts(user?.id);
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedAccountId = searchParams.get('account');
+  const activeTab = searchParams.get('tab') ?? 'today';
+
+  const handleTabChange = (tab: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', tab);
+    setSearchParams(next, { replace: true });
+  };
 
   // Fetch trader's accounts with cohort info
   const { data: accounts, isLoading } = useQuery({
@@ -206,63 +214,82 @@ export default function TraderDashboard() {
 
             {activeAccount && (
               <>
-                {/* Rules at a glance — dismissible per account */}
-                <RulesAtAGlanceCard account={activeAccount} />
+                <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+                  <TabsList className="grid w-full grid-cols-3 max-w-md">
+                    <TabsTrigger value="today">Today</TabsTrigger>
+                    <TabsTrigger value="payouts">Payouts</TabsTrigger>
+                    <TabsTrigger value="account">Account</TabsTrigger>
+                  </TabsList>
 
-                {/* Phase Indicator */}
-                <AccountPhaseIndicator 
-                  status={activeAccount.status} 
-                  profitTargetPercent={activeAccount.cohort?.profit_target_percent || 10}
-                  payoutWindowOpened={eligibility?.payout_window_opened !== false}
-                  daysRemaining={eligibility?.days_remaining}
-                  windowOpensAt={eligibility?.payout_window_opens_at}
-                />
-
-                {/* PA-only: Payout Readiness */}
-                {isPerformanceAccount && (
-                  <PayoutReadinessCard
-                    eligibility={eligibility}
-                    accountId={activeAccount.id}
-                  />
-                )}
-
-                {/* PA-only: Ladder Progression */}
-                {isPerformanceAccount && (
-                  <>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <TierStatusCard progress={ladderProgress} />
-                      <CleanPayoutChecklist />
+                  {/* TODAY — trader cockpit: what matters right now */}
+                  <TabsContent value="today" className="space-y-6 mt-6">
+                    {/* Equity Curve promoted to top — emotional anchor */}
+                    <div className="grid gap-4 lg:grid-cols-5">
+                      <div className="lg:col-span-3">
+                        <EquityCurveChart
+                          accountId={activeAccount.id}
+                          startingBalance={activeAccount.starting_balance}
+                          currentBalance={activeAccount.current_balance}
+                          maxDrawdownPct={activeAccount.cohort?.max_total_drawdown_percent ?? 10}
+                          profitTargetPct={activeAccount.cohort?.profit_target_percent ?? 10}
+                          minTradingDays={activeAccount.cohort?.min_trading_days ?? 5}
+                        />
+                      </div>
+                      <div className="lg:col-span-2">
+                        <RuleHealthCard account={activeAccount} />
+                      </div>
                     </div>
-                    <RecentPayoutsTable accountId={activeAccount.id} highlightTierUp={!!tierUpEvent} />
-                    <ResetHistoryStrip />
-                  </>
-                )}
 
-                {/* Primary zone: Equity Curve + Rule Health side-by-side */}
-                <div className="grid gap-4 lg:grid-cols-5">
-                  <div className="lg:col-span-3">
-                    <EquityCurveChart
-                      accountId={activeAccount.id}
-                      startingBalance={activeAccount.starting_balance}
-                      currentBalance={activeAccount.current_balance}
-                      maxDrawdownPct={activeAccount.cohort?.max_total_drawdown_percent ?? 10}
-                      profitTargetPct={activeAccount.cohort?.profit_target_percent ?? 10}
-                      minTradingDays={activeAccount.cohort?.min_trading_days ?? 5}
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <WhatsNextCard account={activeAccount} />
+                      <SafeDayPanel account={activeAccount} />
+                    </div>
+
+                    {/* Compact payout readiness summary — full detail lives in Payouts tab */}
+                    {isPerformanceAccount && (
+                      <PayoutReadinessCard
+                        eligibility={eligibility}
+                        accountId={activeAccount.id}
+                      />
+                    )}
+                  </TabsContent>
+
+                  {/* PAYOUTS — progression + monetization center */}
+                  <TabsContent value="payouts" className="space-y-6 mt-6">
+                    {isPerformanceAccount ? (
+                      <>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <TierStatusCard progress={ladderProgress} />
+                          <CleanPayoutChecklist />
+                        </div>
+                        <RecentPayoutsTable accountId={activeAccount.id} highlightTierUp={!!tierUpEvent} />
+                        <ResetHistoryStrip />
+                      </>
+                    ) : (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-base">Payouts unlock after evaluation</CardTitle>
+                          <CardDescription>
+                            Pass your current evaluation to unlock payout requests, tier progression, and your clean-payout ladder.
+                          </CardDescription>
+                        </CardHeader>
+                      </Card>
+                    )}
+                  </TabsContent>
+
+                  {/* ACCOUNT — configuration + reference */}
+                  <TabsContent value="account" className="space-y-6 mt-6">
+                    <AccountPhaseIndicator
+                      status={activeAccount.status}
+                      profitTargetPercent={activeAccount.cohort?.profit_target_percent || 10}
+                      payoutWindowOpened={eligibility?.payout_window_opened !== false}
+                      daysRemaining={eligibility?.days_remaining}
+                      windowOpensAt={eligibility?.payout_window_opens_at}
                     />
-                  </div>
-                  <div className="lg:col-span-2">
-                    <RuleHealthCard account={activeAccount} />
-                  </div>
-                </div>
-
-                {/* Guidance zone: What's Next + Safe Day side-by-side */}
-                <div className="grid gap-4 md:grid-cols-2">
-                  <WhatsNextCard account={activeAccount} />
-                  <SafeDayPanel account={activeAccount} />
-                </div>
-
-                {/* Consistency Preview (Challenge phase only) */}
-                <ConsistencyPreviewCard account={activeAccount} />
+                    <RulesAtAGlanceCard account={activeAccount} />
+                    <ConsistencyPreviewCard account={activeAccount} />
+                  </TabsContent>
+                </Tabs>
               </>
             )}
           </>
