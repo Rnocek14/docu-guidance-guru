@@ -1,4 +1,5 @@
 import { Suspense, lazy } from "react";
+import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -9,6 +10,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ScrollToHash } from "@/components/ScrollToHash";
 import { Loader2 } from "lucide-react";
+import { captureReferralFromUrl } from "@/lib/referral";
 
 // Lazy-loaded pages
 const Index = lazy(() => import("./pages/Index"));
@@ -51,6 +53,9 @@ const WealthChartsIntegration = lazy(() => import("./pages/admin/WealthChartsInt
 const CohortProjection = lazy(() => import("./pages/admin/CohortProjection"));
 const ShareBonusQueue = lazy(() => import("./pages/admin/ShareBonusQueue"));
 const SupportDashboard = lazy(() => import("./pages/support/SupportDashboard"));
+const AffiliateApply = lazy(() => import("./pages/affiliate/AffiliateApply"));
+const AffiliateDashboard = lazy(() => import("./pages/affiliate/AffiliateDashboard"));
+const AffiliateAdmin = lazy(() => import("./pages/admin/AffiliateAdmin"));
 
 function PageLoader() {
   return (
@@ -62,6 +67,11 @@ function PageLoader() {
 
 const queryClient = new QueryClient();
 
+function ReferralCapture() {
+  useEffect(() => { captureReferralFromUrl(); }, []);
+  return null;
+}
+
 const App = () => (
   <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
   <QueryClientProvider client={queryClient}>
@@ -71,6 +81,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <ScrollToHash />
+          <ReferralCapture />
           <Suspense fallback={<PageLoader />}>
           <Routes>
             {/* Public routes */}
@@ -81,6 +92,24 @@ const App = () => (
             <Route path="/rules" element={<Rules />} />
             <Route path="/p/:shortId" element={<PublicPayoutShare />} />
             <Route path="/payouts" element={<PayoutWall />} />
+
+            {/* Affiliate */}
+            <Route
+              path="/affiliate/apply"
+              element={
+                <ProtectedRoute>
+                  <AffiliateApply />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/affiliate/dashboard"
+              element={
+                <ProtectedRoute>
+                  <AffiliateDashboard />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Protected dashboard router */}
             <Route
@@ -318,6 +347,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <ShareBonusQueue />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/affiliates"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AffiliateAdmin />
                 </ProtectedRoute>
               }
             />
