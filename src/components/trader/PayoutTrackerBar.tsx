@@ -1,10 +1,12 @@
 import { Card, CardContent } from '@/components/ui/card';
-import { Wallet, Trophy, Target } from 'lucide-react';
+import { Wallet, Trophy, Target, ArrowRight } from 'lucide-react';
 
 interface PayoutTrackerBarProps {
   paidTotal: number;
   firstPayoutCap: number;
   lifetimeCap: number;
+  cleanPayoutCount?: number;
+  payoutCadenceDays?: number;
 }
 
 /**
@@ -16,12 +18,19 @@ interface PayoutTrackerBarProps {
  * concrete published values (trader's own paid total + tier-published caps),
  * not derived risk metrics, so showing exact dollars is appropriate.
  */
-export function PayoutTrackerBar({ paidTotal, firstPayoutCap, lifetimeCap }: PayoutTrackerBarProps) {
+export function PayoutTrackerBar({
+  paidTotal,
+  firstPayoutCap,
+  lifetimeCap,
+  cleanPayoutCount = 0,
+  payoutCadenceDays = 14,
+}: PayoutTrackerBarProps) {
   const safePaid = Math.max(0, paidTotal);
   const safeLifetime = Math.max(1, lifetimeCap);
   const pct = Math.min(100, (safePaid / safeLifetime) * 100);
   const firstMarker = Math.min(100, (firstPayoutCap / safeLifetime) * 100);
   const hitFirst = safePaid >= firstPayoutCap;
+  const proPayoutsNeeded = Math.max(0, 3 - cleanPayoutCount);
 
   return (
     <Card className="bg-gradient-to-r from-card via-card to-primary/5">
@@ -66,6 +75,26 @@ export function PayoutTrackerBar({ paidTotal, firstPayoutCap, lifetimeCap }: Pay
           </span>
           <span>Lifetime cap</span>
         </div>
+        {hitFirst && (
+          <div className="mt-3 pt-3 border-t border-border/40 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="text-muted-foreground">
+              First cap cleared. Subsequent payouts:{' '}
+              <span className="text-foreground font-medium">uncapped per cycle</span>, paid every{' '}
+              <span className="text-foreground font-medium">{payoutCadenceDays} days</span>.
+            </span>
+            {proPayoutsNeeded > 0 ? (
+              <span className="flex items-center gap-1 text-primary">
+                <ArrowRight className="h-3 w-3" />
+                {proPayoutsNeeded} clean payout{proPayoutsNeeded === 1 ? '' : 's'} to Pro tier (85/15 split)
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-success font-medium">
+                <ArrowRight className="h-3 w-3" />
+                Pro tier unlocked — 85/15 split active
+              </span>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

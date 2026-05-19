@@ -193,6 +193,7 @@ export default function TraderDashboard() {
                 paidTotal={totalPaidOut ?? 0}
                 firstPayoutCap={activeAccount.cohort?.first_payout_cap_amount ?? 500}
                 lifetimeCap={eligibility?.lifetime_cap_amount ?? 1490}
+                cleanPayoutCount={cleanPayoutCount ?? 0}
               />
             )}
 

@@ -38,7 +38,9 @@ export function RulesAtAGlanceCard({ account }: RulesAtAGlanceCardProps) {
     { label: 'Min trading days', value: `${c?.min_trading_days ?? 5} days before passing` },
     { label: 'Payout split', value: `80% to you (Starter ladder)` },
     { label: 'First payout cap', value: `Up to $${(c?.first_payout_cap_amount ?? 500).toLocaleString()}` },
+    { label: 'Payouts 2+', value: `Uncapped per cycle, up to lifetime cap` },
     { label: 'Cooldown', value: `14 days between payouts` },
+    { label: 'Pro tier unlock', value: `3 clean payouts → 85/15 split, higher lifetime cap` },
   ];
 
   return (
