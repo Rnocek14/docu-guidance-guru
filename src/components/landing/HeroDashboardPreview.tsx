@@ -136,8 +136,19 @@ export function HeroDashboardPreview() {
               <path d={`${pathD} L 100 100 L 0 100 Z`} fill="url(#heroEqGrad)" />
               {/* Line */}
               <path d={pathD} fill="none" stroke="hsl(var(--primary))" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-              {/* Current price dot */}
-              <circle cx="100" cy={equityPoints.length > 0 ? (100 - ((equityPoints[equityPoints.length - 1] - minY) / (maxY - minY)) * 100).toFixed(1) : '50'} r="2" fill="hsl(var(--primary))" />
+              {/* Current price dot — pulsing halo conveys "live" */}
+              {(() => {
+                const cy = (100 - ((equityPoints[equityPoints.length - 1] - minY) / (maxY - minY)) * 100).toFixed(1);
+                return (
+                  <g>
+                    <circle cx="100" cy={cy} r="2" fill="hsl(var(--primary))" opacity="0.35">
+                      <animate attributeName="r" values="2;6;2" dur="2.4s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0.45;0;0.45" dur="2.4s" repeatCount="indefinite" />
+                    </circle>
+                    <circle cx="100" cy={cy} r="1.6" fill="hsl(var(--primary))" />
+                  </g>
+                );
+              })()}
             </svg>
           </div>
 
