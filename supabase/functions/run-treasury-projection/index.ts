@@ -46,13 +46,34 @@ const TIER = {
   profitTargetPercent: 10,
 }
 
+// ---------- Cost-mode presets (Phase 1 v2) ----------
+// "lean"     — solo founder, beta, no payroll, contract tools only
+// "staffed"  — partial CS/ops support, mid-stage
+// "scaled"   — production-aligned ops budget (matches production monte-carlo.ts)
+const COST_MODE_OPEX: Record<'lean' | 'staffed' | 'scaled', number> = {
+  lean: 3_000,
+  staffed: 12_000,
+  scaled: 18_000,
+}
+
 // ---------- Default trader-behavior assumptions ----------
-// Conservative production-aligned values. Caller may override.
+// CALIBRATED TO PRODUCTION (2026-05-19 reconciliation).
+// Mirrors src/lib/monte-carlo.ts DEFAULT_ASSUMPTIONS which is itself
+// calibrated to QuantVPS/Tradeify/Topstep industry benchmarks (2026-03-02).
+// If you change a value here, update both files AND the calibration test.
 interface BehaviorAssumptions {
   passRate: number              // P(account passes evaluation in any given month)
   resetRateAnnual: number       // annual probability a failed account buys a reset
   monthlyChurn: number          // P(funded account stops trading in a month, no payout)
-  payoutProbPerMonth: number    // P(funded account requests payout in a given month)
+  // PRODUCTION-CALIBRATED PAYOUT MODEL (v2):
+  //   only `payoutRequestRate` × funded ever become payout-active.
+  //   active accounts request `payoutsPerActiveAccountPerMonth` per month,
+  //   bounded above by `minMonthsBetweenPayouts` (cadence floor).
+  //   every funded account is hard-capped at `lifetimeCapPerAccount` total paid.
+  payoutRequestRate: number               // P(funded account ever becomes payout-active). prod=0.25
+  payoutsPerActiveAccountPerMonth: number // per active requester, post-eligibility. prod=0.7
+  minMonthsBetweenPayouts: number         // hard floor: 1 month in production (caps at 1.0)
+  lifetimeCapPerAccount: number           // $ hard cap per funded account. prod=$1,490
   avgPayoutWhenPaid: number     // mean trader payout amount when one occurs
   affiliateCommissionPct: number
   chargebackRate: number        // share of revenue that becomes a chargeback (net rev penalty)
@@ -62,15 +83,23 @@ interface BehaviorAssumptions {
 }
 
 const DEFAULT_BEHAVIOR: BehaviorAssumptions = {
-  passRate: 0.12,
+  // Pass rate — calibrated to 7% mode (industry: QuantVPS/Tradeify/Topstep)
+  passRate: 0.07,
   resetRateAnnual: 0.18,
   monthlyChurn: 0.08,
-  payoutProbPerMonth: 0.35,
-  avgPayoutWhenPaid: 380,
+  // Production calibration: only 25% of funded ever request a payout;
+  // those who do request ~0.7 payouts/mo, capped at 1/mo cadence.
+  payoutRequestRate: 0.25,
+  payoutsPerActiveAccountPerMonth: 0.7,
+  minMonthsBetweenPayouts: 1,
+  // $1,490 lifetime cap per Starter tier account (TIER.lifetimeCapAmount).
+  lifetimeCapPerAccount: 1_490,
+  avgPayoutWhenPaid: 350,
   affiliateCommissionPct: 0.10, // blended (some sales attributed, some not)
   chargebackRate: 0.015,
   refundRate: 0.02,
-  fixedMonthlyOpex: 12_000,
+  // Default to LEAN beta opex. Override via `costMode` input.
+  fixedMonthlyOpex: COST_MODE_OPEX.lean,
   variableCostPerAccount: 8, // platform/data per funded account/month
 }
 
@@ -90,6 +119,7 @@ interface ProjectionInput {
   successParadoxMonthlyDelta?: number   // additive +pass-rate per month, e.g. 0.003
   trials: number                        // Monte Carlo trials (we do analytic + noise)
   behavior?: Partial<BehaviorAssumptions>
+  costMode?: 'lean' | 'staffed' | 'scaled'   // selects fixedMonthlyOpex preset
 }
 
 interface MonthState {
