@@ -31,6 +31,14 @@ interface BreakerState {
   last_evaluated_at: string;
   triggered_by: string | null;
   previous_level: string | null;
+  rolling_payrev_ratio: number;
+  payrev_revenue_30d: number;
+  payrev_payouts_30d: number;
+  payrev_window_days: number;
+  payrev_level: string;
+  payrev_release_streak: number;
+  last_transition_at: string | null;
+  last_transition_reason: string | null;
 }
 
 const LEVEL_CONFIG = {
@@ -72,6 +80,12 @@ const THRESHOLD_ELEVATED = 15;
 const THRESHOLD_CRITICAL = 18;
 const THRESHOLD_EMERGENCY = 20;
 
+// Pay/Rev thresholds (calibrated v1.1, 2026-05-19)
+const PAYREV_L1 = 0.30; // tighten
+const PAYREV_L2 = 0.45; // freeze
+const PAYREV_L2_RELEASE = 0.40;
+const PAYREV_L1_RELEASE = 0.25;
+
 export function BreakerStatusPanel() {
   const { data: breaker, isLoading } = useQuery({
     queryKey: ['econ-breaker-state'],
@@ -105,6 +119,13 @@ export function BreakerStatusPanel() {
   const config = LEVEL_CONFIG[level] || LEVEL_CONFIG.normal;
   const Icon = config.icon;
   const passRate = Number(breaker.rolling_pass_rate) || 0;
+  const payRev = Number(breaker.rolling_payrev_ratio) || 0;
+  const payRevPct = payRev * 100;
+  const payrevLevel = (breaker.payrev_level || 'normal') as 'normal' | 'elevated' | 'critical';
+  const payrevDrivingColor =
+    payrevLevel === 'critical' ? 'text-destructive'
+    : payrevLevel === 'elevated' ? 'text-warning'
+    : 'text-foreground';
 
   // Calculate how close to each threshold
   const headroomToElevated = Math.max(0, THRESHOLD_ELEVATED - passRate);
@@ -169,6 +190,51 @@ export function BreakerStatusPanel() {
 
         <Separator />
 
+        {/* Pay/Rev Gauge — v1.1 production breaker signal */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-1">
+              <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+              Rolling 30-Day Pay/Rev
+            </span>
+            <span className={`font-bold ${payrevDrivingColor}`}>
+              {payRevPct.toFixed(1)}%
+            </span>
+          </div>
+          <div className="relative">
+            <Progress
+              value={Math.min((payRev / 0.60) * 100, 100)}
+              className="h-3"
+            />
+            <div className="absolute top-0 h-3 flex items-center" style={{ left: `${(PAYREV_L1 / 0.60) * 100}%` }}>
+              <div className="w-0.5 h-full bg-warning" />
+            </div>
+            <div className="absolute top-0 h-3 flex items-center" style={{ left: `${(PAYREV_L2 / 0.60) * 100}%` }}>
+              <div className="w-0.5 h-full bg-destructive" />
+            </div>
+          </div>
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>0%</span>
+            <span className="text-warning">30% L1</span>
+            <span className="text-destructive">45% L2</span>
+            <span>60%</span>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            ${Math.round(breaker.payrev_payouts_30d).toLocaleString()} paid /
+            {' '}${Math.round(breaker.payrev_revenue_30d).toLocaleString()} revenue •
+            sub-level <code className="bg-muted px-1 rounded">{payrevLevel}</code>
+            {payrevLevel !== 'normal' && breaker.payrev_release_streak > 0 && (
+              <span> • release streak {breaker.payrev_release_streak}/{payrevLevel === 'critical' ? 12 : 36}</span>
+            )}
+          </div>
+          <div className="text-[10px] text-muted-foreground/80">
+            Window: trailing 30 days, fulfilled checkouts vs paid+paid_confirmed payouts.
+            Tighten {'>'}30%, Freeze {'>'}45%. Release at {'<'}{PAYREV_L2_RELEASE*100}% / {'<'}{PAYREV_L1_RELEASE*100}% with hysteresis.
+          </div>
+        </div>
+
+        <Separator />
+
         {/* Control Surface Status */}
         <div className="grid grid-cols-3 gap-3">
           <div className={`flex items-center gap-2 p-2 rounded-md text-sm ${breaker.payouts_blocked ? 'bg-destructive/10' : 'bg-muted'}`}>
@@ -224,6 +290,12 @@ export function BreakerStatusPanel() {
             <AlertTitle className="text-sm">Level Changed</AlertTitle>
             <AlertDescription className="text-xs">
               {breaker.previous_level} → {breaker.breaker_level}
+              {breaker.last_transition_at && (
+                <span> • {formatDistanceToNow(new Date(breaker.last_transition_at), { addSuffix: true })}</span>
+              )}
+              {breaker.last_transition_reason && (
+                <div className="mt-1 font-mono text-[10px] opacity-80">{breaker.last_transition_reason}</div>
+              )}
             </AlertDescription>
           </Alert>
         )}
