@@ -17,23 +17,28 @@ export function ResetHistoryStrip() {
   const { data } = useQuery({
     queryKey: ['reset-history', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: purchases, error } = await supabase
         .from('reset_purchases')
-        .select('id, bundle_id, status, resets_total, resets_remaining, created_at, account_id')
+        .select('id, bundle_id, status, resets_total, created_at, account_id, restored_account, applied_at')
         .eq('user_id', user!.id)
         .order('created_at', { ascending: false })
         .limit(5);
       if (error) throw error;
-      return data ?? [];
+      const { data: accounts } = await supabase
+        .from('accounts')
+        .select('reset_credits_remaining')
+        .eq('user_id', user!.id);
+      const banked = (accounts ?? []).reduce(
+        (sum, a) => sum + (a.reset_credits_remaining ?? 0),
+        0,
+      );
+      return { purchases: purchases ?? [], banked };
     },
     enabled: !!user?.id,
   });
 
-  if (!data || data.length === 0) return null;
-
-  const banked = data
-    .filter((p) => p.status === 'paid' && p.resets_remaining > 0)
-    .reduce((sum, p) => sum + p.resets_remaining, 0);
+  if (!data || data.purchases.length === 0) return null;
+  const { purchases, banked } = data;
 
   return (
     <Card>
@@ -49,7 +54,7 @@ export function ResetHistoryStrip() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {data.map((p) => {
+        {purchases.map((p) => {
           const bundle = RESET_BUNDLES[p.bundle_id as ResetBundleId];
           return (
             <Link
@@ -60,8 +65,8 @@ export function ResetHistoryStrip() {
               <div>
                 <p className="font-medium text-foreground">{bundle?.label ?? p.bundle_id}</p>
                 <p className="text-xs text-muted-foreground">
-                  {format(new Date(p.created_at), 'MMM d, yyyy')} ·{' '}
-                  {p.resets_remaining}/{p.resets_total} remaining
+                  {format(new Date(p.created_at), 'MMM d, yyyy')} · {p.resets_total} reset{p.resets_total > 1 ? 's' : ''}
+                  {p.restored_account ? ' · account restored' : p.applied_at ? ' · credits banked' : ''}
                 </p>
               </div>
               <Badge variant={p.status === 'paid' ? 'secondary' : p.status === 'pending' ? 'outline' : 'default'}>
