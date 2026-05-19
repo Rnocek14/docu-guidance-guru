@@ -138,6 +138,11 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
   let reserve = input.startingReserve
   let funded = input.startingTraders
   let payoutQueue = 0
+  // Stock of funded accounts that have never received a payout yet. Every
+  // newly-funded account adds 1 to this pool; payouts probabilistically
+  // drain it. Replaces the prior `newFunded / funded` proxy which assumed
+  // only first-month accounts were ever cap-eligible.
+  let firstPayoutPool = input.startingTraders
   let worstTrough = reserve
   let insolventMonth: number | null = null
   let l1Count = 0
@@ -178,6 +183,11 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
     // Evaluations take ~5–20 days; assume 1-month lag is roughly absorbed by passRate.
     const newFunded = signups * effectivePass
     const churnedThisMonth = funded * beh.monthlyChurn
+    const churnedFirstPayoutShare = funded > 0 ? firstPayoutPool / funded : 0
+    firstPayoutPool = Math.max(
+      0,
+      firstPayoutPool - churnedThisMonth * churnedFirstPayoutShare + newFunded
+    )
     funded = Math.max(0, funded - churnedThisMonth + newFunded)
 
     // --- 4. Revenue ---
@@ -190,18 +200,27 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
     const grossRevenue = entryRevenue + resetRevenue - refunds
     const netRevenue = Math.max(0, grossRevenue - chargebacks)
 
-    // --- 5. Payouts owed this month (cohort-aware) ---
-    // Per funded account: P(payout) * avgPayout, capped on first payout.
-    // We approximate first-payout-cap impact via fraction-of-funded-that-are-new.
-    const newCohortFraction = funded > 0 ? Math.min(1, newFunded / funded) : 0
+    // --- 5. Payouts owed this month (cohort-aware, stock-based cap) ---
+    // The first-payout cap applies to every account's FIRST payout regardless
+    // of how long ago they were funded. We model the population of cap-eligible
+    // accounts as a stock (firstPayoutPool) and probabilistically drain it.
+    const payoutRequestsThisMonth = funded * beh.payoutProbPerMonth
+    const firstPayoutShare = funded > 0
+      ? Math.min(1, firstPayoutPool / funded)
+      : 0
     const cappedAvgPayout =
-      newCohortFraction * Math.min(TIER.firstPayoutCap, beh.avgPayoutWhenPaid) +
-      (1 - newCohortFraction) * beh.avgPayoutWhenPaid
+      firstPayoutShare * Math.min(TIER.firstPayoutCap, beh.avgPayoutWhenPaid) +
+      (1 - firstPayoutShare) * beh.avgPayoutWhenPaid
 
-    const payoutsDueGross = funded * beh.payoutProbPerMonth * beh.avgPayoutWhenPaid
+    const payoutsDueGross = payoutRequestsThisMonth * beh.avgPayoutWhenPaid
     const payoutsDueNet =
-      funded * beh.payoutProbPerMonth * cappedAvgPayout +
+      payoutRequestsThisMonth * cappedAvgPayout +
       payoutQueue // deferred from prior months join the queue
+
+    // Drain the first-payout pool by the share of this month's requests that
+    // were first payouts (not by amount).
+    const firstPayoutsConsumed = payoutRequestsThisMonth * firstPayoutShare
+    firstPayoutPool = Math.max(0, firstPayoutPool - firstPayoutsConsumed)
 
     // --- 6. Breaker evaluation (uses rolling Pay/Rev based on PRIOR months) ---
     const rollingRev = recentRev.reduce((a, b) => a + b, 0)

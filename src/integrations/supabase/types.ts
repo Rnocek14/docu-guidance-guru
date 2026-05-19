@@ -4131,6 +4131,10 @@ export type Database = {
             Args: { _destination_name: string; _user_id: string }
             Returns: Json
           }
+      void_affiliate_attribution_by_source: {
+        Args: { p_reason?: string; p_source: string; p_source_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       account_event_type:
