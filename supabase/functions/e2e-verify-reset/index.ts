@@ -37,6 +37,7 @@ Deno.serve(async (req) => {
   const createdPurchases: string[] = []
   const createdAuditKeys: string[] = []
   const createdEventKeys: string[] = []
+  let createdUserId: string | null = null
 
   try {
     // Pick any active cohort
@@ -44,7 +45,14 @@ Deno.serve(async (req) => {
       .from('cohorts').select('id').eq('is_active', true).limit(1).single()
     if (!cohort) throw new Error('no active cohort')
 
-    const userId = crypto.randomUUID()
+    // Create an ephemeral auth user (FK requires real auth.users row)
+    const email = `e2e-${crypto.randomUUID().slice(0, 8)}@meridian-e2e.local`
+    const { data: created, error: userErr } = await supabase.auth.admin.createUser({
+      email, password: crypto.randomUUID(), email_confirm: true,
+    })
+    if (userErr || !created?.user) throw new Error('create user: ' + (userErr?.message ?? 'no user'))
+    const userId = created.user.id
+    createdUserId = userId
     const acctId = crypto.randomUUID()
     createdAccounts.push(acctId)
 
@@ -219,6 +227,9 @@ Deno.serve(async (req) => {
       }
       if (createdAccounts.length) {
         await supabase.from('accounts').delete().in('id', createdAccounts)
+      }
+      if (createdUserId) {
+        await supabase.auth.admin.deleteUser(createdUserId)
       }
     } catch (cleanupErr) {
       console.error('cleanup error:', (cleanupErr as Error).message)
