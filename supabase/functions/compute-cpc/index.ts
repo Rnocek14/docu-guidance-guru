@@ -69,7 +69,9 @@ Deno.serve(async (req) => {
 
     // Resolve CRON_SECRET: prefer env var, fallback to internal_secrets table
     let cronSecret = Deno.env.get('CRON_SECRET') ?? ''
+    const envLen = cronSecret.length
     if (!cronSecret || cronSecret.length < 16) {
+      console.warn('compute-cpc: CRON_SECRET env missing/short, fallback to internal_secrets')
       try {
         const sbLookup = createClient(
           Deno.env.get('SUPABASE_URL')!,
@@ -83,6 +85,7 @@ Deno.serve(async (req) => {
         cronSecret = data?.value ?? ''
       } catch { /* best effort */ }
     }
+    console.log('compute-cpc auth-debug', { envLen, finalLen: cronSecret.length, hasHeader: !!cronSecretHeader, headerLen: cronSecretHeader.length })
     let source: 'manual' | 'cron' = 'manual'
     let isAuthorized = false
 
