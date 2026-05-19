@@ -64,7 +64,7 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
             <>
               <RuleRow label="Payout Split" value={`${tier.splitPercent}%`} highlight />
               <RuleRow label="First Payout" value={`Up to $${tier.firstPayoutCap}`} />
-              <RuleRow label="Payouts 2+" value="Uncapped per cycle" highlight />
+              <RuleRow label="Payouts 2+" value={`Every ${tier.payoutCooldown} days, paced`} highlight />
               <RuleRow label="Lifetime Earnings" value={`Up to ${tier.lifetimeCapMultiple}× entry`} highlight />
               <RuleRow label="Cooldown Period" value={`${tier.payoutCooldown} days`} />
               <RuleRow label="Human Review" value="For Flags" highlight />

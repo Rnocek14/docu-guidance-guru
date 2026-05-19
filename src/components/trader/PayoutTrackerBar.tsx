@@ -78,9 +78,9 @@ export function PayoutTrackerBar({
         {hitFirst && (
           <div className="mt-3 pt-3 border-t border-border/40 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="text-muted-foreground">
-              First cap cleared. Subsequent payouts:{' '}
-              <span className="text-foreground font-medium">uncapped per cycle</span>, paid every{' '}
-              <span className="text-foreground font-medium">{payoutCadenceDays} days</span>.
+              First cap cleared. Subsequent payouts paid every{' '}
+              <span className="text-foreground font-medium">{payoutCadenceDays} days</span>,{' '}
+              <span className="text-foreground font-medium">paced for platform stability</span>.
             </span>
             {proPayoutsNeeded > 0 ? (
               <span className="flex items-center gap-1 text-primary">
