@@ -64,7 +64,15 @@ Deno.serve(async (req) => {
         if (session.metadata?.purchase_type === 'reset_bundle') {
           await handleResetBundleCompleted(supabase, session, event.id)
         } else {
-          await handleCheckoutCompleted(supabase, session)
+          // NOTE: Evaluation purchases are now fulfilled exclusively by the
+          // provider-agnostic `payment-webhook` function to prevent a
+          // double-receiver race against checkout_fulfillment_queue.
+          // We keep `reset_bundle` handling here until payment-webhook gains
+          // reset support; everything else short-circuits as a no-op.
+          console.log(
+            `stripe-webhook: ignoring checkout.session.completed eventId=${event.id} ` +
+            `session=${session.id} — routed via payment-webhook`
+          )
         }
         break
       }
