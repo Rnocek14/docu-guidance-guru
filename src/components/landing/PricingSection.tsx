@@ -36,8 +36,8 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
         </Badge>
       )}
       {isUpcoming && (
-        <Badge variant="outline" className="absolute -top-3 left-1/2 -translate-x-1/2 text-muted-foreground px-4">
-          Upcoming
+        <Badge variant="outline" className="absolute -top-3 left-1/2 -translate-x-1/2 text-muted-foreground px-4 whitespace-nowrap">
+          Unlocks after Starter beta
         </Badge>
       )}
       <CardHeader className="text-center pb-2 pt-8">
@@ -78,7 +78,7 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
             disabled
             onClick={() => track('tier_upcoming_click', { tier: tier.id })}
           >
-            Coming Soon
+            On the roadmap · Q3 2026
           </Button>
         ) : (
           <Button
