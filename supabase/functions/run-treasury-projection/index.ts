@@ -400,12 +400,18 @@ function runMonteCarlo(input: ProjectionInput) {
   const insolventCount = results.filter(r => r.insolventMonth !== null).length
   const survivalRate = 1 - insolventCount / trials
 
-  // Reserve recommendations (use P5 trough as stress; P50 worst as recommended; worst overall as catastrophic)
-  const troughs = results.map(r => r.worstMonthTrough)
+  // Reserve recommendations. We use the LIABILITY-ADJUSTED trough
+  // (reserve - outstanding deferred payout queue) as the source of truth.
+  // The bare reserve trough understates risk because it counts deferred
+  // payouts as "retained cash" rather than as obligations owed.
+  const troughs = results.map(r => r.worstLiabilityAdjustedTrough)
   troughs.sort((a, b) => a - b)
   const reserveCatastrophic = troughs[0]
   const reserveStress = percentile(troughs, 5)
   const reserveRecommended = percentile(troughs, 50)
+
+  // Keep cash-only troughs available for diagnostics / chart parity.
+  const cashTroughs = results.map(r => r.worstMonthTrough).sort((a, b) => a - b)
 
   // Required reserve to NEVER go negative under each scenario.
   // If trough is negative, required additional capital = abs(trough).
@@ -417,7 +423,7 @@ function runMonteCarlo(input: ProjectionInput) {
     trials,
     insolventCount,
     medianResult: results[Math.floor(trials / 2)],
-    worstResult: results.reduce((a, b) => (a.worstMonthTrough < b.worstMonthTrough ? a : b)),
+    worstResult: results.reduce((a, b) => (a.worstLiabilityAdjustedTrough < b.worstLiabilityAdjustedTrough ? a : b)),
     reserve: {
       recommended_trough: round2(reserveRecommended),
       stress_trough_p5: round2(reserveStress),
@@ -425,6 +431,11 @@ function runMonteCarlo(input: ProjectionInput) {
       required_additional_recommended: round2(requiredAdditional(reserveRecommended)),
       required_additional_stress: round2(requiredAdditional(reserveStress)),
       required_additional_catastrophic: round2(requiredAdditional(reserveCatastrophic)),
+      // Cash-only troughs (pre-liability-adjustment) for transparency.
+      cash_only_recommended_trough: round2(percentile(cashTroughs, 50)),
+      cash_only_stress_trough_p5: round2(percentile(cashTroughs, 5)),
+      cash_only_catastrophic_trough: round2(cashTroughs[0]),
+      methodology: 'liability_adjusted_v1',
     },
     breaker: {
       avg_l1_months: round2(results.reduce((s, r) => s + r.breakerL1Months, 0) / trials),
