@@ -3107,6 +3107,72 @@ export type Database = {
           },
         ]
       }
+      treasury_projections: {
+        Row: {
+          breaker_freeze_months: number
+          breaker_l1_months: number
+          created_at: string
+          created_by: string | null
+          id: string
+          inputs_json: Json
+          insolvent: boolean
+          insolvent_month: number | null
+          label: string | null
+          min_reserve_catastrophic: number | null
+          min_reserve_recommended: number | null
+          min_reserve_stress: number | null
+          results_json: Json
+          safe_growth_ceiling_pct: number | null
+          scenario_key: string
+          starting_reserve: number
+          starting_traders: number
+          verdict_json: Json
+          worst_month_trough: number | null
+        }
+        Insert: {
+          breaker_freeze_months?: number
+          breaker_l1_months?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          inputs_json?: Json
+          insolvent?: boolean
+          insolvent_month?: number | null
+          label?: string | null
+          min_reserve_catastrophic?: number | null
+          min_reserve_recommended?: number | null
+          min_reserve_stress?: number | null
+          results_json?: Json
+          safe_growth_ceiling_pct?: number | null
+          scenario_key: string
+          starting_reserve: number
+          starting_traders: number
+          verdict_json?: Json
+          worst_month_trough?: number | null
+        }
+        Update: {
+          breaker_freeze_months?: number
+          breaker_l1_months?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          inputs_json?: Json
+          insolvent?: boolean
+          insolvent_month?: number | null
+          label?: string | null
+          min_reserve_catastrophic?: number | null
+          min_reserve_recommended?: number | null
+          min_reserve_stress?: number | null
+          results_json?: Json
+          safe_growth_ceiling_pct?: number | null
+          scenario_key?: string
+          starting_reserve?: number
+          starting_traders?: number
+          verdict_json?: Json
+          worst_month_trough?: number | null
+        }
+        Relationships: []
+      }
       user_cohort_payouts: {
         Row: {
           cohort_id: string
