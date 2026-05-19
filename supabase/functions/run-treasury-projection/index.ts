@@ -509,7 +509,7 @@ function runMonteCarlo(input: ProjectionInput) {
       cash_only_recommended_trough: round2(percentile(cashTroughs, 50)),
       cash_only_stress_trough_p5: round2(percentile(cashTroughs, 5)),
       cash_only_catastrophic_trough: round2(cashTroughs[0]),
-      methodology: 'liability_adjusted_v1',
+      methodology: 'liability_adjusted_v2_lifetime_capped',
     },
     breaker: {
       avg_l1_months: round2(results.reduce((s, r) => s + r.breakerL1Months, 0) / trials),
