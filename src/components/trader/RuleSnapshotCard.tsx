@@ -48,9 +48,9 @@ export function RuleSnapshotCard({ ruleSnapshot }: RuleSnapshotCardProps) {
     },
     {
       icon: Scale,
-      label: 'Max Total Drawdown',
+      label: 'Max Drawdown (EOD trailing)',
       value: `${ruleSnapshot.max_total_drawdown_percent}%`,
-      description: 'Maximum drawdown from highest balance',
+      description: 'Trails highest EOD balance; locks at starting balance',
     },
     {
       icon: Target,
