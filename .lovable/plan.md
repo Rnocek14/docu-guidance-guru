@@ -113,3 +113,4 @@ Then stop building and spend 30 days on distribution: outreach, content, Discord
 Deferred (Workstream 2b):
 - Webhook handler to flip `pending → paid` and trigger reset application (will extend existing payment-webhook).
 - Breach-trigger email sequence (rolls into email infra workstream).
+Workstream 2b shipped: apply_reset_from_purchase RPC + reset-handler webhook branch + ResetHistoryStrip updated to read banked credits from accounts.
