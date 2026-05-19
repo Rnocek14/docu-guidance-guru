@@ -117,15 +117,15 @@
     /* Sidebar */
     --sidebar-background: 224 50% 6%;
     --sidebar-foreground: 213 31% 91%;
-    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary: 188 78% 54%;
     --sidebar-primary-foreground: 224 71% 4%;
     --sidebar-accent: 217 33% 12%;
     --sidebar-accent-foreground: 213 31% 91%;
     --sidebar-border: 216 34% 17%;
-    --sidebar-ring: 217 91% 60%;
+    --sidebar-ring: 188 78% 54%;
 
     /* Chart colors */
-    --chart-1: 217 91% 60%;
+    --chart-1: 188 78% 54%;
     --chart-2: 142 71% 45%;
     --chart-3: 0 63% 50%;
     --chart-4: 38 92% 50%;
