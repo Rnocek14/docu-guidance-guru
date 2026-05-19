@@ -1,11 +1,14 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { CheckCircle2, XCircle, Clock, Banknote, Sparkles } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Banknote, Sparkles, Share2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { SharePayoutModal } from './SharePayoutModal';
 
 interface RecentPayoutsTableProps {
   accountId: string;
@@ -94,6 +97,7 @@ function statusLabel(status: string) {
 }
 
 export function RecentPayoutsTable({ accountId, highlightTierUp = false }: RecentPayoutsTableProps) {
+  const [shareTarget, setShareTarget] = useState<{ id: string; amount: number } | null>(null);
   const { data: payouts, isLoading } = useQuery({
     queryKey: ['recent-payouts', accountId],
     queryFn: async () => {
@@ -148,6 +152,7 @@ export function RecentPayoutsTable({ accountId, highlightTierUp = false }: Recen
               <TableHead className="text-right">Amount</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Clean</TableHead>
+              <TableHead className="w-[60px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -171,10 +176,31 @@ export function RecentPayoutsTable({ accountId, highlightTierUp = false }: Recen
                 <TableCell>
                   <CleanBadge isClean={p.is_clean_payout} reason={p.clean_payout_reason} status={p.status} />
                 </TableCell>
+                <TableCell className="text-right">
+                  {TERMINAL_PAID.includes(p.status) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 gap-1 text-xs"
+                      onClick={() => setShareTarget({ id: p.id, amount: p.amount })}
+                    >
+                      <Share2 className="h-3 w-3" />
+                      Share
+                    </Button>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
+        {shareTarget && (
+          <SharePayoutModal
+            open
+            onOpenChange={(o) => !o && setShareTarget(null)}
+            payoutId={shareTarget.id}
+            amount={shareTarget.amount}
+          />
+        )}
       </CardContent>
     </Card>
   );
