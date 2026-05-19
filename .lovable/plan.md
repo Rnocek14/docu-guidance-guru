@@ -114,3 +114,13 @@ Deferred (Workstream 2b):
 - Webhook handler to flip `pending → paid` and trigger reset application (will extend existing payment-webhook).
 - Breach-trigger email sequence (rolls into email infra workstream).
 Workstream 2b shipped: apply_reset_from_purchase RPC + reset-handler webhook branch + ResetHistoryStrip updated to read banked credits from accounts.
+
+## Workstream 4 — Dashboard Trust Polish (shipped)
+- `PayoutTrackerBar` — top-of-dashboard progress: paid → first cap → lifetime cap.
+- `RulesAtAGlanceCard` — dismissible per-account plain-English rules summary (localStorage).
+- `LivePayoutTicker` — bottom marquee strip pulling `get_recent_public_payouts`; auto-refreshes every 60s; hidden when empty.
+- `EquityCurveChart` — added drawdown floor line (`stepAfter`, dashed destructive) computed as `max(startingBalance, peak × (1 − maxDD%/100))` per point; legend hint in description.
+- `PricingSection` — Pro/Elite upcoming tiers now show "Unlocks after Starter beta" badge and "On the roadmap · Q3 2026" button label (reads as roadmap, not vaporware).
+- New keyframe `ticker` in `src/index.css` for the live marquee.
+
+Workstream 3 (Affiliate scaffold) and breach-email sequence remain queued. Email work is blocked on sender-domain verification.
