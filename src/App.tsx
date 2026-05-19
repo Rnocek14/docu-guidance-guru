@@ -42,6 +42,7 @@ const CohortsManagement = lazy(() => import("./pages/admin/CohortsManagement"));
 const AuditLogs = lazy(() => import("./pages/admin/AuditLogs"));
 const MonteCarloAnalytics = lazy(() => import("./pages/admin/MonteCarloAnalytics"));
 const LiabilityDashboard = lazy(() => import("./pages/admin/LiabilityDashboard"));
+const TreasuryDashboard = lazy(() => import("./pages/admin/TreasuryDashboard"));
 const OpsPlaybook = lazy(() => import("./pages/admin/OpsPlaybook"));
 const OpsMetrics = lazy(() => import("./pages/admin/OpsMetrics"));
 const TierReadiness = lazy(() => import("./pages/admin/TierReadiness"));
@@ -267,6 +268,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <LiabilityDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/treasury"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <TreasuryDashboard />
                 </ProtectedRoute>
               }
             />
