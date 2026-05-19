@@ -1,140 +1,143 @@
-# Launch Traction Plan — Distribution Over Engineering
 
-The risk architecture is done. From here, every build should answer one question: **does this generate trader trust, payout proof, or repeat revenue?** If no, defer.
+# Diagnosis: Why the Treasury Sim Says LTV = −$104
 
-Four workstreams, ordered by ROI. Ship 1 → 2 → 3 → 4. Do not parallelize 3 or 4 until 1 and 2 are live and producing real screenshots.
+I found the answer, and it's not "assumptions are vague" — it's much more concrete than that. **The treasury simulator is missing four production constraints that already exist in this codebase.** The result is a model that systematically overstates payout liability by ~4–5× and produces a false negative-LTV signal.
 
----
+## The Smoking Gun
 
-## 1. Payout Proof System (HIGHEST ROI)
+This project has TWO simulators:
 
-**Goal:** Every paid trader becomes a marketing asset. Make sharing the default action, not an afterthought.
+- `supabase/functions/run-treasury-projection/index.ts` — the one we've been running. Standalone. Hand-rolled defaults. **Missing key production constraints.**
+- `src/lib/monte-carlo.ts` — a 1,655-line production simulator with `DEFAULT_ASSUMPTIONS` explicitly labeled **"CALIBRATED TO INDUSTRY REALITY (2026-03-02)"** referencing QuantVPS, Tradeify, and Topstep benchmarks.
 
-**What to build:**
-- **Shareable payout receipt page** — public, unlisted URL per paid payout: `/p/[short_id]`. Renders trader handle (opt-in display name), amount, tier badge, "Paid by Meridian" wordmark, date. Open Graph image auto-generated for Twitter/Discord previews.
-- **"Share your payout" modal** — appears once when a payout flips to `paid_confirmed`. One-click buttons: Copy link, Download PNG, Tweet, Open in Discord.
-- **$25 share bonus (opt-in)** — trader pastes public post URL → admin verifies → bonus credited to next payout. New `payout_share_bonuses` table, simple admin approve queue.
-- **Public payout wall** — `/payouts` landing route. Anonymized feed of recent paid payouts (handle + amount + tier + relative time). Live social proof on the marketing site. Drives the funnel back to checkout.
+These two simulators were never reconciled. The treasury sim uses a simplified behavior model that the production sim outgrew months ago.
 
-**Why first:** Cheapest viral loop. Each verified screenshot reduces CAC on the next 50 sales. Architecture already tracks `is_clean_payout` and `paid_confirmed` — we're just adding a presentation layer + one bonus table.
+## Side-by-Side: What the Treasury Sim Got Wrong
 
----
+| Variable | Treasury sim (broken) | Production calibration (real) | Impact |
+|---|---|---|---|
+| `passRate` | 12% | 7% mode (4–12%) | ~OK |
+| `avgPayoutWhenPaid` | $380 | $350 mean / $120 stdDev | ~OK |
+| `payoutRequestRate` | **MISSING — assumes 100%** | **25% mode (15–40%)** | **4× overstated** |
+| `lifetimeCapPerUser` | **MISSING** | **$1,490 hard cap** | unbounded → bounded |
+| `minMonthsBetweenPayouts` | **MISSING** | **1 month** | cadence cap |
+| `minWinningDaysPerPayout` | **MISSING** | **10 days** | retires most blowing-up traders |
+| `payoutCooldownDays` | MISSING | 14 days | reinforces cadence cap |
+| `fixedMonthlyCosts` | $12k | $18k (but solo beta is much less) | known |
 
-## 2. Reset Funnel (HIGHEST REVENUE LIFT)
+## Why This Produced "LTV = −$104"
 
-**Goal:** Convert breach events into reset purchases within 24 hours. Today there is **no in-app reset CTA at all** — this is the single biggest revenue leak.
+The treasury sim's per-trader payout obligation is:
+```
+0.14 lifetime pass × 4.4 expected payouts × $380 = $234 obligation / signup
+```
 
-**What to build:**
-- **Breach-moment CTA** — `AccountPhaseIndicator` / `WhatsNextCard` show a prominent "Reset for $99 — keep your progress streak" button the instant status flips to `failed`. Existing breach copy stays; CTA is additive.
-- **24-hour urgency discount** — first 24h after breach: $79 reset (20% off). After 24h: $99. Countdown timer visible in dashboard + email. Server-enforced; cohort-aware; reuses existing checkout pipeline with a `reset_discount` flag.
-- **Reset email sequence** — 3 transactional emails via Lovable Email: T+0 (breach + discount link), T+12h (last chance), T+48h (final offer at full price). One template, dynamic copy.
-- **Reset bundle SKU** — "3-pack resets — $199 (save $98)." New tier variant in `tier-economics.ts`, single Stripe price, decrements a `reset_credits` counter on the account lineage.
-- **"Reset history" strip** on TraderDashboard — gamifies persistence ("Attempt 3 of ∞ — most traders pass by attempt 4"). Soft social proof, no manipulation.
+But the production constraints say the real obligation is bounded:
+```
+0.08 lifetime pass × 0.25 payoutRequestRate × min($1,490 lifetime cap, ...) 
+≈ 0.02 × $1,490 = ~$30 obligation / signup
+```
 
-**Why second:** Pure margin. Acquisition is already paid for. Every reset captured here is found money.
+That's an **~8× difference** in expected payout liability per signup. With net inflow ~$161/signup, the corrected number is roughly:
+```
+LTV ≈ $161 net inflow − $30 payout obligation − $24 variable cost ≈ +$107 / signup
+```
 
----
+**The math flips from −$104 to roughly +$107 just by importing production constraints.** No assumption change required.
 
-## 3. Affiliate / Creator Scaffold (DISTRIBUTION ENGINE)
+## Why It Was Hidden Until Now
 
-**Goal:** Stand up the rev-share rails so a creator can sign up, get a link, and earn within 10 minutes. Don't recruit yet — just be ready when the first payout screenshots go viral.
+- The original treasury sim was written before Bug #1 (liability-adjusted trough) was fixed. Without liability accounting, it never showed runaway obligations and nobody noticed it wasn't modeling caps.
+- Once Bug #1 was fixed, the unbounded payout obligation finally surfaced — but as a "scary insight," not as "your sim is missing 4 production constraints."
+- The two simulators have different purposes (per-trader vs cohort-aging) and were never explicitly reconciled.
 
-**What to build:**
-- `affiliates` table (user_id, code, rate_pct default 20, payout_method, status)
-- `affiliate_attributions` table (purchase_id, affiliate_id, amount_due, status)
-- `/affiliate/apply` page — simple form, manual approval initially
-- `/affiliate/dashboard` page — link, clicks, conversions, pending payout, paid total
-- Checkout attribution: capture `?ref=CODE` → cookie (30 days) → stamp on `checkout_fulfillment_queue` → resolve to `affiliate_attributions` on `paid_confirmed`
-- Admin page: approve affiliates, mark commissions paid (manual Stripe transfer for v1 — no automation needed at this volume)
-- **Do NOT build:** automated payouts, MLM tiers, leaderboards, fancy dashboards. Bare-minimum until 5 active affiliates exist.
-
-**Why third:** Builds quietly in background. The moment payout screenshots start spreading (from #1), one DM to a small YouTube trader unlocks compounding distribution. If the rails don't exist that day, the moment is lost.
-
----
-
-## 4. Dashboard Trust Polish (CONVERSION DEFENSE)
-
-**Goal:** A trader landing on the dashboard for the first time should think "this is real" within 5 seconds. Tactical, not a redesign.
-
-**What to build:**
-- **Drawdown visual upgrade** in `EquityCurveChart` — render the trailing 10% EOD floor as a visible line that locks at starting balance. Makes the abstract rule tangible.
-- **Payout tracker bar** — across the top of TraderDashboard: "$0 paid → $500 first payout cap → $1,490 lifetime." Visible progress is psychological gold.
-- **Rules clarity card** — collapsible "Your rules at a glance" on first dashboard load, dismissible. One source of truth, plain English.
-- **Live payout ticker** — small footer strip pulling the same feed as the public payout wall: "Trader_X just got paid $312 — 2 min ago." Real social proof inside the product.
-- **Pro/Elite cards on pricing** — keep them, but add explicit "Unlocks after Starter beta — Q[X] 2026" badge so they read as roadmap not vaporware. (Reverses prior advice based on user feedback — clearer label, not removal.)
-
-**Why fourth:** Polish only matters once #1–3 are driving traffic. Premature polish = procrastination.
+The user's instinct ("the assumptions are wrong") was directionally right but the actual issue is even more concrete: the constraints exist in code already, they just aren't wired into the treasury model.
 
 ---
 
-## Explicit Non-Goals
+# The Plan
 
-These are off the table until post-launch data demands them:
-- More risk rules, breakers, or restrictions
-- Additional tiers, currencies, or instruments
-- Re-architecting the ladder or payout pacing
-- AI-anything that isn't already shipped
-- Mobile app
-- More admin dashboards
+## Phase 1 — Reconcile the Treasury Sim with Production Calibration
 
----
+Edit `supabase/functions/run-treasury-projection/index.ts`:
 
-## Technical Notes
+1. **Import the SSOT.** Reference (mirror) `DEFAULT_ASSUMPTIONS` and `SimulationKnobs` from `src/lib/monte-carlo.ts` directly inside the edge function (edge functions can't import from `src/`, so mirror with a "SOURCE OF TRUTH" comment block and a CI assertion test that fails if values drift).
 
-- All new edge function logic follows existing patterns: SECURITY DEFINER RPCs, `FOR UPDATE` on money rows, server-side state transitions only.
-- Reset discount logic lives in `_shared/checkout/tier-economics.ts` (SSOT) — never duplicated in the UI.
-- Public payout pages must read from a security-definer RPC that returns only the opted-in safe fields. No direct table exposure.
-- Share bonuses are tracked separately from `payouts` so they never pollute `is_clean_payout` or lifetime cap math.
-- Affiliate commissions are a *liability*, not a payout — they bypass the trader payout pipeline entirely.
+2. **Add `payoutRequestRate`** to behavior model. Apply it to the funded population before computing payout requests:
+   ```ts
+   const requestingFunded = funded * beh.payoutRequestRate.mode
+   const payoutRequestsThisMonth = requestingFunded * beh.payoutsPerPaidAccountPerMonth.mode
+   ```
 
----
+3. **Add `lifetimeCapPerUser` accounting.** Track cumulative paid amount per cohort (or as an aggregate stock). When a cohort's average cumulative paid amount approaches `lifetimeCap`, decay its `payoutProbPerMonth` toward zero. This is the single most important fix.
 
-## Suggested Sequencing (rough)
+4. **Add `minMonthsBetweenPayouts`** as a hard cap on `payoutsPerPaidAccountPerMonth`. Currently 1, so this caps cadence at 1/month per requesting trader.
 
-1. Payout proof system — ship within 1 week. Highest leverage per hour of work.
-2. Reset funnel — ship week 2. Revenue starts compounding immediately.
-3. Affiliate scaffold — week 3, quiet build. Have it ready before you need it.
-4. Dashboard polish — week 4, iterate based on first 50 users' confusion points.
+5. **Update fixed opex default to a "lean beta" tier.** Add a `costMode` input: `lean` ($3k/mo), `staffed` ($12k/mo), `scaled` ($18k/mo). Default to `lean` for beta scenarios.
 
-Then stop building and spend 30 days on distribution: outreach, content, Discord, creator DMs. Architecture is done.
+6. **Add a `methodology` field** to results: `liability_adjusted_v2_lifetime_capped`. Bump the schema marker so the dashboard knows the new runs are post-calibration.
 
----
+## Phase 2 — Re-Derive LTV and Republish Decomposition v2
 
-**Confirm this ordering and I'll start with workstream 1 (Payout Proof). Or tell me which workstream to start with if you want a different order.**
+Rerun the same 5 decompositions (`/mnt/documents/treasury_decomposition_v2.md`) using the corrected model:
 
-## Workstream 2 — Reset Funnel (shipped)
-- `src/lib/reset-bundles.ts` + `supabase/functions/_shared/reset-bundles.ts` — bundle SSOT (single $99, urgency $79, 3-pack $199), 24h urgency window helpers.
-- `ResetOfferCard` — breach-moment CTA mounted in `AccountDetails` after `BreachExplainer`. Live countdown when urgency window is open.
-- `/reset/:accountId` page (`ResetCheckout.tsx`) — bundle picker + order summary, calls `create-reset-checkout`.
-- `create-reset-checkout` edge function — Stripe checkout session (price_data, no product lookup); pre-persists `pending` row in `reset_purchases`; server-side urgency-window enforcement.
-- `reset_purchases` table — RLS: traders read own, admins/risk read all; no client writes.
-- `ResetHistoryStrip` on trader dashboard — banked + recent reset bundles.
+- Unit economics (expect LTV to flip from −$104 to roughly +$100, give or take)
+- Cohort waterfall (no change — already correct)
+- Revenue attribution (no change — already correct)
+- Small-beta survival scenarios (expect tiny beta to flip from "trough −$264k, 0% survival" to "survivable")
+- Sensitivity ranking (expect `lifetimeCapPerUser` and `payoutRequestRate` to top the list)
 
-Deferred (Workstream 2b):
-- Webhook handler to flip `pending → paid` and trigger reset application (will extend existing payment-webhook).
-- Breach-trigger email sequence (rolls into email infra workstream).
-Workstream 2b shipped: apply_reset_from_purchase RPC + reset-handler webhook branch + ResetHistoryStrip updated to read banked credits from accounts.
+Output: a clean v2 markdown report side-by-side with v1, with a "what changed" section showing the corrected numbers vs the broken ones.
 
-## Workstream 4 — Dashboard Trust Polish (shipped)
-- `PayoutTrackerBar` — top-of-dashboard progress: paid → first cap → lifetime cap.
-- `RulesAtAGlanceCard` — dismissible per-account plain-English rules summary (localStorage).
-- `LivePayoutTicker` — bottom marquee strip pulling `get_recent_public_payouts`; auto-refreshes every 60s; hidden when empty.
-- `EquityCurveChart` — added drawdown floor line (`stepAfter`, dashed destructive) computed as `max(startingBalance, peak × (1 − maxDD%/100))` per point; legend hint in description.
-- `PricingSection` — Pro/Elite upcoming tiers now show "Unlocks after Starter beta" badge and "On the roadmap · Q3 2026" button label (reads as roadmap, not vaporware).
-- New keyframe `ticker` in `src/index.css` for the live marquee.
+## Phase 3 — Build the Viability Region Map (the user's actual ask)
 
-Workstream 3 (Affiliate scaffold) and breach-email sequence remain queued. Email work is blocked on sender-domain verification.
+A standalone analytical script (no UI, no edge function) that produces a 3-axis grid:
 
-## Workstream 3 — Affiliate Scaffold (shipped)
-- `affiliates` table: user-unique, code-unique (A–Z0–9_-, 3–32), rates default 25% initial / 10% reset, status flow pending → approved/rejected/suspended.
-- `affiliate_attributions` table: unique (source, source_id) → idempotent across webhook retries; status pending → paid; admin can mark paid with optional reference.
-- `affiliate_code` column on `checkout_fulfillment_queue` + `reset_purchases` — stamped pre-Stripe so attribution survives webhook race.
-- RPCs: `apply_for_affiliate` (trader), `get_affiliate_by_code` (public, approved-only, no PII), `record_affiliate_attribution` (service-role, blocks self-referrals, computes commission server-side), `mark_affiliate_attribution_paid` (admin).
-- `src/lib/referral.ts` — captures `?ref=CODE` once with 30-day TTL in localStorage; first-touch wins; survives refresh / multi-tab / delayed purchase.
-- `<ReferralCapture />` mounted in `App.tsx` so every route silently captures `?ref=`.
-- `Checkout.tsx` + `ResetCheckout.tsx` send the stored code with their respective edge-function calls.
-- `create-checkout-session` + `create-reset-checkout` validate code shape and persist it on the pre-flight row.
-- `stripe-webhook/checkout-handler.ts` + `reset-handler.ts` call `record_affiliate_attribution` after successful fulfillment (best-effort, non-blocking).
-- Pages: `/affiliate/apply`, `/affiliate/dashboard` (trader), `/admin/affiliates` (apps + commissions tabs).
-- Nav: Footer "Affiliates" link + admin sidebar entry.
-- v1 deliberately omits: automated payouts, MLM, sub-affiliates, click counts, creator portals.
+- **Axis 1: `fixedMonthlyOpex`** — [$2k, $4k, $6k, $8k, $12k, $18k]
+- **Axis 2: `avgPayoutWhenPaid`** — [$200, $300, $380, $500]
+- **Axis 3: `payoutRequestRate` × `payoutsPerPaidAccountPerMonth`** — combined as "effective payout extraction velocity" with 5 levels (low → high)
+
+For each cell (6 × 4 × 5 = 120 combinations), run 30 Monte Carlo trials with corrected model and record:
+
+- 24-month liability-adjusted trough (P50, P5)
+- Insolvency probability
+- L2 freeze months
+- **Classification:** `viable` (P50 trough > 0, L2 < 3 mo) / `marginal` (P50 > −$20k) / `insolvent` (P50 < −$20k)
+
+Output: `/mnt/documents/treasury_viability_map_v1.md` with:
+- A heatmap-style table per opex tier showing the viability region across payout-size × velocity
+- A textual summary: "Meridian is viable when [opex ≤ $X] AND [avgPayout ≤ $Y OR velocity ≤ Z]"
+- The minimum opex headroom required at each (avgPayout, velocity) point
+
+## Phase 4 — Cross-Validate Against the Existing Competitor Profiles
+
+The codebase already has `src/lib/competitor-profiles.ts` with Apex- and FTMO-derived calibrations. Run the corrected treasury sim against:
+- Apex Conservative profile (high pass throttle, $2k cap × 5, fast cadence)
+- FTMO refund-model variant
+- Meridian Starter (current production knobs)
+
+If the corrected Meridian model lands in a plausibly-survivable zone vs the competitor benchmarks, the calibration is validated. If not, the next investigation step is `payoutRequestRate` — that's the only assumption I'm still genuinely unsure about, and it's the one that should be checked against any seed-data the project has.
+
+## What I'm NOT Doing (And Why)
+
+- **Not adding UI for the viability map.** Markdown report is faster, denser, and what the user has been consuming. UI later if useful.
+- **Not researching external prop firm payout data via web search.** The project already calibrated against QuantVPS/Tradeify/Topstep three months ago — those numbers are baked into `monte-carlo.ts`. Re-researching would be redundant.
+- **Not building a separate "beta mode" simulator.** The corrected treasury sim with `costMode: 'lean'` IS the beta simulator.
+- **Not touching production payout logic.** This is all simulator-side. Production payout/breaker/cap code is correct; the sim was simply unaware of it.
+
+## Deliverables
+
+1. Patched `supabase/functions/run-treasury-projection/index.ts` with imported production constraints
+2. `treasury_decomposition_v2.md` — corrected LTV and decomposition
+3. `treasury_viability_map_v1.md` — the 3-axis region map
+4. A short verdict at the end: **"At opex ≤ $X and trader behavior in region Y, Meridian is viable. Here's the minimum required reserve and the safe scaling velocity."**
+
+## Risk / Confidence
+
+- High confidence the LTV flips positive once `lifetimeCapPerUser` and `payoutRequestRate` are wired in. The math is mechanical, not modeled.
+- Medium confidence on the exact `payoutRequestRate` value (production says 25% mode; if it's actually 50% in real Meridian data we don't have yet, the picture is less rosy).
+- Low risk of regressions — all changes are inside the projection edge function. No production payout code is touched.
+
+## Suggested Order
+
+Phase 1 → Phase 2 → Phase 3 → Phase 4. Phase 1+2 is roughly one edit cycle. Phase 3 is a single bun script. Phase 4 is half an hour. Total: one focused session.

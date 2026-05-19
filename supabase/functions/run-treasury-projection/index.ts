@@ -46,13 +46,34 @@ const TIER = {
   profitTargetPercent: 10,
 }
 
+// ---------- Cost-mode presets (Phase 1 v2) ----------
+// "lean"     — solo founder, beta, no payroll, contract tools only
+// "staffed"  — partial CS/ops support, mid-stage
+// "scaled"   — production-aligned ops budget (matches production monte-carlo.ts)
+const COST_MODE_OPEX: Record<'lean' | 'staffed' | 'scaled', number> = {
+  lean: 3_000,
+  staffed: 12_000,
+  scaled: 18_000,
+}
+
 // ---------- Default trader-behavior assumptions ----------
-// Conservative production-aligned values. Caller may override.
+// CALIBRATED TO PRODUCTION (2026-05-19 reconciliation).
+// Mirrors src/lib/monte-carlo.ts DEFAULT_ASSUMPTIONS which is itself
+// calibrated to QuantVPS/Tradeify/Topstep industry benchmarks (2026-03-02).
+// If you change a value here, update both files AND the calibration test.
 interface BehaviorAssumptions {
   passRate: number              // P(account passes evaluation in any given month)
   resetRateAnnual: number       // annual probability a failed account buys a reset
   monthlyChurn: number          // P(funded account stops trading in a month, no payout)
-  payoutProbPerMonth: number    // P(funded account requests payout in a given month)
+  // PRODUCTION-CALIBRATED PAYOUT MODEL (v2):
+  //   only `payoutRequestRate` × funded ever become payout-active.
+  //   active accounts request `payoutsPerActiveAccountPerMonth` per month,
+  //   bounded above by `minMonthsBetweenPayouts` (cadence floor).
+  //   every funded account is hard-capped at `lifetimeCapPerAccount` total paid.
+  payoutRequestRate: number               // P(funded account ever becomes payout-active). prod=0.25
+  payoutsPerActiveAccountPerMonth: number // per active requester, post-eligibility. prod=0.7
+  minMonthsBetweenPayouts: number         // hard floor: 1 month in production (caps at 1.0)
+  lifetimeCapPerAccount: number           // $ hard cap per funded account. prod=$1,490
   avgPayoutWhenPaid: number     // mean trader payout amount when one occurs
   affiliateCommissionPct: number
   chargebackRate: number        // share of revenue that becomes a chargeback (net rev penalty)
@@ -62,15 +83,23 @@ interface BehaviorAssumptions {
 }
 
 const DEFAULT_BEHAVIOR: BehaviorAssumptions = {
-  passRate: 0.12,
+  // Pass rate — calibrated to 7% mode (industry: QuantVPS/Tradeify/Topstep)
+  passRate: 0.07,
   resetRateAnnual: 0.18,
   monthlyChurn: 0.08,
-  payoutProbPerMonth: 0.35,
-  avgPayoutWhenPaid: 380,
+  // Production calibration: only 25% of funded ever request a payout;
+  // those who do request ~0.7 payouts/mo, capped at 1/mo cadence.
+  payoutRequestRate: 0.25,
+  payoutsPerActiveAccountPerMonth: 0.7,
+  minMonthsBetweenPayouts: 1,
+  // $1,490 lifetime cap per Starter tier account (TIER.lifetimeCapAmount).
+  lifetimeCapPerAccount: 1_490,
+  avgPayoutWhenPaid: 350,
   affiliateCommissionPct: 0.10, // blended (some sales attributed, some not)
   chargebackRate: 0.015,
   refundRate: 0.02,
-  fixedMonthlyOpex: 12_000,
+  // Default to LEAN beta opex. Override via `costMode` input.
+  fixedMonthlyOpex: COST_MODE_OPEX.lean,
   variableCostPerAccount: 8, // platform/data per funded account/month
 }
 
@@ -90,6 +119,7 @@ interface ProjectionInput {
   successParadoxMonthlyDelta?: number   // additive +pass-rate per month, e.g. 0.003
   trials: number                        // Monte Carlo trials (we do analytic + noise)
   behavior?: Partial<BehaviorAssumptions>
+  costMode?: 'lean' | 'staffed' | 'scaled'   // selects fixedMonthlyOpex preset
 }
 
 interface MonthState {
@@ -139,7 +169,13 @@ interface ProjectionResult {
 //   - computing aggregated payouts via behavior assumptions
 // Then we apply the breaker to compute paid-vs-deferred.
 function runSingleProjection(input: ProjectionInput, seed: number): ProjectionResult {
-  const beh: BehaviorAssumptions = { ...DEFAULT_BEHAVIOR, ...(input.behavior ?? {}) }
+  // Merge: defaults → costMode opex preset → caller behavior overrides.
+  const costModeOpex = input.costMode ? COST_MODE_OPEX[input.costMode] : undefined
+  const beh: BehaviorAssumptions = {
+    ...DEFAULT_BEHAVIOR,
+    ...(costModeOpex !== undefined ? { fixedMonthlyOpex: costModeOpex } : {}),
+    ...(input.behavior ?? {}),
+  }
   const months: MonthState[] = []
   let reserve = input.startingReserve
   let funded = input.startingTraders
@@ -149,6 +185,15 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
   // drain it. Replaces the prior `newFunded / funded` proxy which assumed
   // only first-month accounts were ever cap-eligible.
   let firstPayoutPool = input.startingTraders
+  // ---- v2 lifetime-cap accounting (aggregate, not per-account) ----
+  // We track the total lifetime PAYOUT HEADROOM available across every
+  // funded account that has ever existed in the population. Each funded
+  // account contributes `lifetimeCapPerAccount × payoutRequestRate` of
+  // expected lifetime obligation (only the requesting share can extract).
+  // `cumulativeDueEver` is decremented from this stock; when it hits zero
+  // the population is fully cap-bound and no further payouts can accrue.
+  let lifetimeHeadroomStock = input.startingTraders * beh.lifetimeCapPerAccount * beh.payoutRequestRate
+  let cumulativeDueEver = 0
   let worstTrough = reserve
   // Liability-adjusted trough: reserve minus outstanding deferred-payout queue.
   // The bare reserve curve understates risk because deferred payouts are
@@ -225,6 +270,10 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
       firstPayoutPool - churnedThisMonth * churnedFirstPayoutShare + newFunded
     )
     funded = Math.max(0, funded - churnedThisMonth + newFunded)
+    // Extend lifetime payout headroom for newly funded accounts.
+    // Only the `payoutRequestRate` share will ever extract, so the obligation
+    // stock grows by `newFunded × lifetimeCap × payoutRequestRate`.
+    lifetimeHeadroomStock += newFunded * beh.lifetimeCapPerAccount * beh.payoutRequestRate
 
     // --- 4. Revenue ---
     const entryRevenue = signups * TIER.entryFee
@@ -236,11 +285,23 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
     const grossRevenue = entryRevenue + resetRevenue - refunds
     const netRevenue = Math.max(0, grossRevenue - chargebacks)
 
-    // --- 5. Payouts owed this month (cohort-aware, stock-based cap) ---
-    // The first-payout cap applies to every account's FIRST payout regardless
-    // of how long ago they were funded. We model the population of cap-eligible
-    // accounts as a stock (firstPayoutPool) and probabilistically drain it.
-    const payoutRequestsThisMonth = funded * beh.payoutProbPerMonth
+    // --- 5. Payouts owed this month (v2: requester-fraction + cadence floor + lifetime cap) ---
+    //
+    // Production constraints applied:
+    //   (a) payoutRequestRate     — only X% of funded ever request a payout
+    //   (b) minMonthsBetweenPayouts — hard cap on requests/active/month
+    //   (c) firstPayoutCap         — caps trader receipts on first payout
+    //   (d) lifetimeCapPerAccount  — hard $ ceiling per funded account ever
+    //
+    // The population of payout-active accounts is `funded × payoutRequestRate`.
+    // Their per-month request rate is `payoutsPerActiveAccountPerMonth`, but
+    // bounded above by the cadence floor `1 / minMonthsBetweenPayouts`.
+    const cadenceCap = beh.minMonthsBetweenPayouts > 0
+      ? 1 / beh.minMonthsBetweenPayouts
+      : Infinity
+    const effectivePayoutsPerActive = Math.min(beh.payoutsPerActiveAccountPerMonth, cadenceCap)
+    const activeRequesters = funded * beh.payoutRequestRate
+    const payoutRequestsThisMonth = activeRequesters * effectivePayoutsPerActive
     const firstPayoutShare = funded > 0
       ? Math.min(1, firstPayoutPool / funded)
       : 0
@@ -249,13 +310,26 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
       (1 - firstPayoutShare) * beh.avgPayoutWhenPaid
 
     const payoutsDueGross = payoutRequestsThisMonth * beh.avgPayoutWhenPaid
-    const payoutsDueNet =
-      payoutRequestsThisMonth * cappedAvgPayout +
-      payoutQueue // deferred from prior months join the queue
+    let payoutsDueNetThisMonth = payoutRequestsThisMonth * cappedAvgPayout
+    // Apply aggregate lifetime cap: cannot exceed remaining headroom in the
+    // population's lifetime payout stock. Once exhausted, the funded base is
+    // structurally retired from payout obligation.
+    const headroomRemaining = Math.max(0, lifetimeHeadroomStock - cumulativeDueEver)
+    if (payoutsDueNetThisMonth > headroomRemaining) {
+      payoutsDueNetThisMonth = headroomRemaining
+    }
+    cumulativeDueEver += payoutsDueNetThisMonth
+    const payoutsDueNet = payoutsDueNetThisMonth + payoutQueue // queued joins this month's bill
 
     // Drain the first-payout pool by the share of this month's requests that
     // were first payouts (not by amount).
-    const firstPayoutsConsumed = payoutRequestsThisMonth * firstPayoutShare
+    // If we got bound by the lifetime-cap headroom this month, scale down
+    // first-payout consumption proportionally so the pool doesn't drain
+    // faster than dollars actually accrued.
+    const scale = payoutRequestsThisMonth > 0 && payoutsDueGross > 0
+      ? Math.min(1, payoutsDueNetThisMonth / Math.max(1, payoutRequestsThisMonth * cappedAvgPayout))
+      : 1
+    const firstPayoutsConsumed = payoutRequestsThisMonth * firstPayoutShare * scale
     firstPayoutPool = Math.max(0, firstPayoutPool - firstPayoutsConsumed)
 
     // --- 6. Breaker evaluation (uses rolling Pay/Rev based on PRIOR months) ---
@@ -435,7 +509,7 @@ function runMonteCarlo(input: ProjectionInput) {
       cash_only_recommended_trough: round2(percentile(cashTroughs, 50)),
       cash_only_stress_trough_p5: round2(percentile(cashTroughs, 5)),
       cash_only_catastrophic_trough: round2(cashTroughs[0]),
-      methodology: 'liability_adjusted_v1',
+      methodology: 'liability_adjusted_v2_lifetime_capped',
     },
     breaker: {
       avg_l1_months: round2(results.reduce((s, r) => s + r.breakerL1Months, 0) / trials),
@@ -605,6 +679,7 @@ Deno.serve(async (req) => {
       successParadoxMonthlyDelta: Number(body.successParadoxMonthlyDelta ?? 0.003),
       trials: Number(body.trials ?? 100),
       behavior: body.behavior ?? {},
+      costMode: (body.costMode as 'lean' | 'staffed' | 'scaled' | undefined) ?? 'lean',
     }
 
     // Bounds
