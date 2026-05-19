@@ -1986,6 +1986,7 @@ export type Database = {
           calculated_eligible_amount: number | null
           clean_evaluated_at: string | null
           clean_payout_reason: string | null
+          created_at: string
           destination_name_match: boolean | null
           device_fingerprint_id: string | null
           fraud_review_id: string | null
@@ -2015,6 +2016,7 @@ export type Database = {
           calculated_eligible_amount?: number | null
           clean_evaluated_at?: string | null
           clean_payout_reason?: string | null
+          created_at?: string
           destination_name_match?: boolean | null
           device_fingerprint_id?: string | null
           fraud_review_id?: string | null
@@ -2044,6 +2046,7 @@ export type Database = {
           calculated_eligible_amount?: number | null
           clean_evaluated_at?: string | null
           clean_payout_reason?: string | null
+          created_at?: string
           destination_name_match?: boolean | null
           device_fingerprint_id?: string | null
           fraud_review_id?: string | null
