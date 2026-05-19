@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import {
   LayoutDashboard, Shield, AlertTriangle, Users, Settings,
-  FileText, Flag, CreditCard, Activity, Cpu, Wrench, Plug, LineChart, Gift, Handshake,
+  FileText, Flag, CreditCard, Activity, Cpu, Wrench, Plug, LineChart, Gift, Handshake, Gauge,
 } from 'lucide-react';
 
 interface NavItem {
@@ -22,6 +22,7 @@ export const missionControlNavItems: NavItem[] = [
   { label: 'Risk Dashboard', href: '/risk', icon: <AlertTriangle className="h-5 w-5" />, section: 'tools' },
   { label: 'Payout Liability', href: '/admin/liability', icon: <CreditCard className="h-5 w-5" />, section: 'tools' },
   { label: 'Monte Carlo', href: '/admin/monte-carlo', icon: <Activity className="h-5 w-5" />, section: 'tools' },
+  { label: 'Treasury / Scaling', href: '/admin/treasury', icon: <Gauge className="h-5 w-5" />, section: 'tools' },
   { label: 'System Overview', href: '/admin/system', icon: <Shield className="h-5 w-5" />, section: 'tools' },
   { label: 'Users', href: '/admin/users', icon: <Users className="h-5 w-5" />, section: 'tools' },
   { label: 'Cohorts', href: '/admin/cohorts', icon: <Settings className="h-5 w-5" />, section: 'tools' },
