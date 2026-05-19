@@ -145,34 +145,38 @@ export function HeroDashboardPreview() {
                 </span>
               </div>
             </div>
-            <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full h-32 sm:h-36" preserveAspectRatio="none">
-              {/* Grid */}
-              {[0.2, 0.4, 0.6, 0.8].map((f) => (
-                <line key={f} x1={PAD_L} y1={PAD_T + f * innerH} x2={VB_W - PAD_R} y2={PAD_T + f * innerH} stroke="hsl(var(--border))" strokeWidth="0.15" strokeDasharray="0.6 1.2" />
-              ))}
-              {/* Drawdown limit */}
-              <line x1={PAD_L} y1={drawdownY} x2={VB_W - PAD_R} y2={drawdownY} stroke="hsl(var(--destructive))" strokeWidth="0.25" strokeDasharray="1.2 1.2" opacity="0.5" />
-              {/* Profit target */}
-              <line x1={PAD_L} y1={targetY} x2={VB_W - PAD_R} y2={targetY} stroke="hsl(var(--primary))" strokeWidth="0.25" strokeDasharray="1.2 1.2" opacity="0.5" />
-              {/* Fill */}
-              <defs>
-                <linearGradient id="heroEqGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.3" />
-                  <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path d={`${pathD} L ${VB_W - PAD_R} ${VB_H - PAD_B} L ${PAD_L} ${VB_H - PAD_B} Z`} fill="url(#heroEqGrad)" />
-              {/* Line */}
-              <path d={pathD} fill="none" stroke="hsl(var(--primary))" strokeWidth="0.55" strokeLinecap="round" strokeLinejoin="round" />
-              {/* Current price dot — pulsing halo conveys "live" */}
-              <g>
-                <circle cx={lastX} cy={lastY} r="0.9" fill="hsl(var(--primary))" opacity="0.35">
-                  <animate attributeName="r" values="0.9;2.4;0.9" dur="2.4s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.5;0;0.5" dur="2.4s" repeatCount="indefinite" />
-                </circle>
-                <circle cx={lastX} cy={lastY} r="0.8" fill="hsl(var(--background))" stroke="hsl(var(--primary))" strokeWidth="0.4" />
-              </g>
-            </svg>
+            <div className="relative w-full h-32 sm:h-36">
+              <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+                {/* Grid */}
+                {[0.2, 0.4, 0.6, 0.8].map((f) => (
+                  <line key={f} x1={PAD_L} y1={PAD_T + f * innerH} x2={VB_W - PAD_R} y2={PAD_T + f * innerH} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" strokeDasharray="2 4" />
+                ))}
+                {/* Drawdown limit */}
+                <line x1={PAD_L} y1={drawdownY} x2={VB_W - PAD_R} y2={drawdownY} stroke="hsl(var(--destructive))" strokeWidth="1.25" vectorEffect="non-scaling-stroke" strokeDasharray="4 4" opacity="0.5" />
+                {/* Profit target */}
+                <line x1={PAD_L} y1={targetY} x2={VB_W - PAD_R} y2={targetY} stroke="hsl(var(--primary))" strokeWidth="1.25" vectorEffect="non-scaling-stroke" strokeDasharray="4 4" opacity="0.5" />
+                {/* Fill */}
+                <defs>
+                  <linearGradient id="heroEqGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.3" />
+                    <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <path d={`${pathD} L ${VB_W - PAD_R} ${VB_H - PAD_B} L ${PAD_L} ${VB_H - PAD_B} Z`} fill="url(#heroEqGrad)" />
+                {/* Line */}
+                <path d={pathD} fill="none" stroke="hsl(var(--primary))" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {/* Current price dot — rendered as HTML so it stays a true circle */}
+              <div
+                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                style={{ left: `${(lastX / VB_W) * 100}%`, top: `${(lastY / VB_H) * 100}%` }}
+              >
+                <span className="relative flex items-center justify-center">
+                  <span className="absolute h-4 w-4 rounded-full bg-primary/40 animate-ping" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-background border-2 border-primary" />
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* 3-column grid: Rule Health / What's Next / Review Readiness — matches real layout */}
