@@ -1093,7 +1093,9 @@ export type Database = {
           last_transition_reason: string | null
           net_buffer: number | null
           payouts_blocked: boolean
+          payrev_chargebacks_30d: number
           payrev_level: string
+          payrev_net_revenue_30d: number
           payrev_payouts_30d: number
           payrev_release_streak: number
           payrev_revenue_30d: number
@@ -1117,7 +1119,9 @@ export type Database = {
           last_transition_reason?: string | null
           net_buffer?: number | null
           payouts_blocked?: boolean
+          payrev_chargebacks_30d?: number
           payrev_level?: string
+          payrev_net_revenue_30d?: number
           payrev_payouts_30d?: number
           payrev_release_streak?: number
           payrev_revenue_30d?: number
@@ -1141,7 +1145,9 @@ export type Database = {
           last_transition_reason?: string | null
           net_buffer?: number | null
           payouts_blocked?: boolean
+          payrev_chargebacks_30d?: number
           payrev_level?: string
+          payrev_net_revenue_30d?: number
           payrev_payouts_30d?: number
           payrev_release_streak?: number
           payrev_revenue_30d?: number
@@ -3351,6 +3357,7 @@ export type Database = {
         Args: { _account_id: string }
         Returns: Json
       }
+      check_breaker_staleness: { Args: never; Returns: undefined }
       check_consistency_rules: { Args: { _account_id: string }; Returns: Json }
       check_cron_health: { Args: never; Returns: undefined }
       check_geo_mismatch: { Args: { _user_id: string }; Returns: Json }
@@ -3563,7 +3570,9 @@ export type Database = {
           last_transition_reason: string
           net_buffer: number
           payouts_blocked: boolean
+          payrev_chargebacks_30d: number
           payrev_level: string
+          payrev_net_revenue_30d: number
           payrev_payouts_30d: number
           payrev_release_streak: number
           payrev_revenue_30d: number
