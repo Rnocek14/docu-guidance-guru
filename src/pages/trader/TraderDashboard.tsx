@@ -284,6 +284,9 @@ export default function TraderDashboard() {
             </CardContent>
           </Card>
         )}
+
+        {/* Live payout ticker — social proof inside the product */}
+        <LivePayoutTicker />
       </div>
     </DashboardLayout>
   );
