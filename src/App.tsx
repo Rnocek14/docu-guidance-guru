@@ -18,6 +18,8 @@ const Signup = lazy(() => import("./pages/Signup"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Checkout = lazy(() => import("./pages/Checkout"));
 const Rules = lazy(() => import("./pages/Rules"));
+const PublicPayoutShare = lazy(() => import("./pages/PublicPayoutShare"));
+const PayoutWall = lazy(() => import("./pages/PayoutWall"));
 
 const TraderDashboard = lazy(() => import("./pages/trader/TraderDashboard"));
 const TraderAccounts = lazy(() => import("./pages/trader/TraderAccounts"));
@@ -46,6 +48,7 @@ const QaScanRunner = lazy(() => import("./pages/admin/QaScanRunner"));
 const SupportEmails = lazy(() => import("./pages/admin/SupportEmails"));
 const WealthChartsIntegration = lazy(() => import("./pages/admin/WealthChartsIntegration"));
 const CohortProjection = lazy(() => import("./pages/admin/CohortProjection"));
+const ShareBonusQueue = lazy(() => import("./pages/admin/ShareBonusQueue"));
 const SupportDashboard = lazy(() => import("./pages/support/SupportDashboard"));
 
 function PageLoader() {
@@ -75,6 +78,8 @@ const App = () => (
             <Route path="/signup" element={<Signup />} />
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/rules" element={<Rules />} />
+            <Route path="/p/:shortId" element={<PublicPayoutShare />} />
+            <Route path="/payouts" element={<PayoutWall />} />
 
             {/* Protected dashboard router */}
             <Route
@@ -296,6 +301,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <CohortProjection />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/share-bonuses"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <ShareBonusQueue />
                 </ProtectedRoute>
               }
             />
