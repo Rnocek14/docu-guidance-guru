@@ -124,3 +124,17 @@ Workstream 2b shipped: apply_reset_from_purchase RPC + reset-handler webhook bra
 - New keyframe `ticker` in `src/index.css` for the live marquee.
 
 Workstream 3 (Affiliate scaffold) and breach-email sequence remain queued. Email work is blocked on sender-domain verification.
+
+## Workstream 3 — Affiliate Scaffold (shipped)
+- `affiliates` table: user-unique, code-unique (A–Z0–9_-, 3–32), rates default 25% initial / 10% reset, status flow pending → approved/rejected/suspended.
+- `affiliate_attributions` table: unique (source, source_id) → idempotent across webhook retries; status pending → paid; admin can mark paid with optional reference.
+- `affiliate_code` column on `checkout_fulfillment_queue` + `reset_purchases` — stamped pre-Stripe so attribution survives webhook race.
+- RPCs: `apply_for_affiliate` (trader), `get_affiliate_by_code` (public, approved-only, no PII), `record_affiliate_attribution` (service-role, blocks self-referrals, computes commission server-side), `mark_affiliate_attribution_paid` (admin).
+- `src/lib/referral.ts` — captures `?ref=CODE` once with 30-day TTL in localStorage; first-touch wins; survives refresh / multi-tab / delayed purchase.
+- `<ReferralCapture />` mounted in `App.tsx` so every route silently captures `?ref=`.
+- `Checkout.tsx` + `ResetCheckout.tsx` send the stored code with their respective edge-function calls.
+- `create-checkout-session` + `create-reset-checkout` validate code shape and persist it on the pre-flight row.
+- `stripe-webhook/checkout-handler.ts` + `reset-handler.ts` call `record_affiliate_attribution` after successful fulfillment (best-effort, non-blocking).
+- Pages: `/affiliate/apply`, `/affiliate/dashboard` (trader), `/admin/affiliates` (apps + commissions tabs).
+- Nav: Footer "Affiliates" link + admin sidebar entry.
+- v1 deliberately omits: automated payouts, MLM, sub-affiliates, click counts, creator portals.

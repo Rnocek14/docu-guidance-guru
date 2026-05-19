@@ -95,7 +95,11 @@ export default function ResetCheckout() {
     setIsProcessing(true);
     try {
       const { data, error } = await supabase.functions.invoke('create-reset-checkout', {
-        body: { accountId, bundleId: selected },
+        body: {
+          accountId,
+          bundleId: selected,
+          affiliateCode: (await import('@/lib/referral')).getReferralCode(),
+        },
       });
       if (error) throw error;
       if (data?.url) {

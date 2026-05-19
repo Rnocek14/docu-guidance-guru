@@ -41,6 +41,12 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     const accountId = body?.accountId as string | undefined
     const bundleId = body?.bundleId as ResetBundleId | undefined
+    const affiliateCodeRaw = body?.affiliateCode as string | undefined
+    const affiliateCode = (() => {
+      if (!affiliateCodeRaw) return null
+      const c = String(affiliateCodeRaw).trim().toUpperCase()
+      return /^[A-Z0-9_-]{3,32}$/.test(c) ? c : null
+    })()
 
     if (!accountId || !bundleId || !RESET_BUNDLES[bundleId]) {
       return json({ error: 'Invalid request' }, 400)
@@ -125,6 +131,7 @@ Deno.serve(async (req) => {
       provider_session_id: session.id,
       status: 'pending',
       metadata: { stripe_url: session.url },
+      affiliate_code: affiliateCode,
     })
 
     return json({ url: session.url, sessionId: session.id })

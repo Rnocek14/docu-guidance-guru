@@ -1,0 +1,1 @@
+grant execute on function public.record_affiliate_attribution(text, uuid, text, uuid, integer) to service_role;

@@ -24,6 +24,9 @@ export function Footer() {
             <Link to="/payouts" className="hover:text-foreground transition-colors">
               Payout Wall
             </Link>
+            <Link to="/affiliate/apply" className="hover:text-foreground transition-colors">
+              Affiliates
+            </Link>
             <Link to="/login" className="hover:text-foreground transition-colors">
               Sign In
             </Link>

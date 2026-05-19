@@ -97,7 +97,13 @@ export default function Checkout() {
     setIsProcessing(true);
     try {
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-        body: { tierId: selectedTier, disclaimerAccepted: true, rulesAcknowledged: true, rulesVersion: 'v1.0' },
+        body: {
+          tierId: selectedTier,
+          disclaimerAccepted: true,
+          rulesAcknowledged: true,
+          rulesVersion: 'v1.0',
+          affiliateCode: (await import('@/lib/referral')).getReferralCode(),
+        },
       });
       if (error) throw error;
       if (data?.url) {

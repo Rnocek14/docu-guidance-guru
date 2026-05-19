@@ -101,4 +101,28 @@ export async function handleResetBundleCompleted(
   }
 
   console.log(`reset-handler: applied purchase=${purchaseId} session=${session.id} result=${JSON.stringify(applyResult)}`)
+
+  // Affiliate attribution (best-effort, idempotent)
+  try {
+    const { data: prow } = await supabase
+      .from('reset_purchases')
+      .select('affiliate_code, amount_paid_cents, user_id')
+      .eq('id', purchaseId)
+      .maybeSingle()
+    const affCode = (prow as { affiliate_code?: string | null } | null)?.affiliate_code
+    if (affCode) {
+      const amt = (prow as { amount_paid_cents?: number } | null)?.amount_paid_cents || session.amount_total || 0
+      const buyer = (prow as { user_id?: string } | null)?.user_id || userId
+      const { error: attribErr } = await supabase.rpc('record_affiliate_attribution', {
+        p_source: 'reset',
+        p_source_id: purchaseId,
+        p_code: affCode,
+        p_buyer_user_id: buyer,
+        p_amount_cents: amt,
+      })
+      if (attribErr) console.error(`Reset affiliate attribution failed: ${attribErr.message}`, { purchaseId })
+    }
+  } catch (e) {
+    console.error('Reset affiliate attribution threw (non-fatal):', (e as Error).message)
+  }
 }

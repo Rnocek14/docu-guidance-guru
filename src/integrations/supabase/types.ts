@@ -303,6 +303,113 @@ export type Database = {
           },
         ]
       }
+      affiliate_attributions: {
+        Row: {
+          affiliate_id: string
+          buyer_user_id: string
+          commission_cents: number
+          created_at: string
+          id: string
+          notes: string | null
+          paid_at: string | null
+          paid_by: string | null
+          paid_reference: string | null
+          purchase_amount_cents: number
+          rate_pct: number
+          source: string
+          source_id: string
+          status: string
+        }
+        Insert: {
+          affiliate_id: string
+          buyer_user_id: string
+          commission_cents: number
+          created_at?: string
+          id?: string
+          notes?: string | null
+          paid_at?: string | null
+          paid_by?: string | null
+          paid_reference?: string | null
+          purchase_amount_cents: number
+          rate_pct: number
+          source: string
+          source_id: string
+          status?: string
+        }
+        Update: {
+          affiliate_id?: string
+          buyer_user_id?: string
+          commission_cents?: number
+          created_at?: string
+          id?: string
+          notes?: string | null
+          paid_at?: string | null
+          paid_by?: string | null
+          paid_reference?: string | null
+          purchase_amount_cents?: number
+          rate_pct?: number
+          source?: string
+          source_id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "affiliate_attributions_affiliate_id_fkey"
+            columns: ["affiliate_id"]
+            isOneToOne: false
+            referencedRelation: "affiliates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      affiliates: {
+        Row: {
+          applied_at: string
+          approved_at: string | null
+          approved_by: string | null
+          code: string
+          created_at: string
+          id: string
+          notes: string | null
+          payout_method: string | null
+          rate_initial_pct: number
+          rate_reset_pct: number
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          applied_at?: string
+          approved_at?: string | null
+          approved_by?: string | null
+          code: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          payout_method?: string | null
+          rate_initial_pct?: number
+          rate_reset_pct?: number
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          applied_at?: string
+          approved_at?: string | null
+          approved_by?: string | null
+          code?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          payout_method?: string | null
+          rate_initial_pct?: number
+          rate_reset_pct?: number
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       ai_usage_log: {
         Row: {
           ai_status: string
@@ -566,6 +673,7 @@ export type Database = {
       }
       checkout_fulfillment_queue: {
         Row: {
+          affiliate_code: string | null
           amount_cents: number | null
           attempts: number
           created_at: string
@@ -590,6 +698,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          affiliate_code?: string | null
           amount_cents?: number | null
           attempts?: number
           created_at?: string
@@ -614,6 +723,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          affiliate_code?: string | null
           amount_cents?: number | null
           attempts?: number
           created_at?: string
@@ -2236,6 +2346,7 @@ export type Database = {
       reset_purchases: {
         Row: {
           account_id: string
+          affiliate_code: string | null
           amount_paid_cents: number
           applied_at: string | null
           bundle_id: string
@@ -2256,6 +2367,7 @@ export type Database = {
         }
         Insert: {
           account_id: string
+          affiliate_code?: string | null
           amount_paid_cents: number
           applied_at?: string | null
           bundle_id: string
@@ -2276,6 +2388,7 @@ export type Database = {
         }
         Update: {
           account_id?: string
+          affiliate_code?: string | null
           amount_paid_cents?: number
           applied_at?: string | null
           bundle_id?: string
@@ -3141,6 +3254,30 @@ export type Database = {
       }
     }
     Functions: {
+      apply_for_affiliate: {
+        Args: { p_code: string; p_payout_method?: string }
+        Returns: {
+          applied_at: string
+          approved_at: string | null
+          approved_by: string | null
+          code: string
+          created_at: string
+          id: string
+          notes: string | null
+          payout_method: string | null
+          rate_initial_pct: number
+          rate_reset_pct: number
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "affiliates"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       apply_geo_mismatch_hold: { Args: { _user_id: string }; Returns: Json }
       apply_reset_from_purchase: {
         Args: { p_provider_event_id?: string; p_purchase_id: string }
@@ -3365,6 +3502,14 @@ export type Database = {
           p_user_id: string
         }
         Returns: string
+      }
+      get_affiliate_by_code: {
+        Args: { p_code: string }
+        Returns: {
+          code: string
+          id: string
+          status: string
+        }[]
       }
       get_ai_daily_token_sum: {
         Args: { p_date?: string; p_function_name: string }
@@ -3647,6 +3792,31 @@ export type Database = {
         }
         Returns: undefined
       }
+      mark_affiliate_attribution_paid: {
+        Args: { p_attribution_id: string; p_paid_reference?: string }
+        Returns: {
+          affiliate_id: string
+          buyer_user_id: string
+          commission_cents: number
+          created_at: string
+          id: string
+          notes: string | null
+          paid_at: string | null
+          paid_by: string | null
+          paid_reference: string | null
+          purchase_amount_cents: number
+          rate_pct: number
+          source: string
+          source_id: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "affiliate_attributions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       mark_payout_paid: {
         Args: {
           _payment_reference: string
@@ -3695,6 +3865,16 @@ export type Database = {
       purge_cron_http_runs: {
         Args: { retain_days?: number }
         Returns: undefined
+      }
+      record_affiliate_attribution: {
+        Args: {
+          p_amount_cents: number
+          p_buyer_user_id: string
+          p_code: string
+          p_source: string
+          p_source_id: string
+        }
+        Returns: string
       }
       record_geo_signal: {
         Args: {

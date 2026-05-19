@@ -42,11 +42,19 @@ Deno.serve(async (req) => {
 
     // ── 2. Parse & validate request ─────────────────────────
     const body = await req.json()
-    const { tierId, disclaimerAccepted, rulesAcknowledged } = body as {
+    const { tierId, disclaimerAccepted, rulesAcknowledged, affiliateCode } = body as {
       tierId?: string
       disclaimerAccepted?: boolean
       rulesAcknowledged?: boolean
+      affiliateCode?: string | null
     }
+
+    // Normalize and validate affiliate code shape (don't fail if invalid; just drop it)
+    const normalizedAffCode = (() => {
+      if (!affiliateCode) return null
+      const c = String(affiliateCode).trim().toUpperCase()
+      return /^[A-Z0-9_-]{3,32}$/.test(c) ? c : null
+    })()
 
     if (!tierId || !TIERS[tierId]) {
       return new Response(JSON.stringify({ error: 'Invalid tier' }), {
@@ -160,6 +168,7 @@ Deno.serve(async (req) => {
         provider_session_id: result.sessionId,
         provider_payment_id: result.paymentIntent || null,
         rail_key: railKey,
+        affiliate_code: normalizedAffCode,
       })
 
     if (queueInsertErr && !queueInsertErr.code?.includes('23505')) {
