@@ -148,7 +148,12 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
   // only first-month accounts were ever cap-eligible.
   let firstPayoutPool = input.startingTraders
   let worstTrough = reserve
+  // Liability-adjusted trough: reserve minus outstanding deferred-payout queue.
+  // The bare reserve curve understates risk because deferred payouts are
+  // liabilities, not retained profit. This is the load-bearing metric.
+  let worstLiabilityAdjustedTrough = reserve
   let insolventMonth: number | null = null
+  let liabilityInsolventMonth: number | null = null
   let l1Count = 0
   let l2Count = 0
   let totalRev = 0
@@ -167,6 +172,25 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
   let breakerLevel: MonthState['breakerLevel'] = 'normal'
 
   for (let m = 1; m <= input.horizonMonths; m++) {
+    // --- 0. Breaker evaluation FIRST (uses rolling Pay/Rev from prior months) ---
+    // Done before acquisition so we can throttle intake under freeze.
+    const rollingRev = recentRev.reduce((a, b) => a + b, 0)
+    const rollingPaid = recentPaid.reduce((a, b) => a + b, 0)
+    const rollingRatio = rollingRev > 0 ? rollingPaid / rollingRev : 0
+
+    if (breakerLevel === 'normal') {
+      if (rollingRatio > BREAKER.L2_TRIGGER) breakerLevel = 'l2'
+      else if (rollingRatio > BREAKER.L1_TRIGGER) breakerLevel = 'l1'
+    } else if (breakerLevel === 'l1') {
+      if (rollingRatio > BREAKER.L2_TRIGGER) breakerLevel = 'l2'
+      else if (rollingRatio < BREAKER.L1_RELEASE) breakerLevel = 'normal'
+    } else if (breakerLevel === 'l2') {
+      if (rollingRatio < BREAKER.L2_RELEASE) breakerLevel = 'l1'
+    }
+
+    if (breakerLevel === 'l1') l1Count++
+    if (breakerLevel === 'l2') l2Count++
+
     // --- 1. Acquisition (growth-compounded) ---
     const growthFactor = Math.pow(1 + input.growthRateMoM, m - 1)
     let signups = input.newSignupsMonth1 * growthFactor
@@ -174,6 +198,12 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
       signups *= input.affiliateSurgeMultiplier
     }
     signups *= 1 + noise(m, 1) * 0.05 // ±5% acquisition jitter
+    // Acquisition throttle under breaker: payout freezes erode social trust,
+    // affiliate intake slows, public Discords notice. Modeling sustained
+    // intake during a freeze creates a false-positive treasury survivability
+    // shape (catastrophic > baseline). Mirrors Operations Playbook intake lock.
+    if (breakerLevel === 'l1') signups *= 0.70
+    else if (breakerLevel === 'l2') signups *= 0.20
     signups = Math.max(0, signups)
 
     // --- 2. Pass-rate (with optional success-paradox drift) ---
@@ -227,24 +257,7 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
     firstPayoutPool = Math.max(0, firstPayoutPool - firstPayoutsConsumed)
 
     // --- 6. Breaker evaluation (uses rolling Pay/Rev based on PRIOR months) ---
-    const rollingRev = recentRev.reduce((a, b) => a + b, 0)
-    const rollingPaid = recentPaid.reduce((a, b) => a + b, 0)
-    const rollingRatio = rollingRev > 0 ? rollingPaid / rollingRev : 0
-
-    // Transition with hysteresis
-    if (breakerLevel === 'normal') {
-      if (rollingRatio > BREAKER.L2_TRIGGER) breakerLevel = 'l2'
-      else if (rollingRatio > BREAKER.L1_TRIGGER) breakerLevel = 'l1'
-    } else if (breakerLevel === 'l1') {
-      if (rollingRatio > BREAKER.L2_TRIGGER) breakerLevel = 'l2'
-      else if (rollingRatio < BREAKER.L1_RELEASE) breakerLevel = 'normal'
-    } else if (breakerLevel === 'l2') {
-      if (rollingRatio < BREAKER.L2_RELEASE) breakerLevel = 'l1'
-    }
-
-    if (breakerLevel === 'l1') l1Count++
-    if (breakerLevel === 'l2') l2Count++
-
+    // (Moved to top of loop so acquisition can be throttled under breaker.)
     // --- 7. Apply breaker: how much we actually pay ---
     let deferralFraction = 0
     if (breakerLevel === 'l1') deferralFraction = BREAKER.L1_DEFER_FRACTION
@@ -260,8 +273,23 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
     const cashflow = netRevenue - payoutsPaid - affiliateCommissions - opex
     reserve += cashflow
 
+    // Horizon-end queue drain: any remaining deferred-payout queue at the
+    // final month must be booked against reserve. Otherwise the model lets
+    // unpaid liabilities vanish off the right edge of the chart.
+    if (m === input.horizonMonths && payoutQueue > 0) {
+      reserve -= payoutQueue
+      payoutQueue = 0
+    }
+
     if (reserve < worstTrough) worstTrough = reserve
     if (insolventMonth === null && reserve < 0) insolventMonth = m
+    const liabilityAdjusted = reserve - payoutQueue
+    if (liabilityAdjusted < worstLiabilityAdjustedTrough) {
+      worstLiabilityAdjustedTrough = liabilityAdjusted
+    }
+    if (liabilityInsolventMonth === null && liabilityAdjusted < 0) {
+      liabilityInsolventMonth = m
+    }
 
     // Roll the windows (keep last 3 months for breaker ratio)
     recentRev.push(netRevenue)
@@ -318,7 +346,9 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
     months,
     scalingCheckpoints: checkpoints,
     worstMonthTrough: round2(worstTrough),
+    worstLiabilityAdjustedTrough: round2(worstLiabilityAdjustedTrough),
     insolventMonth,
+    liabilityInsolventMonth,
     breakerL1Months: l1Count,
     breakerL2Months: l2Count,
     finalFunded: months[months.length - 1]?.totalFunded ?? 0,
