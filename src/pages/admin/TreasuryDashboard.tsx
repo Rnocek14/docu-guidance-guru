@@ -136,7 +136,7 @@ export default function TreasuryDashboard() {
   }
 
   return (
-    <DashboardLayout navItems={missionControlNavItems} pageTitle="Treasury / Scaling Velocity">
+    <DashboardLayout navItems={missionControlNavItems} title="Treasury / Scaling Velocity">
       <div className="space-y-6 p-6">
         <div className="flex items-start justify-between">
           <div>
