@@ -60,7 +60,8 @@ Deno.serve(async (req) => {
   }
 
   // Auth: cron secret only
-  const authHeader = req.headers.get('Authorization')
+  const authHeader = req.headers.get('Authorization') ?? ''
+  const cronSecretHeader = req.headers.get('X-Cron-Secret') ?? ''
 
   // Resolve CRON_SECRET: prefer env var, fallback to internal_secrets table
   let cronSecret = Deno.env.get('CRON_SECRET') ?? ''
@@ -86,8 +87,11 @@ Deno.serve(async (req) => {
       headers: { 'Content-Type': 'application/json' },
     })
   }
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
-  if (!token || !(await constantTimeEqual(token, cronSecret))) {
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  const isCron =
+    (cronSecretHeader && await constantTimeEqual(cronSecretHeader, cronSecret)) ||
+    (bearerToken && await constantTimeEqual(bearerToken, cronSecret))
+  if (!isCron) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
