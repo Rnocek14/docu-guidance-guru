@@ -239,6 +239,10 @@ export function EquityCurveChart({ accountId, startingBalance, currentBalance: c
               <span className="text-muted-foreground/50" title="Drawdown is measured from peak equity, not starting balance">
                 Drawdown computed from peak equity.
               </span>
+              <span className="inline-flex items-center gap-1.5 ml-2 text-[11px] text-destructive/80">
+                <span className="inline-block w-3 border-t border-dashed border-destructive" aria-hidden />
+                Drawdown floor
+              </span>
             </CardDescription>
           </div>
           <div className="text-right">
