@@ -3174,7 +3174,7 @@ export type Database = {
           _details: Json
           _id: string
           _idempotency: string
-          _ip: unknown
+          _ip: string
           _prev_hash: string
           _reason: string
           _request_id: string
