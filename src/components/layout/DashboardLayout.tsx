@@ -39,7 +39,7 @@ interface NavItem {
   label: string;
   href: string;
   icon: ReactNode;
-  section?: 'daily' | 'tools';
+  section?: string;
   external?: boolean;
 }
 
@@ -57,16 +57,27 @@ export function DashboardLayout({ children, title, navItems }: DashboardLayoutPr
   const [toolsOpen, setToolsOpen] = useState(false);
   const [toolsSearch, setToolsSearch] = useState('');
 
-  // Split nav into daily vs tools sections
-  const hasTools = navItems.some(i => i.section === 'tools');
-  const dailyItems = hasTools ? navItems.filter(i => !i.section || i.section === 'daily') : navItems;
-  const toolsItems = hasTools ? navItems.filter(i => i.section === 'tools') : [];
+  // Split nav into daily (always-visible) vs grouped collapsible sections.
+  // Any section other than 'daily' (or undefined) becomes its own collapsible group.
+  const dailyItems = navItems.filter(i => !i.section || i.section === 'daily');
+  const groupedSections = useMemo(() => {
+    const groups = new Map<string, NavItem[]>();
+    for (const item of navItems) {
+      if (!item.section || item.section === 'daily') continue;
+      if (!groups.has(item.section)) groups.set(item.section, []);
+      groups.get(item.section)!.push(item);
+    }
+    return Array.from(groups.entries());
+  }, [navItems]);
 
-  const filteredToolsItems = useMemo(() => {
-    if (!toolsSearch.trim()) return toolsItems;
+  const filteredGroupedSections = useMemo(() => {
+    if (!toolsSearch.trim()) return groupedSections;
     const q = toolsSearch.toLowerCase();
-    return toolsItems.filter(i => i.label.toLowerCase().includes(q));
-  }, [toolsItems, toolsSearch]);
+    return groupedSections
+      .map(([name, items]) => [name, items.filter(i => i.label.toLowerCase().includes(q))] as const)
+      .filter(([, items]) => items.length > 0);
+  }, [groupedSections, toolsSearch]);
+  const totalToolCount = groupedSections.reduce((n, [, items]) => n + items.length, 0);
 
   const handleSignOut = async () => {
     await signOut();
@@ -162,49 +173,53 @@ export function DashboardLayout({ children, title, navItems }: DashboardLayoutPr
               );
             })}
 
-            {/* Tools section (collapsible) */}
-            {toolsItems.length > 0 && (
-              <Collapsible open={toolsOpen || toolsItems.some(i => location.pathname === i.href)} onOpenChange={setToolsOpen}>
-                <CollapsibleTrigger className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground w-full transition-colors mt-2">
-                  <Wrench className="h-5 w-5" />
-                  <span className="flex-1 text-left">Tools</span>
-                  <ChevronDown className={cn("h-4 w-4 transition-transform", (toolsOpen || toolsItems.some(i => location.pathname === i.href)) && "rotate-180")} />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="space-y-0.5 mt-1 ml-2 border-l border-sidebar-border pl-2">
-                  {toolsItems.length > 6 && (
-                    <div className="relative px-1 py-1" onClick={e => e.stopPropagation()}>
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                      <Input
-                        placeholder="Filter tools…"
-                        value={toolsSearch}
-                        onChange={e => setToolsSearch(e.target.value)}
-                        onKeyDown={e => e.stopPropagation()}
-                        className="h-7 pl-7 text-xs bg-sidebar-background border-sidebar-border"
-                      />
-                    </div>
-                  )}
-                  {filteredToolsItems.map((item) => {
-                    const isActive = location.pathname === item.href;
-                    return (
-                      <Link
-                        key={item.href}
-                        to={item.href}
-                        onClick={() => setSidebarOpen(false)}
-                        className={cn(
-                          'flex items-center gap-3 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
-                          isActive
-                            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                        )}
-                      >
-                        {item.icon}
-                        {item.label}
-                      </Link>
-                    );
-                  })}
-                </CollapsibleContent>
-              </Collapsible>
+            {/* Tool group search (only when many tools) */}
+            {totalToolCount > 6 && (
+              <div className="relative px-1 py-2 mt-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <Input
+                  placeholder="Filter tools…"
+                  value={toolsSearch}
+                  onChange={e => setToolsSearch(e.target.value)}
+                  className="h-7 pl-7 text-xs bg-sidebar-background border-sidebar-border"
+                />
+              </div>
             )}
+
+            {/* Grouped sections (each collapsible) */}
+            {filteredGroupedSections.map(([sectionName, items]) => {
+              const sectionHasActive = items.some(i => location.pathname === i.href);
+              const forceOpen = sectionHasActive || !!toolsSearch.trim();
+              return (
+                <Collapsible key={sectionName} defaultOpen={forceOpen} open={forceOpen ? true : undefined}>
+                  <CollapsibleTrigger className="flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground w-full transition-colors mt-2">
+                    <span className="flex-1 text-left">{sectionName}</span>
+                    <ChevronDown className={cn("h-4 w-4 transition-transform", forceOpen && "rotate-180")} />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-0.5 mt-1 ml-2 border-l border-sidebar-border pl-2">
+                    {items.map((item) => {
+                      const isActive = location.pathname === item.href;
+                      return (
+                        <Link
+                          key={item.href}
+                          to={item.href}
+                          onClick={() => setSidebarOpen(false)}
+                          className={cn(
+                            'flex items-center gap-3 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                            isActive
+                              ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                              : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                          )}
+                        >
+                          {item.icon}
+                          {item.label}
+                        </Link>
+                      );
+                    })}
+                  </CollapsibleContent>
+                </Collapsible>
+              );
+            })}
           </nav>
 
           {/* User section */}
