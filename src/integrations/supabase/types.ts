@@ -1733,6 +1733,104 @@ export type Database = {
           },
         ]
       }
+      payout_share_bonuses: {
+        Row: {
+          applied_to_payout_id: string | null
+          bonus_amount: number
+          created_at: string
+          id: string
+          payout_id: string
+          post_url: string
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          applied_to_payout_id?: string | null
+          bonus_amount?: number
+          created_at?: string
+          id?: string
+          payout_id: string
+          post_url: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          applied_to_payout_id?: string | null
+          bonus_amount?: number
+          created_at?: string
+          id?: string
+          payout_id?: string
+          post_url?: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payout_share_bonuses_applied_to_payout_id_fkey"
+            columns: ["applied_to_payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payout_share_bonuses_payout_id_fkey"
+            columns: ["payout_id"]
+            isOneToOne: false
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payout_shares: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          id: string
+          is_public: boolean
+          payout_id: string
+          short_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          is_public?: boolean
+          payout_id: string
+          short_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          is_public?: boolean
+          payout_id?: string
+          short_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payout_shares_payout_id_fkey"
+            columns: ["payout_id"]
+            isOneToOne: true
+            referencedRelation: "payouts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payouts: {
         Row: {
           account_id: string
@@ -3233,6 +3331,26 @@ export type Database = {
       get_pending_pass_velocity: {
         Args: { _window_hours?: number }
         Returns: Json
+      }
+      get_public_payout_share: {
+        Args: { _short_id: string }
+        Returns: {
+          amount: number
+          display_name: string
+          paid_at: string
+          short_id: string
+          tier_name: string
+        }[]
+      }
+      get_recent_public_payouts: {
+        Args: { _limit?: number }
+        Returns: {
+          amount: number
+          display_name: string
+          paid_at: string
+          short_id: string
+          tier_name: string
+        }[]
       }
       get_rolling_pass_rate: { Args: { _window_days?: number }; Returns: Json }
       get_support_ops_metrics: { Args: { p_days?: number }; Returns: Json }

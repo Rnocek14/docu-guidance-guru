@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import {
   LayoutDashboard, Shield, AlertTriangle, Users, Settings,
-  FileText, Flag, CreditCard, Activity, Cpu, Wrench, Plug, LineChart,
+  FileText, Flag, CreditCard, Activity, Cpu, Wrench, Plug, LineChart, Gift,
 } from 'lucide-react';
 
 interface NavItem {
@@ -33,4 +33,5 @@ export const missionControlNavItems: NavItem[] = [
   { label: 'Email Triage', href: '/admin/support-emails', icon: <FileText className="h-5 w-5" />, section: 'tools' },
   { label: 'WealthCharts Setup', href: '/admin/wealthcharts', icon: <Plug className="h-5 w-5" />, section: 'tools' },
   { label: 'Cohort Projection', href: '/admin/projection', icon: <LineChart className="h-5 w-5" />, section: 'tools' },
+  { label: 'Share Bonuses', href: '/admin/share-bonuses', icon: <Gift className="h-5 w-5" />, section: 'tools' },
 ];
