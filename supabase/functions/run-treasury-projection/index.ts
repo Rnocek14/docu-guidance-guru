@@ -120,7 +120,9 @@ interface ProjectionResult {
   months: MonthState[]
   scalingCheckpoints: Record<string, { month: number; reserveEnd: number; payoutQueueCarry: number } | null>
   worstMonthTrough: number
+  worstLiabilityAdjustedTrough: number
   insolventMonth: number | null
+  liabilityInsolventMonth: number | null
   breakerL1Months: number
   breakerL2Months: number
   finalFunded: number
