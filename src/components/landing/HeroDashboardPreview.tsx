@@ -1,7 +1,7 @@
 import { 
   TrendingUp, Shield, CheckCircle2, AlertTriangle, Calendar, 
   DollarSign, Target, Compass, ShieldCheck, ChevronRight,
-  XCircle
+  XCircle, CircleDollarSign
 } from 'lucide-react';
 
 /** Static dashboard mockup that mirrors the actual TraderDashboard layout.
@@ -30,9 +30,27 @@ export function HeroDashboardPreview() {
   const targetY = 100 - ((110000 - minY) / (maxY - minY)) * 100;
 
   return (
-    <div className="relative mx-auto max-w-5xl mt-12 animate-in fade-in slide-in-from-bottom-6 duration-1000 [animation-delay:800ms]">
+    <div className="relative mx-auto max-w-5xl mt-4 sm:mt-6 animate-in fade-in slide-in-from-bottom-6 duration-1000 [animation-delay:800ms]">
       {/* Glow */}
       <div className="absolute inset-0 -z-10 rounded-2xl bg-primary/8 blur-2xl scale-105" />
+
+      {/* Floating "Payout Paid" notification — single live trading artifact */}
+      <div className="hidden sm:flex absolute -top-4 right-4 sm:right-8 z-10 items-center gap-2 rounded-lg border border-success/30 bg-card/95 backdrop-blur-sm px-3 py-2 shadow-lg animate-in fade-in slide-in-from-top-2 duration-700 [animation-delay:1400ms]">
+        <div className="rounded-full bg-success/15 p-1.5">
+          <CircleDollarSign className="h-3.5 w-3.5 text-success" />
+        </div>
+        <div className="flex flex-col leading-tight">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold text-foreground">Payout Paid</span>
+            <span className="text-[9px] px-1 py-0.5 rounded bg-success/15 text-success font-medium">ACH</span>
+          </div>
+          <span className="text-[9px] text-muted-foreground font-mono">$3,180.00 · just now</span>
+        </div>
+        <span className="relative flex h-1.5 w-1.5 ml-1">
+          <span className="absolute inset-0 rounded-full bg-success animate-ping opacity-60" />
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success" />
+        </span>
+      </div>
 
       <div className="rounded-2xl border border-border/60 bg-card/90 backdrop-blur-sm shadow-2xl overflow-hidden">
         {/* Window chrome */}

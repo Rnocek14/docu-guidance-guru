@@ -12,7 +12,7 @@ const badges = [
 
 export function Hero() {
   return (
-    <section className="relative overflow-hidden pt-20 pb-16 lg:pt-32 lg:pb-24">
+    <section className="relative overflow-hidden pt-20 pb-8 lg:pt-32 lg:pb-12">
       {/* Animated background gradient effects */}
       <div className="absolute inset-0 -z-10">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[600px] rounded-full bg-primary/5 blur-3xl animate-pulse" />
