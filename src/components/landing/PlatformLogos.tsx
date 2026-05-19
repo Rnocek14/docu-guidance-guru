@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { track } from '@/lib/track';
-import wealthChartsLogo from '@/assets/wealthcharts-logo.svg';
+import wealthChartsLogoDark from '@/assets/wealthcharts-logo.svg';
+import wealthChartsLogoLight from '@/assets/wealthcharts-logo-light.svg';
 
 export function PlatformLogos() {
   const tracked = useRef(false);
@@ -20,9 +21,14 @@ export function PlatformLogos() {
         </p>
         <div className="flex justify-center">
           <img
-            src={wealthChartsLogo}
+            src={wealthChartsLogoLight}
             alt="WealthCharts"
-            className="h-10 md:h-12 w-auto opacity-90"
+            className="h-10 md:h-12 w-auto opacity-90 block dark:hidden"
+          />
+          <img
+            src={wealthChartsLogoDark}
+            alt="WealthCharts"
+            className="h-10 md:h-12 w-auto opacity-90 hidden dark:block"
           />
         </div>
       </div>
