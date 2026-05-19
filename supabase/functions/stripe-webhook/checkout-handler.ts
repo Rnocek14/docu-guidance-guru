@@ -213,6 +213,29 @@ export async function handleCheckoutCompleted(
 
   console.log(`Account created atomically: id=${accountId} tier=${tierId} user=${userId} session=${session.id}`)
 
+  // ── Step 3b: Affiliate attribution (best-effort, idempotent) ──
+  try {
+    const { data: queueWithAff } = await supabase
+      .from('checkout_fulfillment_queue')
+      .select('id, affiliate_code, amount_cents')
+      .eq('id', claimRow.id)
+      .maybeSingle()
+    const affCode = (queueWithAff as { affiliate_code?: string | null } | null)?.affiliate_code
+    if (affCode) {
+      const amt = (queueWithAff as { amount_cents?: number } | null)?.amount_cents || session.amount_total || 0
+      const { error: attribErr } = await supabase.rpc('record_affiliate_attribution', {
+        p_source: 'checkout',
+        p_source_id: claimRow.id,
+        p_code: affCode,
+        p_buyer_user_id: userId,
+        p_amount_cents: amt,
+      })
+      if (attribErr) console.error(`Affiliate attribution failed: ${attribErr.message}`, { queueId: claimRow.id })
+    }
+  } catch (e) {
+    console.error('Affiliate attribution threw (non-fatal):', (e as Error).message)
+  }
+
   // ── Step 4: Provision sim account at active provider (best-effort) ──
   // This call is intentionally NON-blocking to checkout completion:
   //   - Trader's payment succeeded and their account row exists.
