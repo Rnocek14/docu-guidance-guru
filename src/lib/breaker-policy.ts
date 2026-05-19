@@ -102,18 +102,22 @@ export interface BreakerDiagnostics {
 /**
  * Thresholds & hysteresis for the Pay/Rev Guardrail.
  * 
- * Level 0 → 1: rollingPayRevAvg3Prev > 0.45 (tighten)
- * Level 1 → 2: rollingPayRevAvg3Prev > 0.60 (freeze)
- * Level 2 → 1: rollingPayRevAvg3Prev < 0.55 for 2 consecutive months
- * Level 1 → 0: rollingPayRevAvg3Prev < 0.40 for 3 consecutive months
+ * Level 0 → 1: rollingPayRevAvg3Prev > 0.30 (tighten)
+ * Level 1 → 2: rollingPayRevAvg3Prev > 0.45 (freeze)
+ * Level 2 → 1: rollingPayRevAvg3Prev < 0.40 for 2 consecutive months
+ * Level 1 → 0: rollingPayRevAvg3Prev < 0.25 for 3 consecutive months
+ *
+ * Calibrated 2026-05-19 from affiliate+breaker sweep:
+ * stress insolvency 100% → 0.1%, realistic-case L2 freeze time 0.0%.
+ * Prior defaults (0.45 / 0.60) left 2.1–2.6% stress insolvency.
  */
 const PAYREV_V1 = {
   // Escalation thresholds
-  l0ToL1Threshold: 0.45,
-  l1ToL2Threshold: 0.60,
+  l0ToL1Threshold: 0.30,
+  l1ToL2Threshold: 0.45,
   // Release thresholds (with hysteresis gap)
-  l2ToL1Threshold: 0.55,
-  l1ToL0Threshold: 0.40,
+  l2ToL1Threshold: 0.40,
+  l1ToL0Threshold: 0.25,
   // Consecutive months required for release
   l2ReleaseMonths: 2,
   l1ReleaseMonths: 3,
@@ -131,7 +135,7 @@ const PAYREV_V1 = {
 
 export const PAY_REV_GUARDRAIL_V1: BreakerPolicy = {
   name: 'Pay/Rev Guardrail',
-  version: 'v1',
+  version: 'v1.1',
 
   evaluate(ctx: BreakerEvaluationContext): BreakerEvaluationResult {
     const { rollingPayRevAvg3Prev, currentLevel, state } = ctx;
