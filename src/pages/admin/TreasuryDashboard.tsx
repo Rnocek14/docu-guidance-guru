@@ -16,6 +16,7 @@ import {
 import { Gauge, AlertTriangle, ShieldCheck, ShieldAlert, Play, TrendingUp, Loader2 } from 'lucide-react';
 import { supabase, SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { BetaMetricsPanel } from '@/components/admin/BetaMetricsPanel';
 
 interface ProjectionResponse {
   ok: boolean;
@@ -150,6 +151,8 @@ export default function TreasuryDashboard() {
             </p>
           </div>
         </div>
+
+        <BetaMetricsPanel />
 
         {/* Scenario Picker */}
         <Card>
