@@ -169,7 +169,13 @@ interface ProjectionResult {
 //   - computing aggregated payouts via behavior assumptions
 // Then we apply the breaker to compute paid-vs-deferred.
 function runSingleProjection(input: ProjectionInput, seed: number): ProjectionResult {
-  const beh: BehaviorAssumptions = { ...DEFAULT_BEHAVIOR, ...(input.behavior ?? {}) }
+  // Merge: defaults → costMode opex preset → caller behavior overrides.
+  const costModeOpex = input.costMode ? COST_MODE_OPEX[input.costMode] : undefined
+  const beh: BehaviorAssumptions = {
+    ...DEFAULT_BEHAVIOR,
+    ...(costModeOpex !== undefined ? { fixedMonthlyOpex: costModeOpex } : {}),
+    ...(input.behavior ?? {}),
+  }
   const months: MonthState[] = []
   let reserve = input.startingReserve
   let funded = input.startingTraders
@@ -179,6 +185,15 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
   // drain it. Replaces the prior `newFunded / funded` proxy which assumed
   // only first-month accounts were ever cap-eligible.
   let firstPayoutPool = input.startingTraders
+  // ---- v2 lifetime-cap accounting (aggregate, not per-account) ----
+  // We track the total lifetime PAYOUT HEADROOM available across every
+  // funded account that has ever existed in the population. Each funded
+  // account contributes `lifetimeCapPerAccount × payoutRequestRate` of
+  // expected lifetime obligation (only the requesting share can extract).
+  // `cumulativeDueEver` is decremented from this stock; when it hits zero
+  // the population is fully cap-bound and no further payouts can accrue.
+  let lifetimeHeadroomStock = input.startingTraders * beh.lifetimeCapPerAccount * beh.payoutRequestRate
+  let cumulativeDueEver = 0
   let worstTrough = reserve
   // Liability-adjusted trough: reserve minus outstanding deferred-payout queue.
   // The bare reserve curve understates risk because deferred payouts are
