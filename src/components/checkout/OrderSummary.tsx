@@ -32,6 +32,8 @@ export function OrderSummary({ tier }: OrderSummaryProps) {
           <p>• Payout rate: {tier.splitPercent}% of eligible rewards</p>
           <p>• First payout: up to ${tier.firstPayoutCap}</p>
           <p>• Lifetime earnings: up to {tier.lifetimeCapMultiple}× your entry fee (${tier.lifetimeCapAmount.toLocaleString()})</p>
+          <p>• Drawdown: 10% end-of-day trailing, locks at starting balance</p>
+          <p>• Payout review SLA: 1–3 business days (max 5 if flagged)</p>
           <p>• Reset fee: $99 (optional, if evaluation is failed)</p>
         </div>
       </CardContent>
