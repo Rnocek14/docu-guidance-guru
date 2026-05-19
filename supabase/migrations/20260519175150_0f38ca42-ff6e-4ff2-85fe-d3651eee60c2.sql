@@ -1,0 +1,1 @@
+GRANT EXECUTE ON FUNCTION public._pa_validate() TO anon, authenticated;
