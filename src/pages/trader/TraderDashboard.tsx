@@ -192,10 +192,7 @@ export default function TraderDashboard() {
               <PayoutTrackerBar
                 paidTotal={totalPaidOut ?? 0}
                 firstPayoutCap={activeAccount.cohort?.first_payout_cap_amount ?? 500}
-                lifetimeCap={
-                  eligibility?.lifetime_cap_amount ??
-                  activeAccount.starting_balance * 0.0298 // ~Starter 10× of $149 entry; safe fallback
-                }
+                lifetimeCap={eligibility?.lifetime_cap_amount ?? 1490}
               />
             )}
 
