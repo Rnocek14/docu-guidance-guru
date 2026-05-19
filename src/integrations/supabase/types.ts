@@ -178,6 +178,7 @@ export type Database = {
           failed_at: string | null
           highest_balance: number
           id: string
+          last_reset_at: string | null
           last_trade_at: string | null
           parent_account_id: string | null
           passed_at: string | null
@@ -189,6 +190,7 @@ export type Database = {
           provider_payment_id: string | null
           provider_session_id: string
           provisioned_at: string | null
+          reset_credits_remaining: number
           root_account_id: string | null
           rule_snapshot: Json | null
           starting_balance: number
@@ -215,6 +217,7 @@ export type Database = {
           failed_at?: string | null
           highest_balance?: number
           id?: string
+          last_reset_at?: string | null
           last_trade_at?: string | null
           parent_account_id?: string | null
           passed_at?: string | null
@@ -226,6 +229,7 @@ export type Database = {
           provider_payment_id?: string | null
           provider_session_id: string
           provisioned_at?: string | null
+          reset_credits_remaining?: number
           root_account_id?: string | null
           rule_snapshot?: Json | null
           starting_balance?: number
@@ -252,6 +256,7 @@ export type Database = {
           failed_at?: string | null
           highest_balance?: number
           id?: string
+          last_reset_at?: string | null
           last_trade_at?: string | null
           parent_account_id?: string | null
           passed_at?: string | null
@@ -263,6 +268,7 @@ export type Database = {
           provider_payment_id?: string | null
           provider_session_id?: string
           provisioned_at?: string | null
+          reset_credits_remaining?: number
           root_account_id?: string | null
           rule_snapshot?: Json | null
           starting_balance?: number
@@ -2231,15 +2237,18 @@ export type Database = {
         Row: {
           account_id: string
           amount_paid_cents: number
+          applied_at: string | null
           bundle_id: string
           created_at: string
           id: string
           metadata: Json
           paid_at: string | null
           provider: string | null
+          provider_event_id: string | null
           provider_session_id: string | null
           resets_remaining: number
           resets_total: number
+          restored_account: boolean
           status: string
           updated_at: string
           urgency_window_active: boolean
@@ -2248,15 +2257,18 @@ export type Database = {
         Insert: {
           account_id: string
           amount_paid_cents: number
+          applied_at?: string | null
           bundle_id: string
           created_at?: string
           id?: string
           metadata?: Json
           paid_at?: string | null
           provider?: string | null
+          provider_event_id?: string | null
           provider_session_id?: string | null
           resets_remaining: number
           resets_total: number
+          restored_account?: boolean
           status?: string
           updated_at?: string
           urgency_window_active?: boolean
@@ -2265,15 +2277,18 @@ export type Database = {
         Update: {
           account_id?: string
           amount_paid_cents?: number
+          applied_at?: string | null
           bundle_id?: string
           created_at?: string
           id?: string
           metadata?: Json
           paid_at?: string | null
           provider?: string | null
+          provider_event_id?: string | null
           provider_session_id?: string | null
           resets_remaining?: number
           resets_total?: number
+          restored_account?: boolean
           status?: string
           updated_at?: string
           urgency_window_active?: boolean
@@ -3127,6 +3142,10 @@ export type Database = {
     }
     Functions: {
       apply_geo_mismatch_hold: { Args: { _user_id: string }; Returns: Json }
+      apply_reset_from_purchase: {
+        Args: { p_provider_event_id?: string; p_purchase_id: string }
+        Returns: Json
+      }
       approve_payout_atomic: {
         Args: {
           _approved_by: string
@@ -3215,6 +3234,10 @@ export type Database = {
           _raw_webhook?: Json
         }
         Returns: Json
+      }
+      consume_reset_credit_if_breached: {
+        Args: { p_account_id: string }
+        Returns: boolean
       }
       create_risk_snapshot: {
         Args: {

@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@18.5.0'
 import { handleCheckoutCompleted } from './checkout-handler.ts'
 import { handleChargeRefunded } from './refund-handler.ts'
+import { handleResetBundleCompleted } from './reset-handler.ts'
 
 // No CORS needed — called by Stripe servers, not browsers
 // verify_jwt = false — we verify Stripe's webhook signature instead
@@ -59,7 +60,12 @@ Deno.serve(async (req) => {
     // ── 2. Handle events ────────────────────────────────────
     switch (event.type) {
       case 'checkout.session.completed': {
-        await handleCheckoutCompleted(supabase, event.data.object as Stripe.Checkout.Session)
+        const session = event.data.object as Stripe.Checkout.Session
+        if (session.metadata?.purchase_type === 'reset_bundle') {
+          await handleResetBundleCompleted(supabase, session, event.id)
+        } else {
+          await handleCheckoutCompleted(supabase, session)
+        }
         break
       }
       case 'charge.refunded': {
