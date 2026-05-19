@@ -33,6 +33,8 @@ interface BreakerState {
   previous_level: string | null;
   rolling_payrev_ratio: number;
   payrev_revenue_30d: number;
+  payrev_net_revenue_30d: number;
+  payrev_chargebacks_30d: number;
   payrev_payouts_30d: number;
   payrev_window_days: number;
   payrev_level: string;
@@ -221,14 +223,16 @@ export function BreakerStatusPanel() {
           </div>
           <div className="text-xs text-muted-foreground">
             ${Math.round(breaker.payrev_payouts_30d).toLocaleString()} paid /
-            {' '}${Math.round(breaker.payrev_revenue_30d).toLocaleString()} revenue •
+            {' '}${Math.round(breaker.payrev_net_revenue_30d ?? breaker.payrev_revenue_30d).toLocaleString()} net rev
+            {' '}(gross ${Math.round(breaker.payrev_revenue_30d).toLocaleString()},
+            {' '}cb −${Math.round(breaker.payrev_chargebacks_30d ?? 0).toLocaleString()}) •
             sub-level <code className="bg-muted px-1 rounded">{payrevLevel}</code>
             {payrevLevel !== 'normal' && breaker.payrev_release_streak > 0 && (
               <span> • release streak {breaker.payrev_release_streak}/{payrevLevel === 'critical' ? 12 : 36}</span>
             )}
           </div>
           <div className="text-[10px] text-muted-foreground/80">
-            Window: trailing 30 days, fulfilled checkouts vs paid+paid_confirmed payouts.
+            Window: trailing 30 days. Denominator = fulfilled checkout revenue − non-won chargebacks (net).
             Tighten {'>'}30%, Freeze {'>'}45%. Release at {'<'}{PAYREV_L2_RELEASE*100}% / {'<'}{PAYREV_L1_RELEASE*100}% with hysteresis.
           </div>
         </div>
