@@ -270,6 +270,10 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
       firstPayoutPool - churnedThisMonth * churnedFirstPayoutShare + newFunded
     )
     funded = Math.max(0, funded - churnedThisMonth + newFunded)
+    // Extend lifetime payout headroom for newly funded accounts.
+    // Only the `payoutRequestRate` share will ever extract, so the obligation
+    // stock grows by `newFunded × lifetimeCap × payoutRequestRate`.
+    lifetimeHeadroomStock += newFunded * beh.lifetimeCapPerAccount * beh.payoutRequestRate
 
     // --- 4. Revenue ---
     const entryRevenue = signups * TIER.entryFee
@@ -281,11 +285,23 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
     const grossRevenue = entryRevenue + resetRevenue - refunds
     const netRevenue = Math.max(0, grossRevenue - chargebacks)
 
-    // --- 5. Payouts owed this month (cohort-aware, stock-based cap) ---
-    // The first-payout cap applies to every account's FIRST payout regardless
-    // of how long ago they were funded. We model the population of cap-eligible
-    // accounts as a stock (firstPayoutPool) and probabilistically drain it.
-    const payoutRequestsThisMonth = funded * beh.payoutProbPerMonth
+    // --- 5. Payouts owed this month (v2: requester-fraction + cadence floor + lifetime cap) ---
+    //
+    // Production constraints applied:
+    //   (a) payoutRequestRate     — only X% of funded ever request a payout
+    //   (b) minMonthsBetweenPayouts — hard cap on requests/active/month
+    //   (c) firstPayoutCap         — caps trader receipts on first payout
+    //   (d) lifetimeCapPerAccount  — hard $ ceiling per funded account ever
+    //
+    // The population of payout-active accounts is `funded × payoutRequestRate`.
+    // Their per-month request rate is `payoutsPerActiveAccountPerMonth`, but
+    // bounded above by the cadence floor `1 / minMonthsBetweenPayouts`.
+    const cadenceCap = beh.minMonthsBetweenPayouts > 0
+      ? 1 / beh.minMonthsBetweenPayouts
+      : Infinity
+    const effectivePayoutsPerActive = Math.min(beh.payoutsPerActiveAccountPerMonth, cadenceCap)
+    const activeRequesters = funded * beh.payoutRequestRate
+    const payoutRequestsThisMonth = activeRequesters * effectivePayoutsPerActive
     const firstPayoutShare = funded > 0
       ? Math.min(1, firstPayoutPool / funded)
       : 0
@@ -294,13 +310,26 @@ function runSingleProjection(input: ProjectionInput, seed: number): ProjectionRe
       (1 - firstPayoutShare) * beh.avgPayoutWhenPaid
 
     const payoutsDueGross = payoutRequestsThisMonth * beh.avgPayoutWhenPaid
-    const payoutsDueNet =
-      payoutRequestsThisMonth * cappedAvgPayout +
-      payoutQueue // deferred from prior months join the queue
+    let payoutsDueNetThisMonth = payoutRequestsThisMonth * cappedAvgPayout
+    // Apply aggregate lifetime cap: cannot exceed remaining headroom in the
+    // population's lifetime payout stock. Once exhausted, the funded base is
+    // structurally retired from payout obligation.
+    const headroomRemaining = Math.max(0, lifetimeHeadroomStock - cumulativeDueEver)
+    if (payoutsDueNetThisMonth > headroomRemaining) {
+      payoutsDueNetThisMonth = headroomRemaining
+    }
+    cumulativeDueEver += payoutsDueNetThisMonth
+    const payoutsDueNet = payoutsDueNetThisMonth + payoutQueue // queued joins this month's bill
 
     // Drain the first-payout pool by the share of this month's requests that
     // were first payouts (not by amount).
-    const firstPayoutsConsumed = payoutRequestsThisMonth * firstPayoutShare
+    // If we got bound by the lifetime-cap headroom this month, scale down
+    // first-payout consumption proportionally so the pool doesn't drain
+    // faster than dollars actually accrued.
+    const scale = payoutRequestsThisMonth > 0 && payoutsDueGross > 0
+      ? Math.min(1, payoutsDueNetThisMonth / Math.max(1, payoutRequestsThisMonth * cappedAvgPayout))
+      : 1
+    const firstPayoutsConsumed = payoutRequestsThisMonth * firstPayoutShare * scale
     firstPayoutPool = Math.max(0, firstPayoutPool - firstPayoutsConsumed)
 
     // --- 6. Breaker evaluation (uses rolling Pay/Rev based on PRIOR months) ---
