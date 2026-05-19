@@ -21,11 +21,15 @@ const corsHeaders = {
 }
 
 // ---------- Breaker v1.2 (production constants) ----------
+// MIRROR of PAY_REV_GUARDRAIL_V1 thresholds in src/lib/breaker-policy.ts.
+// Numerical drift between this projection and production policy would
+// invalidate reserve recommendations — if you change one, change both
+// and re-run pre-launch audit.
 const BREAKER = {
-  L1_TRIGGER: 0.30,   // tighten
-  L2_TRIGGER: 0.45,   // freeze
-  L1_RELEASE: 0.25,   // hysteresis
-  L2_RELEASE: 0.40,
+  L1_TRIGGER: 0.30,   // L0→L1 escalation: rolling Pay/Rev > 30% → tighten
+  L2_TRIGGER: 0.45,   // L1→L2 escalation: rolling Pay/Rev > 45% → freeze
+  L1_RELEASE: 0.25,   // L1→L0 release  : rolling Pay/Rev < 25% with hysteresis
+  L2_RELEASE: 0.40,   // L2→L1 release  : rolling Pay/Rev < 40% with hysteresis
   L1_DEFER_FRACTION: 0.30, // L1 defers 30% of due payouts to next month
   L2_DEFER_FRACTION: 1.00, // L2 defers all payouts
 }

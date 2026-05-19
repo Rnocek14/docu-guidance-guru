@@ -12,7 +12,6 @@ type PublicShare = {
   short_id: string;
   display_name: string;
   amount: number;
-  tier_name: string;
   paid_at: string | null;
 };
 
@@ -35,7 +34,7 @@ export default function PublicPayoutShare() {
     if (data) {
       const title = `${data.display_name} got paid $${Number(data.amount).toLocaleString()} — Meridian`;
       document.title = title;
-      const desc = `Verified payout of $${Number(data.amount).toLocaleString()} on a ${data.tier_name} simulated account.`;
+      const desc = `Verified payout of $${Number(data.amount).toLocaleString()} from a Meridian simulated trading account.`;
       const meta = document.querySelector('meta[name="description"]') ?? Object.assign(document.createElement('meta'), { name: 'description' });
       meta.setAttribute('content', desc);
       if (!meta.parentNode) document.head.appendChild(meta);
@@ -80,14 +79,13 @@ export default function PublicPayoutShare() {
             </p>
           </div>
 
-          <div className="flex items-center justify-center gap-2">
-            <Badge variant="secondary" className="text-xs">{data.tier_name}</Badge>
-            {data.paid_at && (
+          {data.paid_at && (
+            <div className="flex items-center justify-center">
               <span className="text-xs text-muted-foreground">
                 {format(new Date(data.paid_at), 'MMM d, yyyy')}
               </span>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="pt-4 border-t border-border space-y-3">
             <p className="text-xs text-muted-foreground">

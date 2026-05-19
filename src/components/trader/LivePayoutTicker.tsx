@@ -8,7 +8,6 @@ type PublicPayout = {
   short_id: string;
   display_name: string;
   amount: number;
-  tier_name: string;
   paid_at: string | null;
 };
 
