@@ -96,7 +96,7 @@ function useActionItems() {
       const items: ActionItem[] = [];
 
       // Parallel fetch all action sources
-      const [payoutsRes, flagsRes, cronConfigRes, cronRunsRes, failedPaymentsRes] = await Promise.all([
+      const [payoutsRes, flagsRes, cronConfigRes, cronRunsRes, failedPaymentsRes, breakerStateRes] = await Promise.all([
         supabase.from('payouts').select('id, status, amount, updated_at, account_id')
           .in('status', ['pending', 'under_review', 'approved']),
         supabase.from('flags').select('id, flag_type, reason, severity, account_id, created_at')
@@ -106,6 +106,9 @@ function useActionItems() {
           .order('ran_at', { ascending: false }).limit(1000),
         supabase.from('payout_payments').select('id, payout_id, status, initiated_at')
           .eq('status', 'failed').limit(10),
+        supabase.from('econ_breaker_state')
+          .select('last_evaluated_at, breaker_level')
+          .maybeSingle(),
       ]);
 
       // Pending payouts needing action
@@ -176,6 +179,26 @@ function useActionItems() {
             link: `/admin/ops-metrics?job=${cfg.jobname}`,
           });
         }
+      }
+
+      // Breaker freshness — the safety circuit breaker runs as an in-database
+      // pg_cron job (no HTTP log), so check its own last_evaluated_at timestamp.
+      // Expected cadence is every 5 minutes; flag if it hasn't run in 20+ min.
+      const breakerLastAt = breakerStateRes.data?.last_evaluated_at;
+      const breakerAgeMins = breakerLastAt
+        ? differenceInMinutes(now, new Date(breakerLastAt))
+        : Infinity;
+      if (breakerAgeMins > 20) {
+        items.push({
+          id: 'breaker-stale',
+          type: 'cron',
+          severity: breakerAgeMins > 60 ? 'red' : 'yellow',
+          title: 'Safety breaker not evaluating',
+          detail: breakerLastAt
+            ? `Last evaluated ${formatDistanceToNow(new Date(breakerLastAt), { addSuffix: true })}`
+            : 'Never evaluated',
+          link: '/admin/governor',
+        });
       }
 
       // Sort: red first, then yellow, then green
