@@ -34,6 +34,7 @@ import {
   Search,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { missionControlNavItems } from '@/components/layout/AdminNav';
 
 interface NavItem {
   label: string;
@@ -305,24 +306,10 @@ export const riskNavItems: NavItem[] = [
   { label: 'Review Queue', href: '/risk/queue', icon: <AlertTriangle className="h-5 w-5" /> },
 ];
 
-export const adminNavItems: NavItem[] = [
-  { label: 'Governor', href: '/admin/governor', icon: <Cpu className="h-5 w-5" /> },
-  { label: 'Dashboard', href: '/admin', icon: <LayoutDashboard className="h-5 w-5" /> },
-  { label: 'System Overview', href: '/admin/system', icon: <Shield className="h-5 w-5" /> },
-  { label: 'Payout Liability', href: '/admin/liability', icon: <CreditCard className="h-5 w-5" /> },
-  { label: 'Monte Carlo', href: '/admin/monte-carlo', icon: <Activity className="h-5 w-5" /> },
-  { label: 'Risk Dashboard', href: '/risk', icon: <AlertTriangle className="h-5 w-5" /> },
-  { label: 'Review Queue', href: '/risk/queue', icon: <Flag className="h-5 w-5" /> },
-  { label: 'Users', href: '/admin/users', icon: <Users className="h-5 w-5" /> },
-  { label: 'Cohorts', href: '/admin/cohorts', icon: <Settings className="h-5 w-5" /> },
-  { label: 'Audit Logs', href: '/admin/audit', icon: <FileText className="h-5 w-5" /> },
-  { label: 'Morning Checks', href: '/admin/ops-metrics', icon: <Activity className="h-5 w-5" /> },
-  { label: 'Ops Playbook', href: '/admin/ops-playbook', icon: <FileText className="h-5 w-5" /> },
-  { label: 'Tier Readiness', href: '/admin/tier-readiness', icon: <Shield className="h-5 w-5" /> },
-  { label: 'Launch Readiness', href: '/admin/readiness', icon: <Shield className="h-5 w-5" /> },
-  { label: 'QA Scan', href: '/admin/qa-scan', icon: <Activity className="h-5 w-5" /> },
-  { label: 'Email Triage', href: '/admin/support-emails', icon: <FileText className="h-5 w-5" /> },
-];
+// Single source of truth for the admin sidebar lives in AdminNav.tsx
+// (Daily + Tools collapsible + optional Advanced). Re-exported so every
+// admin page renders the same grouped sidebar instead of a flat dump.
+export const adminNavItems: NavItem[] = missionControlNavItems;
 
 export const supportNavItems: NavItem[] = [
   { label: 'Dashboard', href: '/support', icon: <LayoutDashboard className="h-5 w-5" /> },
