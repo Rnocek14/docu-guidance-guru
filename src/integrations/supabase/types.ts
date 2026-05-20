@@ -903,6 +903,178 @@ export type Database = {
         }
         Relationships: []
       }
+      competitor_intel_annotations: {
+        Row: {
+          author: string | null
+          change_id: string
+          created_at: string
+          id: string
+          kind: string
+          note: string | null
+        }
+        Insert: {
+          author?: string | null
+          change_id: string
+          created_at?: string
+          id?: string
+          kind: string
+          note?: string | null
+        }
+        Update: {
+          author?: string | null
+          change_id?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          note?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_intel_annotations_change_id_fkey"
+            columns: ["change_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_intel_changes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitor_intel_changes: {
+        Row: {
+          acknowledged: boolean
+          acknowledged_at: string | null
+          acknowledged_by: string | null
+          detected_at: string
+          field: string
+          firm_id: string
+          id: string
+          new_value: Json | null
+          old_value: Json | null
+          severity: string
+          snapshot_id: string | null
+        }
+        Insert: {
+          acknowledged?: boolean
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          detected_at?: string
+          field: string
+          firm_id: string
+          id?: string
+          new_value?: Json | null
+          old_value?: Json | null
+          severity?: string
+          snapshot_id?: string | null
+        }
+        Update: {
+          acknowledged?: boolean
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          detected_at?: string
+          field?: string
+          firm_id?: string
+          id?: string
+          new_value?: Json | null
+          old_value?: Json | null
+          severity?: string
+          snapshot_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_intel_changes_firm_id_fkey"
+            columns: ["firm_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_intel_profiles"
+            referencedColumns: ["firm_id"]
+          },
+          {
+            foreignKeyName: "competitor_intel_changes_snapshot_id_fkey"
+            columns: ["snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_intel_snapshots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitor_intel_profiles: {
+        Row: {
+          active: boolean
+          created_at: string
+          firm_id: string
+          kind: string
+          name: string
+          notes: string | null
+          updated_at: string
+          urls: Json
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          firm_id: string
+          kind?: string
+          name: string
+          notes?: string | null
+          updated_at?: string
+          urls?: Json
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          firm_id?: string
+          kind?: string
+          name?: string
+          notes?: string | null
+          updated_at?: string
+          urls?: Json
+        }
+        Relationships: []
+      }
+      competitor_intel_snapshots: {
+        Row: {
+          captured_at: string
+          created_at: string
+          extraction_confidence: string | null
+          firm_id: string
+          id: string
+          payload: Json
+          raw_markdown: string | null
+          schema_version: number
+          scrape_kind: string
+          source_url: string
+        }
+        Insert: {
+          captured_at?: string
+          created_at?: string
+          extraction_confidence?: string | null
+          firm_id: string
+          id?: string
+          payload: Json
+          raw_markdown?: string | null
+          schema_version?: number
+          scrape_kind?: string
+          source_url: string
+        }
+        Update: {
+          captured_at?: string
+          created_at?: string
+          extraction_confidence?: string | null
+          firm_id?: string
+          id?: string
+          payload?: Json
+          raw_markdown?: string | null
+          schema_version?: number
+          scrape_kind?: string
+          source_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_intel_snapshots_firm_id_fkey"
+            columns: ["firm_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_intel_profiles"
+            referencedColumns: ["firm_id"]
+          },
+        ]
+      }
       cpc_snapshots: {
         Row: {
           band: string
