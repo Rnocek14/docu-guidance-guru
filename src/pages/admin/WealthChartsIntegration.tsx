@@ -221,8 +221,8 @@ export default function WealthChartsIntegration() {
   };
 
   // Outputs computed from project
-  const ingestWebhookUrl = `${SUPABASE_URL}/functions/v1/ingest-trade`;
-  const smokeTestUrl = `${SUPABASE_URL}/functions/v1/bridge-smoke-test`;
+  const ingestWebhookUrl = `${SUPABASE_FUNCTIONS_URL}/ingest-trade`;
+  const smokeTestUrl = `${SUPABASE_FUNCTIONS_URL}/bridge-smoke-test`;
   const successRedirect = `${window.location.origin}/dashboard`;
   const supabaseSecretsUrl = `https://supabase.com/dashboard/project/${PROJECT_REF}/settings/functions`;
 
