@@ -98,3 +98,6 @@ verify_jwt = false
 
 [functions.capacity-monitor]
 verify_jwt = false
+
+[functions.scrape-competitor-intel]
+verify_jwt = false
