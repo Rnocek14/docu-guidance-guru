@@ -227,54 +227,73 @@ const SHARED_ASSUMPTIONS = {
 // ============================================================================
 // RUNNER
 // ============================================================================
-function runStressBattery(): StressBatteryResult {
+// Yield to the browser between heavy runs so the UI stays responsive
+// (animations, scrolling, clicks) while the battery is executing.
+const yieldToBrowser = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+async function runStressBattery(
+  onProgress?: (done: number, total: number, label: string) => void,
+): Promise<StressBatteryResult> {
+  // 16 core scenarios + 6 price scenarios + 6 drawdown + 6 breaker (3 targets × 2) = 34
+  const TOTAL_RUNS = 34;
+  let done = 0;
+  const tick = async (label: string) => {
+    done += 1;
+    onProgress?.(done, TOTAL_RUNS, label);
+    await yieldToBrowser();
+  };
+
   const scenarios: ScenarioRow[] = [];
-  const run = (id: ScenarioId, name: string, assumptions: MonteCarloAssumptions, isAttack = false) => {
-    scenarios.push({ id, name, assumptions, result: runMonteCarlo(CONFIG, assumptions), isAttack });
+  const run = async (id: ScenarioId, name: string, assumptions: MonteCarloAssumptions, isAttack = false) => {
+    const result = runMonteCarlo(CONFIG, assumptions);
+    scenarios.push({ id, name, assumptions, result, isAttack });
+    await tick(name);
   };
 
   // Core scenarios
-  run('baseline', 'Baseline (7% pass, 500/mo)', DEFAULT_ASSUMPTIONS);
-  run('pass5', '5% pass rate (conservative)', withPassRate(0.05));
-  run('pass10', '10% pass rate (danger zone)', withPassRate(0.10));
+  await run('baseline', 'Baseline (7% pass, 500/mo)', DEFAULT_ASSUMPTIONS);
+  await run('pass5', '5% pass rate (conservative)', withPassRate(0.05));
+  await run('pass10', '10% pass rate (danger zone)', withPassRate(0.10));
 
   const baseMode = DEFAULT_ASSUMPTIONS.passRate.mode;
-  run('shift2pp', `+2pp shift (${(baseMode * 100).toFixed(0)}% → ${((baseMode + 0.02) * 100).toFixed(0)}%)`, withPassRate(baseMode + 0.02));
+  await run('shift2pp', `+2pp shift (${(baseMode * 100).toFixed(0)}% → ${((baseMode + 0.02) * 100).toFixed(0)}%)`, withPassRate(baseMode + 0.02));
 
   // Payout stress
-  run('profit15x', '1.5× funded profitability', withHighProfitability(1.5));
-  run('clustering', 'Payout clustering', SHARED_ASSUMPTIONS.clustering);
-  run('max_withdrawal', 'Max withdrawal pressure', withMaxWithdrawalPressure());
+  await run('profit15x', '1.5× funded profitability', withHighProfitability(1.5));
+  await run('clustering', 'Payout clustering', SHARED_ASSUMPTIONS.clustering);
+  await run('max_withdrawal', 'Max withdrawal pressure', withMaxWithdrawalPressure());
 
   // Combined stress
-  run('pass5_profit15x', '5% pass + 1.5× profit', withHighProfitability(1.5, withPassRate(0.05)));
-  run('attack_combined', '10% + clustering + attack', SHARED_ASSUMPTIONS.attackCombined, true);
+  await run('pass5_profit15x', '5% pass + 1.5× profit', withHighProfitability(1.5, withPassRate(0.05)));
+  await run('attack_combined', '10% + clustering + attack', SHARED_ASSUMPTIONS.attackCombined, true);
 
   // Solo operator
-  run('solo200', 'Solo ramp (200/mo)', withVolume(200));
-  run('solo200_pass10', 'Solo ramp + 10% pass', withPassRate(0.10, withVolume(200)));
+  await run('solo200', 'Solo ramp (200/mo)', withVolume(200));
+  await run('solo200_pass10', 'Solo ramp + 10% pass', withPassRate(0.10, withVolume(200)));
 
   // Velocity gate impact
-  run('no_gates', 'No velocity gates (baseline)', SHARED_ASSUMPTIONS.noGates);
+  await run('no_gates', 'No velocity gates (baseline)', SHARED_ASSUMPTIONS.noGates);
 
   // Realism scenarios: business costs
-  run('cost_stack', '+ Refunds & CAC (stochastic)', SHARED_ASSUMPTIONS.costStack);
-  run('cost_pass10', '+ Costs + 10% pass', withCostStack(withPassRate(0.10)));
+  await run('cost_stack', '+ Refunds & CAC (stochastic)', SHARED_ASSUMPTIONS.costStack);
+  await run('cost_pass10', '+ Costs + 10% pass', withCostStack(withPassRate(0.10)));
 
   // Soft attack: realistic adversary (breaker design target)
-  run('soft_attack', 'Adversarial-but-plausible (breaker target)', SHARED_ASSUMPTIONS.softAttack);
+  await run('soft_attack', 'Adversarial-but-plausible (breaker target)', SHARED_ASSUMPTIONS.softAttack);
 
   // Price sensitivity
   const priceScenarios: PriceRow[] = [];
-  const runPrice = (id: PriceId, name: string, assumptions: MonteCarloAssumptions) => {
-    priceScenarios.push({ id, name, assumptions, result: runMonteCarlo(CONFIG, assumptions) });
+  const runPrice = async (id: PriceId, name: string, assumptions: MonteCarloAssumptions) => {
+    const result = runMonteCarlo(CONFIG, assumptions);
+    priceScenarios.push({ id, name, assumptions, result });
+    await tick(`Price: ${name}`);
   };
-  runPrice('p149', '$149 (current)', DEFAULT_ASSUMPTIONS);
-  runPrice('p179', '$179', withPrice(179));
-  runPrice('p199', '$199', withPrice(199));
-  runPrice('p249', '$249', withPrice(249));
-  runPrice('p199_pass10', '$199 @ 10% pass', withPassRate(0.10, withPrice(199)));
-  runPrice('p249_pass10', '$249 @ 10% pass', withPassRate(0.10, withPrice(249)));
+  await runPrice('p149', '$149 (current)', DEFAULT_ASSUMPTIONS);
+  await runPrice('p179', '$179', withPrice(179));
+  await runPrice('p199', '$199', withPrice(199));
+  await runPrice('p249', '$249', withPrice(249));
+  await runPrice('p199_pass10', '$199 @ 10% pass', withPassRate(0.10, withPrice(199)));
+  await runPrice('p249_pass10', '$249 @ 10% pass', withPassRate(0.10, withPrice(249)));
 
   // Steady-state 90-day panel — reduced set for performance (15mo × 500 iter each)
   const ddScenarios: { id: ScenarioId; name: string; assumptions: MonteCarloAssumptions; isAttack: boolean }[] = [
@@ -287,8 +306,10 @@ function runStressBattery(): StressBatteryResult {
   ];
 
   let warnedMatureLen = false;
-  const drawdown: DrawdownRow[] = ddScenarios.map(s => {
+  const drawdown: DrawdownRow[] = [];
+  for (const s of ddScenarios) {
     const r = runMonteCarlo(CONFIG_MATURE_90DAY, s.assumptions);
+    await tick(`90-day: ${s.name}`);
     if (import.meta.env.DEV && !warnedMatureLen) {
       const months = r.rawSamples?.[0]?.length;
       if (months == null) {
@@ -369,8 +390,8 @@ function runStressBattery(): StressBatteryResult {
       maxDD = r.risk.maxDrawdown;
       minMonth = r.risk.worstMonth;
     }
-    return { id: s.id, name: s.name, maxDD, minMonth, cumMean, cumP5, payRevP95, payRevP99, pctAbove45, monthMeansWindow, isAttack: s.isAttack };
-  });
+    drawdown.push({ id: s.id, name: s.name, maxDD, minMonth, cumMean, cumP5, payRevP95, payRevP99, pctAbove45, monthMeansWindow, isAttack: s.isAttack });
+  }
 
   // Baseline diagnostics — compute from rawSamples
   const baselineResult = scenarios[0].result;
@@ -456,9 +477,12 @@ function runStressBattery(): StressBatteryResult {
   const CONFIG_BREAKER: MonteCarloConfig = { iterations: 500, monthsPerIteration: 15, seed: 42 };
   const CONFIG_BREAKER_WITH: MonteCarloConfig = { ...CONFIG_BREAKER, breakerPolicy: PAY_REV_GUARDRAIL_V1 };
 
-  const breakerComparisons: BreakerComparisonRow[] = breakerTargets.map(target => {
+  const breakerComparisons: BreakerComparisonRow[] = [];
+  for (const target of breakerTargets) {
     const rNo = runMonteCarlo(CONFIG_BREAKER, target.assumptions);
+    await tick(`Breaker A/B: ${target.name} (no breaker)`);
     const rWith = runMonteCarlo(CONFIG_BREAKER_WITH, target.assumptions);
+    await tick(`Breaker A/B: ${target.name} (with breaker)`);
 
     // Extract 90-day window metrics (M12–M14) for both runs
     const extractWindow = (r: MonteCarloResult) => {
@@ -493,7 +517,7 @@ function runStressBattery(): StressBatteryResult {
     const noMetrics = extractWindow(rNo);
     const withMetrics = extractWindow(rWith);
 
-    return {
+    breakerComparisons.push({
       scenarioName: target.name,
       noBreaker: {
         ...noMetrics,
@@ -508,8 +532,8 @@ function runStressBattery(): StressBatteryResult {
         meanProfit: rWith.profit.mean,
         diagnostics: rWith.breakerDiagnostics!,
       },
-    };
-  });
+    });
+  }
 
   return {
     scenarios,
