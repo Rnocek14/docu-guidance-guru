@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { DisputeRateCard } from '@/components/admin/DisputeRateCard';
 import { RiskThrottlePanel } from '@/components/admin/RiskThrottlePanel';
 import { QaApprovePanel } from '@/components/admin/QaApprovePanel';
+import { SignupCapacityCard } from '@/components/admin/SignupCapacityCard';
 
 export default function AdminDashboard() {
   const queryClient = useQueryClient();
@@ -159,6 +160,9 @@ export default function AdminDashboard() {
 
         {/* Dispute Rate Monitor — processor threshold defense */}
         <DisputeRateCard />
+
+        {/* Signup Capacity — how many new signups can be absorbed */}
+        <SignupCapacityCard />
 
         {/* Pass-Rate Throttle — automated liquidity control */}
         <RiskThrottlePanel />
