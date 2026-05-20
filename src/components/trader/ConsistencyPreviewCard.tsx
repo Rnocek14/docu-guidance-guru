@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Eye } from 'lucide-react';
 import type { Account, Cohort } from '@/lib/types';
 import { supabase } from '@/integrations/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 
 interface ConsistencyPreviewCardProps {
   account: Account & { cohort: Cohort };
@@ -34,6 +34,7 @@ export function ConsistencyPreviewCard({ account }: ConsistencyPreviewCardProps)
       return data;
     },
     enabled: !!nextCohortId,
+    placeholderData: keepPreviousData,
   });
 
   // Fetch current daily stats to show how trader would fare
@@ -48,6 +49,7 @@ export function ConsistencyPreviewCard({ account }: ConsistencyPreviewCardProps)
       return data;
     },
     enabled: !!account.id,
+    placeholderData: keepPreviousData,
   });
 
   if (!nextCohort) return null;
