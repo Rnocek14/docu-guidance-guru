@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Shield, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import type { Account, Cohort } from '@/lib/types';
 
 type HealthLevel = 'stable' | 'caution' | 'at_risk';
@@ -29,6 +29,7 @@ export function RuleHealthCard({ account }: RuleHealthCardProps) {
       return data;
     },
     enabled: !!account.id,
+    placeholderData: keepPreviousData,
   });
 
   const hasTradingData = (dailyStats?.length ?? 0) > 0;
