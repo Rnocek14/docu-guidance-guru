@@ -18,6 +18,7 @@ import { missionControlNavItems } from '@/components/layout/AdminNav';
 import type { DomainCheck, DomainResult, LockState, GovernorConfig, GovernorResult } from '@/lib/governor/types';
 import { GovernorResultSchema } from '@/lib/governor/types';
 import { Input } from '@/components/ui/input';
+import { SignupCapacityCard } from '@/components/admin/SignupCapacityCard';
 
 type Signal = 'green' | 'yellow' | 'red';
 
