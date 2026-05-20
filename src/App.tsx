@@ -57,6 +57,7 @@ import WealthChartsIntegration from "./pages/admin/WealthChartsIntegration";
 import CohortProjection from "./pages/admin/CohortProjection";
 import ShareBonusQueue from "./pages/admin/ShareBonusQueue";
 import AffiliateAdmin from "./pages/admin/AffiliateAdmin";
+import CompetitorIntel from "./pages/admin/CompetitorIntel";
 
 const SupportDashboard = lazy(() => import("./pages/support/SupportDashboard"));
 const AffiliateApply = lazy(() => import("./pages/affiliate/AffiliateApply"));
@@ -369,6 +370,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <AffiliateAdmin />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/intel"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <CompetitorIntel />
                 </ProtectedRoute>
               }
             />
