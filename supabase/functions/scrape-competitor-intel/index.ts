@@ -27,6 +27,7 @@ const corsHeaders = {
 const FIRECRAWL_URL = 'https://api.firecrawl.dev/v2/scrape'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 const OPENAI_MODEL = 'gpt-4o-mini'
+// build: 2026-05-20-direct-1
 
 // Browser-like UA so most landing pages return real HTML rather than a stub.
 const UA =
