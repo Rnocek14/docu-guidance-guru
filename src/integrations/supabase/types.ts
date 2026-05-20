@@ -999,6 +999,7 @@ export type Database = {
         Row: {
           active: boolean
           created_at: string
+          fetch_strategy: string
           firm_id: string
           kind: string
           name: string
@@ -1009,6 +1010,7 @@ export type Database = {
         Insert: {
           active?: boolean
           created_at?: string
+          fetch_strategy?: string
           firm_id: string
           kind?: string
           name: string
@@ -1019,6 +1021,7 @@ export type Database = {
         Update: {
           active?: boolean
           created_at?: string
+          fetch_strategy?: string
           firm_id?: string
           kind?: string
           name?: string
