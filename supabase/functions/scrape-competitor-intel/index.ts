@@ -326,11 +326,15 @@ async function isAuthorized(req: Request, db: ReturnType<typeof createClient>, c
   const userClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: `Bearer ${jwt}` } } },
   )
-  const { data: userData } = await userClient.auth.getUser()
-  if (!userData?.user) return false
-  const { data: hasAdmin } = await db.rpc('has_role', { _user_id: userData.user.id, _role: 'admin' })
+  const { data: claimsData, error: claimsErr } = await userClient.auth.getClaims(jwt)
+  if (claimsErr || !claimsData?.claims?.sub) {
+    console.warn('auth: getClaims failed', claimsErr?.message)
+    return false
+  }
+  const userId = claimsData.claims.sub
+  const { data: hasAdmin, error: rpcErr } = await db.rpc('has_role', { _user_id: userId, _role: 'admin' })
+  if (rpcErr) console.warn('auth: has_role rpc failed', rpcErr.message)
   return hasAdmin === true
 }
 
