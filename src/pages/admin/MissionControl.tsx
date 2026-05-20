@@ -555,6 +555,9 @@ export default function MissionControl() {
           </div>
         </div>
 
+        {/* ── Signup Capacity — how many new signups can be absorbed ── */}
+        <SignupCapacityCard />
+
         {/* ── GO / NO-GO Banner ── */}
         {gov ? (
           <Card className={`border-2 ${gov.verdict === 'safe' ? 'border-success/50 bg-success/5' : 'border-destructive/50 bg-destructive/5'}`}>
