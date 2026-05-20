@@ -31,6 +31,8 @@ interface QueueAccount {
   starting_balance: number;
   total_pnl: number;
   highest_balance: number;
+  daily_pnl?: number;
+  rule_snapshot?: { max_daily_loss_percent?: number; max_total_drawdown_percent?: number } | null;
   created_at: string;
   updated_at: string;
   last_trade_at?: string | null;
@@ -148,6 +150,11 @@ export function ReviewQueueCard({ account, onViewDetails, onActionComplete, isSe
           violations={account.violations}
           flagsCount={account.flags_count}
           payoutAmount={account.payout_amount}
+          startingBalance={account.starting_balance}
+          currentBalance={account.current_balance}
+          highestBalance={account.highest_balance}
+          dailyPnl={account.daily_pnl}
+          ruleSnapshot={account.rule_snapshot}
         />
 
         {/* Timestamp and action */}
