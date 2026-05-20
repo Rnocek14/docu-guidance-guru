@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { TrendingUp, Target } from 'lucide-react';
 import type { Account, Cohort, PayoutEligibility } from '@/lib/types';
 import { isTerminalPaid } from '@/lib/types';
@@ -113,6 +113,7 @@ export default function TraderDashboard() {
       return data as unknown as PayoutEligibility;
     },
     enabled: !!activeAccount?.id && isPerformanceAccount,
+    placeholderData: keepPreviousData,
   });
 
   // Fetch clean payout count for ladder progression (per account lineage)
@@ -140,6 +141,7 @@ export default function TraderDashboard() {
       return count ?? 0;
     },
     enabled: !!activeAccount?.id && !!isPerformanceAccount,
+    placeholderData: keepPreviousData,
   });
 
   const ladderProgress = useMemo(
