@@ -24,13 +24,16 @@ const Help = lazy(() => import("./pages/Help"));
 const PublicPayoutShare = lazy(() => import("./pages/PublicPayoutShare"));
 const PayoutWall = lazy(() => import("./pages/PayoutWall"));
 
-const TraderDashboard = lazy(() => import("./pages/trader/TraderDashboard"));
-const TraderAccounts = lazy(() => import("./pages/trader/TraderAccounts"));
-const TraderTrades = lazy(() => import("./pages/trader/TraderTrades"));
-const TraderPayouts = lazy(() => import("./pages/trader/TraderPayouts"));
-const PayoutRequest = lazy(() => import("./pages/trader/PayoutRequest"));
-const AccountDetails = lazy(() => import("./pages/trader/AccountDetails"));
-const ResetCheckout = lazy(() => import("./pages/ResetCheckout"));
+// Trader pages are eagerly imported. Traders click between Dashboard/Accounts/
+// Trades/Payouts constantly — a lazy Suspense fallback made every click flash
+// a full-screen spinner.
+import TraderDashboard from "./pages/trader/TraderDashboard";
+import TraderAccounts from "./pages/trader/TraderAccounts";
+import TraderTrades from "./pages/trader/TraderTrades";
+import TraderPayouts from "./pages/trader/TraderPayouts";
+import PayoutRequest from "./pages/trader/PayoutRequest";
+import AccountDetails from "./pages/trader/AccountDetails";
+import ResetCheckout from "./pages/ResetCheckout";
 
 // Risk + admin pages are eagerly imported. The operator (you) hits these
 // dozens of times a day; lazy chunks made every click feel like a full
@@ -64,11 +67,11 @@ const AffiliateApply = lazy(() => import("./pages/affiliate/AffiliateApply"));
 const AffiliateDashboard = lazy(() => import("./pages/affiliate/AffiliateDashboard"));
 
 function PageLoader() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-    </div>
-  );
+  // Render nothing during chunk loads so the previous page stays visible
+  // instead of flashing a full-screen spinner. Chunks for trader/risk/admin
+  // pages are eagerly imported, so this only kicks in for rarely-used public
+  // routes (signup, public share, etc.) where a brief blank frame is fine.
+  return null;
 }
 
 // Cache queries across page navigations so clicking sidebar links feels
