@@ -396,7 +396,7 @@ export default function SupportEmails() {
         </div>
 
         {/* Keyboard hints */}
-        <div className="flex gap-3 text-xs text-muted-foreground/60">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground/60">
           <span><kbd className="px-1 py-0.5 rounded border text-[10px]">J</kbd>/<kbd className="px-1 py-0.5 rounded border text-[10px]">K</kbd> navigate</span>
           <span><kbd className="px-1 py-0.5 rounded border text-[10px]">Enter</kbd> select</span>
           <span><kbd className="px-1 py-0.5 rounded border text-[10px]">A</kbd> archive</span>
@@ -404,104 +404,107 @@ export default function SupportEmails() {
           <span><kbd className="px-1 py-0.5 rounded border text-[10px]">Esc</kbd> clear</span>
         </div>
 
-        {/* Main layout: list + detail */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Main layout: list + detail (equal-height, independent scroll) */}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4 h-[calc(100vh-260px)] min-h-[520px]">
           {/* Email list */}
-          <div className="space-y-1 max-h-[calc(100vh-420px)] overflow-y-auto">
+          <Card className="flex flex-col overflow-hidden">
             {emails && emails.length > 0 && (
-              <div className="flex items-center gap-2 px-2 py-1">
+              <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/30">
                 <Checkbox
                   checked={selectedIds.size === emails.length && emails.length > 0}
                   onCheckedChange={toggleSelectAll}
                 />
-                <span className="text-xs text-muted-foreground">Select all</span>
+                <span className="text-xs text-muted-foreground">
+                  {selectedIds.size > 0 ? `${selectedIds.size} selected` : `${emails.length} emails`}
+                </span>
               </div>
             )}
-            {isLoading && <p className="text-muted-foreground text-sm p-4">Loading...</p>}
-            {emails?.length === 0 && !isLoading && (
-              <Card>
-                <CardContent className="p-6 text-center text-muted-foreground">
-                  No emails found.
-                </CardContent>
-              </Card>
-            )}
-            {emails?.map((email, idx) => (
-              <Card
-                key={email.id}
-                className={`cursor-pointer transition-colors hover:border-primary/50 ${
-                  selectedEmail?.id === email.id ? 'border-primary' : ''
-                } ${selectedIndex === idx ? 'ring-1 ring-primary/40' : ''}`}
-              >
-                <CardContent className="p-3">
-                  <div className="flex items-start gap-2">
+            <div className="flex-1 overflow-y-auto divide-y">
+              {isLoading && <p className="text-muted-foreground text-sm p-4">Loading...</p>}
+              {emails?.length === 0 && !isLoading && (
+                <div className="p-8 text-center text-muted-foreground text-sm">No emails found.</div>
+              )}
+              {emails?.map((email, idx) => {
+                const isSelected = selectedEmail?.id === email.id;
+                const isHighlighted = selectedIndex === idx;
+                return (
+                  <div
+                    key={email.id}
+                    className={`group flex items-start gap-2.5 px-3 py-2.5 cursor-pointer transition-colors border-l-2 ${
+                      isSelected
+                        ? 'bg-primary/5 border-l-primary'
+                        : isHighlighted
+                        ? 'bg-muted/40 border-l-primary/40'
+                        : 'border-l-transparent hover:bg-muted/30'
+                    }`}
+                  >
                     <div className="pt-0.5" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selectedIds.has(email.id)}
                         onCheckedChange={() => toggleSelect(email.id)}
                       />
                     </div>
-                    <div className="min-w-0 flex-1" onClick={() => {
-                      handleEmailSelect(email);
-                      setSelectedIndex(idx);
-                    }}>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <p className="text-sm font-medium truncate">{email.subject || '(no subject)'}</p>
-                            {email.auto_sendable && <span title="Auto-sendable"><Zap className="h-3 w-3 text-green-500 shrink-0" /></span>}
-                            {email.human_override && <span title="Human override"><Shield className="h-3 w-3 text-orange-500 shrink-0" /></span>}
-                          </div>
-                          <p className="text-xs text-muted-foreground truncate">{email.from_address}</p>
-                          {email.ai_summary && (
-                            <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{email.ai_summary}</p>
-                          )}
-                        </div>
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <Badge variant="outline" className={TAG_COLORS[email.tag] || ''}>
-                            {TAG_LABELS[email.tag] || email.tag}
-                          </Badge>
-                          <div className="flex items-center gap-1 flex-wrap justify-end">
-                            {email.confidence > 0 && confidenceBadge(email.confidence)}
-                            {email.needs_human && (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
-                                Human
-                              </Badge>
-                            )}
-                            {email.facts_filtered && (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 bg-destructive/10 text-destructive border-destructive/20">
-                                Filtered
-                              </Badge>
-                            )}
-                          </div>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDistanceToNow(new Date(email.created_at), { addSuffix: true })}
+                    <div
+                      className="min-w-0 flex-1"
+                      onClick={() => {
+                        handleEmailSelect(email);
+                        setSelectedIndex(idx);
+                      }}
+                    >
+                      {/* Row 1: subject + time */}
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium truncate flex-1">{email.subject || '(no subject)'}</p>
+                        {email.auto_sendable && <span title="Auto-sendable"><Zap className="h-3 w-3 text-green-500 shrink-0" /></span>}
+                        {email.human_override && <span title="Human override"><Shield className="h-3 w-3 text-orange-500 shrink-0" /></span>}
+                        <span className="text-[11px] text-muted-foreground shrink-0">
+                          {formatDistanceToNow(new Date(email.created_at), { addSuffix: false })}
+                        </span>
+                      </div>
+                      {/* Row 2: sender */}
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">{email.from_address}</p>
+                      {/* Row 3: summary */}
+                      {email.ai_summary && (
+                        <p className="text-xs text-muted-foreground/80 mt-1 line-clamp-1">{email.ai_summary}</p>
+                      )}
+                      {/* Row 4: meta badges inline */}
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${TAG_COLORS[email.tag] || ''}`}>
+                          {TAG_LABELS[email.tag] || email.tag}
+                        </Badge>
+                        {email.confidence > 0 && (
+                          <span className={`text-[10px] font-medium ${
+                            email.confidence >= 0.85 ? 'text-green-600' :
+                            email.confidence >= 0.6 ? 'text-yellow-600' : 'text-destructive'
+                          }`}>
+                            {Math.round(email.confidence * 100)}%
                           </span>
-                        </div>
+                        )}
+                        {email.needs_human && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
+                            Human
+                          </Badge>
+                        )}
+                        {email.facts_filtered && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-destructive/10 text-destructive border-destructive/20">
+                            Filtered
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          </Card>
 
           {/* Detail pane */}
-          <div>
+          <div className="min-h-0">
             {selectedEmail ? (
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <CardTitle className="text-lg">{selectedEmail.subject}</CardTitle>
-                      <CardDescription className="flex items-center gap-2 mt-1">
-                        <User className="h-3 w-3" />
-                        {selectedEmail.from_address}
-                        {selectedEmail.matched_user_id && (
-                          <Badge variant="outline" className="text-xs">Matched User</Badge>
-                        )}
-                      </CardDescription>
-                    </div>
-                    <div className="flex flex-wrap gap-1 justify-end">
+              <Card className="flex flex-col h-full overflow-hidden">
+                <CardHeader className="pb-3 border-b shrink-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <CardTitle className="text-lg leading-tight">{selectedEmail.subject}</CardTitle>
+                    <div className="flex flex-wrap gap-1 justify-end shrink-0">
                       <Badge variant="outline" className={TAG_COLORS[selectedEmail.tag] || ''}>
                         <Tag className="h-3 w-3 mr-1" />
                         {TAG_LABELS[selectedEmail.tag]}
@@ -514,8 +517,17 @@ export default function SupportEmails() {
                       )}
                     </div>
                   </div>
+                  <CardDescription className="flex items-center gap-2 mt-2 flex-wrap">
+                    <User className="h-3 w-3" />
+                    <span className="truncate">{selectedEmail.from_address}</span>
+                    {selectedEmail.matched_user_id && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">Matched User</Badge>
+                    )}
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-xs">{formatDistanceToNow(new Date(selectedEmail.created_at), { addSuffix: true })}</span>
+                  </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-4 flex-1 overflow-y-auto pt-4">
                   {/* AI Telemetry bar */}
                   <div className="flex flex-wrap gap-3 text-xs text-muted-foreground bg-muted/30 rounded-md p-2">
                     <span className="flex items-center gap-1">
@@ -590,24 +602,10 @@ export default function SupportEmails() {
                       <Textarea
                         value={editedReply}
                         onChange={(e) => setEditedReply(e.target.value)}
-                        rows={8}
+                        rows={6}
                         placeholder="Write or edit the AI-drafted reply..."
                         className="text-sm"
                       />
-                      <div className="flex gap-2 mt-2">
-                        <Button
-                          onClick={handleSend}
-                          disabled={!editedReply.trim() || sendReply.isPending || !user}
-                          className="gap-2"
-                          title={!user ? 'Login required to send replies' : undefined}
-                        >
-                          <Send className="h-4 w-4" />
-                          {!user ? 'Login Required' : sendReply.isPending ? 'Sending...' : 'Send Reply'}
-                        </Button>
-                        <Button variant="outline" onClick={() => handleArchive(selectedEmail.id)}>
-                          <Archive className="h-4 w-4 mr-1" /> Archive
-                        </Button>
-                      </div>
                     </div>
                   )}
 
@@ -625,9 +623,25 @@ export default function SupportEmails() {
                     </div>
                   )}
                 </CardContent>
+                {selectedEmail.status !== 'sent' && (
+                  <div className="border-t bg-muted/20 px-6 py-3 flex gap-2 shrink-0">
+                    <Button
+                      onClick={handleSend}
+                      disabled={!editedReply.trim() || sendReply.isPending || !user}
+                      className="gap-2"
+                      title={!user ? 'Login required to send replies' : undefined}
+                    >
+                      <Send className="h-4 w-4" />
+                      {!user ? 'Login Required' : sendReply.isPending ? 'Sending...' : 'Send Reply'}
+                    </Button>
+                    <Button variant="outline" onClick={() => handleArchive(selectedEmail.id)}>
+                      <Archive className="h-4 w-4 mr-1" /> Archive
+                    </Button>
+                  </div>
+                )}
               </Card>
             ) : (
-              <Card>
+              <Card className="h-full flex items-center justify-center">
                 <CardContent className="p-12 text-center text-muted-foreground">
                   <Mail className="h-12 w-12 mx-auto mb-3 opacity-30" />
                   <p>Select an email to view details and send replies</p>
