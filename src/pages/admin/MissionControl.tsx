@@ -98,7 +98,7 @@ function useActionItems() {
       // Parallel fetch all action sources
       const [payoutsRes, flagsRes, cronConfigRes, cronRunsRes, failedPaymentsRes] = await Promise.all([
         supabase.from('payouts').select('id, status, amount, updated_at, account_id')
-          .in('status', ['pending', 'under_review', 'approved', 'payment_failed']),
+          .in('status', ['pending', 'under_review', 'approved']),
         supabase.from('flags').select('id, flag_type, reason, severity, account_id, created_at')
           .eq('status', 'pending').order('created_at', { ascending: false }).limit(10),
         supabase.from('cron_health_config').select('*').eq('enabled', true),
@@ -122,16 +122,19 @@ function useActionItems() {
         });
       }
 
-      // Failed payments
-      const failedPayouts = (payoutsRes.data || []).filter(p => p.status === 'payment_failed');
-      if (failedPayouts.length > 0) {
+      // Failed payments — read from payout_payments (the actual state-of-record).
+      // The payouts.status enum has 'payment_failed', but the production state
+      // machine reverts to 'approved' on failure and writes the failure on the
+      // payout_payments row instead.
+      const failedPayments = failedPaymentsRes.data || [];
+      if (failedPayments.length > 0) {
         items.push({
           id: 'failed-payments',
           type: 'payout',
           severity: 'red',
-          title: `${failedPayouts.length} payout payment${failedPayouts.length > 1 ? 's' : ''} failed`,
+          title: `${failedPayments.length} payout payment${failedPayments.length > 1 ? 's' : ''} failed`,
           detail: 'Requires manual investigation',
-          link: '/risk/queue?status=payment_failed',
+          link: '/risk/queue?tab=failed-payments',
         });
       }
 
