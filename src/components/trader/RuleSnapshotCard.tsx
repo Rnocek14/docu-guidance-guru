@@ -108,9 +108,11 @@ export function RuleSnapshotCard({ ruleSnapshot }: RuleSnapshotCardProps) {
             </div>
           ))}
         </div>
-        <p className="text-xs text-muted-foreground border-t pt-4">
-          Frozen on {format(new Date(ruleSnapshot.frozen_at), 'PPP \'at\' p')}
-        </p>
+        {ruleSnapshot.frozen_at && !isNaN(new Date(ruleSnapshot.frozen_at).getTime()) && (
+          <p className="text-xs text-muted-foreground border-t pt-4">
+            Frozen on {format(new Date(ruleSnapshot.frozen_at), 'PPP \'at\' p')}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
