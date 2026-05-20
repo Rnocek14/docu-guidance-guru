@@ -8,6 +8,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 // Solo-operator steady-state ceiling (see capacity-monitoring memory)
 const FUNDED_CEILING = 500;
+// Comfort zone — where ops load stays manageable for a solo operator
+const COMFORT_TARGET = 200;
 // Assumed average funded-account tenure in months before churn/breach/cap-out
 const AVG_FUNDED_TENURE_MONTHS = 3;
 // Fixed monthly opex floor — below this signup volume, margin gets thin
@@ -47,8 +49,11 @@ export function SignupCapacityCard() {
       const state = (throttle?.state ?? 'green') as 'green' | 'yellow' | 'orange' | 'red';
 
       const headroom = Math.max(FUNDED_CEILING - funded, 0);
+      const comfortHeadroom = Math.max(COMFORT_TARGET - funded, 0);
       // Safe new signups per month = funded-headroom / pass-rate / tenure
-      const headroomBased = Math.floor(headroom / passRate / AVG_FUNDED_TENURE_MONTHS);
+      // We base the recommendation on the COMFORT target, not the hard ceiling.
+      const comfortBased = Math.floor(comfortHeadroom / passRate / AVG_FUNDED_TENURE_MONTHS);
+      const ceilingBased = Math.floor(headroom / passRate / AVG_FUNDED_TENURE_MONTHS);
       // Throttle multiplier (matches the auto-throttle states)
       const throttleMultiplier = !purchaseEnabled
         ? 0
@@ -61,7 +66,11 @@ export function SignupCapacityCard() {
               : 1.0;
 
       const safeMonthly = Math.max(
-        Math.floor(headroomBased * throttleMultiplier),
+        Math.floor(comfortBased * throttleMultiplier),
+        0,
+      );
+      const maxMonthly = Math.max(
+        Math.floor(ceilingBased * throttleMultiplier),
         0,
       );
       const safeDaily = Math.max(Math.floor(safeMonthly / 30), 0);
@@ -69,12 +78,15 @@ export function SignupCapacityCard() {
       return {
         funded,
         headroom,
+        comfortHeadroom,
         passRatePct: passRate * 100,
         purchaseEnabled,
         state,
         safeMonthly,
+        maxMonthly,
         safeDaily,
-        utilizationPct: Math.min(100, Math.round((funded / FUNDED_CEILING) * 100)),
+        comfortPct: Math.min(100, Math.round((funded / COMFORT_TARGET) * 100)),
+        ceilingPct: Math.min(100, Math.round((funded / FUNDED_CEILING) * 100)),
       };
     },
   });
@@ -120,17 +132,24 @@ export function SignupCapacityCard() {
               <span className="text-sm text-muted-foreground">/ month</span>
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              ≈ {data.safeDaily.toLocaleString()} per day
+              ≈ {data.safeDaily.toLocaleString()} per day · comfort-zone pace
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Absolute max: {data.maxMonthly.toLocaleString()}/mo (stretches ops to the ceiling)
             </p>
           </div>
           <div>
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-semibold">{data.funded}</span>
-              <span className="text-sm text-muted-foreground">/ {FUNDED_CEILING} funded</span>
+              <span className="text-sm text-muted-foreground">
+                / {COMFORT_TARGET} comfort · {FUNDED_CEILING} ceiling
+              </span>
             </div>
-            <Progress value={data.utilizationPct} className="mt-2 h-2" />
+            <Progress value={data.comfortPct} className="mt-2 h-2" />
             <p className="text-xs text-muted-foreground mt-1">
-              {data.headroom} funded-account slots available
+              {data.comfortHeadroom > 0
+                ? `${data.comfortHeadroom} slots until comfort target`
+                : `${data.headroom} slots until hard ceiling (past comfort zone)`}
             </p>
           </div>
         </div>
