@@ -9,7 +9,6 @@ import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ScrollToHash } from "@/components/ScrollToHash";
-import { Loader2 } from "lucide-react";
 import { captureReferralFromUrl } from "@/lib/referral";
 
 // Lazy-loaded pages
