@@ -429,11 +429,17 @@ Deno.serve(async (req) => {
           try {
             ;({ payload, markdown } = await directScrape(targetUrl, kind, openaiKey))
           } catch (directErr) {
+            const directMsg = directErr instanceof Error ? directErr.message : 'unknown direct error'
+            console.error(`direct failed for ${firmId}: ${directMsg}`)
             // Auto-fallback to Firecrawl if available — Cloudflare / JS-rendered sites
             if (firecrawlKey) {
-              console.warn(`direct failed for ${firmId}, falling back to firecrawl:`, directErr)
-              ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey))
-              usedStrategy = 'firecrawl'
+              try {
+                ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey))
+                usedStrategy = 'firecrawl'
+              } catch (fcErr) {
+                const fcMsg = fcErr instanceof Error ? fcErr.message : 'unknown firecrawl error'
+                throw new Error(`direct: ${directMsg} | firecrawl: ${fcMsg}`)
+              }
             } else {
               throw directErr
             }
