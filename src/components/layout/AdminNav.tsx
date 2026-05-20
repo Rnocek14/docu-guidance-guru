@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import {
   LayoutDashboard, Shield, AlertTriangle, Users, Settings,
-  FileText, Flag, CreditCard, Activity, Cpu, Wrench, Plug, LineChart, Gift, Handshake, Gauge,
+  FileText, Flag, CreditCard, Activity, Cpu, Wrench, Plug, LineChart, Gift, Handshake, Gauge, Inbox,
 } from 'lucide-react';
 
 interface NavItem {
