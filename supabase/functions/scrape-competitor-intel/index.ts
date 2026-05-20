@@ -346,6 +346,14 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders })
 
   try {
+    const dbgAuth = req.headers.get('Authorization') ?? ''
+    const dbgCron = req.headers.get('X-Cron-Secret') ?? ''
+    console.log('DBG req', {
+      hasAuth: dbgAuth.length > 0,
+      authPrefix: dbgAuth.slice(0, 24),
+      hasCron: dbgCron.length > 0,
+      method: req.method,
+    })
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY') ?? ''
