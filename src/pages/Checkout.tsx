@@ -129,7 +129,7 @@ export default function Checkout() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate("/#pricing")}
+            onClick={() => navigate(-1)}
             className="gap-1.5"
           >
             <ArrowLeft className="h-4 w-4" />
