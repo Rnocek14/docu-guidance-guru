@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import {
   LayoutDashboard, Shield, AlertTriangle, Users, Settings,
-  FileText, Flag, CreditCard, Activity, Cpu, Wrench, Plug, LineChart, Gift, Handshake, Gauge,
+  FileText, Flag, CreditCard, Activity, Cpu, Wrench, Plug, LineChart, Gift, Handshake, Gauge, Inbox,
 } from 'lucide-react';
 
 interface NavItem {
@@ -27,6 +27,7 @@ const DAILY: NavItem[] = [
   { label: 'Mission Control', href: '/admin', icon: <Cpu className="h-5 w-5" />, section: 'daily' },
   { label: 'Review Queue', href: '/risk/queue', icon: <Flag className="h-5 w-5" />, section: 'daily' },
   { label: 'Treasury', href: '/admin/treasury', icon: <Gauge className="h-5 w-5" />, section: 'daily' },
+  { label: 'Email Triage', href: '/admin/support-emails', icon: <Inbox className="h-5 w-5" />, section: 'daily' },
   { label: 'Audit Logs', href: '/admin/audit', icon: <FileText className="h-5 w-5" />, section: 'daily' },
 ];
 
@@ -44,7 +45,6 @@ const TOOLS: NavItem[] = [
   { label: 'Tier Readiness', href: '/admin/tier-readiness', icon: <Shield className="h-5 w-5" />, section: 'Tools' },
   { label: 'Launch Readiness', href: '/admin/readiness', icon: <Shield className="h-5 w-5" />, section: 'Tools' },
   { label: 'QA Scan', href: '/admin/qa-scan', icon: <Activity className="h-5 w-5" />, section: 'Tools' },
-  { label: 'Email Triage', href: '/admin/support-emails', icon: <FileText className="h-5 w-5" />, section: 'Tools' },
   { label: 'Affiliates', href: '/admin/affiliates', icon: <Handshake className="h-5 w-5" />, section: 'Tools' },
   { label: 'Share Bonuses', href: '/admin/share-bonuses', icon: <Gift className="h-5 w-5" />, section: 'Tools' },
   { label: 'WealthCharts Setup', href: '/admin/wealthcharts', icon: <Plug className="h-5 w-5" />, section: 'Tools' },
