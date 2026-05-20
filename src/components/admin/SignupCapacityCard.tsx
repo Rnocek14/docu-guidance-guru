@@ -132,10 +132,10 @@ export function SignupCapacityCard() {
               <span className="text-sm text-muted-foreground">/ month</span>
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              ≈ {data.safeDaily.toLocaleString()} per day · comfort-zone pace
+              ≈ {(data.safeDaily ?? 0).toLocaleString()} per day · comfort-zone pace
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Absolute max: {data.maxMonthly.toLocaleString()}/mo (stretches ops to the ceiling)
+              Absolute max: {(data.maxMonthly ?? 0).toLocaleString()}/mo (stretches ops to the ceiling)
             </p>
           </div>
           <div>
