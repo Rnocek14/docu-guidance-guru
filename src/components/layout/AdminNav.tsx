@@ -26,15 +26,15 @@ interface NavItem {
 const DAILY: NavItem[] = [
   { label: 'Mission Control', href: '/admin', icon: <Cpu className="h-5 w-5" />, section: 'daily' },
   { label: 'Review Queue', href: '/risk/queue', icon: <Flag className="h-5 w-5" />, section: 'daily' },
-  { label: 'Payout Liability', href: '/admin/liability', icon: <CreditCard className="h-5 w-5" />, section: 'daily' },
-  { label: 'Full Governor', href: '/admin/governor', icon: <Shield className="h-5 w-5" />, section: 'daily' },
-  { label: 'Risk Dashboard', href: '/risk', icon: <AlertTriangle className="h-5 w-5" />, section: 'daily' },
-  { label: 'Morning Checks', href: '/admin/ops-metrics', icon: <Activity className="h-5 w-5" />, section: 'daily' },
+  { label: 'Treasury', href: '/admin/treasury', icon: <Gauge className="h-5 w-5" />, section: 'daily' },
   { label: 'Audit Logs', href: '/admin/audit', icon: <FileText className="h-5 w-5" />, section: 'daily' },
 ];
 
 const TOOLS: NavItem[] = [
-  { label: 'Treasury / Scaling', href: '/admin/treasury', icon: <Gauge className="h-5 w-5" />, section: 'Tools' },
+  { label: 'Full Governor', href: '/admin/governor', icon: <Shield className="h-5 w-5" />, section: 'Tools' },
+  { label: 'Payout Liability', href: '/admin/liability', icon: <CreditCard className="h-5 w-5" />, section: 'Tools' },
+  { label: 'Risk Dashboard', href: '/risk', icon: <AlertTriangle className="h-5 w-5" />, section: 'Tools' },
+  { label: 'Morning Checks', href: '/admin/ops-metrics', icon: <Activity className="h-5 w-5" />, section: 'Tools' },
   { label: 'Monte Carlo', href: '/admin/monte-carlo', icon: <Activity className="h-5 w-5" />, section: 'Tools' },
   { label: 'Cohort Projection', href: '/admin/projection', icon: <LineChart className="h-5 w-5" />, section: 'Tools' },
   { label: 'System Overview', href: '/admin/system', icon: <Shield className="h-5 w-5" />, section: 'Tools' },
