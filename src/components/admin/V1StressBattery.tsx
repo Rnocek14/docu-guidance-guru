@@ -570,18 +570,23 @@ export function V1StressBattery() {
   const [result, setResult] = useState<StressBatteryResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
 
   const handleRun = useCallback(() => {
     setIsRunning(true);
     setElapsed(0);
+    setProgress({ done: 0, total: 34, label: 'Starting…' });
     const start = Date.now();
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        const r = runStressBattery();
+        const r = await runStressBattery((done, total, label) => {
+          setProgress({ done, total, label });
+        });
         setResult(r);
         setElapsed(Date.now() - start);
       } finally {
         setIsRunning(false);
+        setProgress(null);
       }
     }, 50);
   }, []);
@@ -605,6 +610,19 @@ export function V1StressBattery() {
             {isRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
             {isRunning ? 'Running…' : 'Run Stress Battery'}
           </Button>
+          {isRunning && progress && (
+            <div className="mt-4 w-full max-w-md">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${(progress.done / progress.total) * 100}%` }}
+                />
+              </div>
+              <p className="mt-2 text-center text-xs text-muted-foreground">
+                {progress.done} / {progress.total} — {progress.label}
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     );
