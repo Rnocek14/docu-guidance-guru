@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, riskNavItems, adminNavItems } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,7 +24,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { AlertTriangle, Clock, DollarSign, RefreshCw, Users, Keyboard, Search, X } from 'lucide-react';
+import { AlertTriangle, Clock, DollarSign, RefreshCw, Users, Keyboard, Search, X, Flag, Info } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Violation } from '@/lib/types';
 import { sortByPriority, calculatePriorityScore, getPriorityLabel } from '@/lib/queue-priority';
@@ -65,15 +65,64 @@ const statusFilters = [
   { value: 'all', label: 'All Pending', icon: Users },
   { value: 'breached_detected', label: 'Breaches', icon: AlertTriangle },
   { value: 'under_review', label: 'Under Review', icon: Clock },
+  { value: 'flags', label: 'Open Flags', icon: Flag },
   { value: 'payout_requested', label: 'Payouts', icon: DollarSign },
 ];
+
+const tabContext: Record<string, { title: string; what: string; why: string; action: string }> = {
+  all: {
+    title: 'All Pending Reviews',
+    what: 'Every account currently waiting on a human decision — breaches, manual reviews, and payout requests combined.',
+    why: 'A single triage view so nothing falls through the cracks. Sorted by priority score (severity + age).',
+    action: 'Work top-down. Highest-priority items render first.',
+  },
+  breached_detected: {
+    title: 'Breaches — Detected by the System',
+    what: 'Accounts the rule engine flagged as having violated a hard rule (daily loss, total drawdown, position size, etc.).',
+    why: 'The system has paused trading but is waiting on you to confirm the breach or override it (e.g. bad market data, platform glitch). Money does not move until you decide.',
+    action: 'Open each card → review the Breach Explainer and Rule Snapshot → Confirm Breach or Reverse.',
+  },
+  under_review: {
+    title: 'Under Manual Review',
+    what: 'Accounts a human (you, support, or risk) placed on hold — usually for suspicious activity, fraud signals, or KYC follow-up.',
+    why: 'Trading is paused while you investigate. These do not auto-resolve; they sit here until you act.',
+    action: 'Review the timeline + flags → either clear the account back to active or escalate to a breach.',
+  },
+  flags: {
+    title: 'Open Flags',
+    what: 'Accounts with one or more pending fraud / risk flags raised by the system (cluster risk, hedging patterns, chargeback exposure, geo mismatch, payment anomalies, etc.).',
+    why: 'Flags are advisory — they do not auto-pause the account, but they highlight behavior that needs your eyes before the next payout or tier-up. Closing a flag (or escalating to a breach) is required to keep the queue clean.',
+    action: 'Open each → read the flag reason and timeline → Resolve (false positive), Acknowledge, or escalate to Under Review / Breach.',
+  },
+  payout_requested: {
+    title: 'Payout Requests',
+    what: 'Traders who have submitted a withdrawal and are waiting for approval. Includes both newly requested and already-under-review payouts.',
+    why: 'Every payout needs a clean-payout check (rule compliance, reserve gate, breaker level, fraud signals) before money leaves. The system pre-screens; you give the final yes/no.',
+    action: 'Open each → verify the trader\'s rule snapshot, recent activity, and any flags → Approve or Deny.',
+  },
+};
 
 export default function ReviewQueue() {
   const { roles } = useAuth();
   const isAdmin = roles.includes('admin');
   const navItems = isAdmin ? adminNavItems : riskNavItems;
   const navigate = useNavigate();
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'all';
+  const [statusFilter, setStatusFilter] = useState(initialTab);
+
+  // Keep URL in sync so Mission Control deep links remain valid
+  useEffect(() => {
+    const current = searchParams.get('tab');
+    if (statusFilter === 'all' && current) {
+      searchParams.delete('tab');
+      setSearchParams(searchParams, { replace: true });
+    } else if (statusFilter !== 'all' && current !== statusFilter) {
+      searchParams.set('tab', statusFilter);
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const gridRef = useRef<HTMLDivElement>(null);
@@ -90,6 +139,9 @@ export default function ReviewQueue() {
 
       if (statusFilter === 'all') {
         query = query.in('status', ['breached_detected', 'under_review', 'payout_requested', 'payout_under_review'] as const);
+      } else if (statusFilter === 'flags') {
+        // Accounts surface here when they have ≥1 pending flag — fetch a wider candidate set
+        query = query.in('status', ['active', 'under_review', 'breached_detected', 'payout_requested', 'payout_under_review'] as const);
       } else {
         query = query.eq('status', statusFilter as 'breached_detected' | 'under_review' | 'payout_requested' | 'payout_under_review');
       }
@@ -172,7 +224,13 @@ export default function ReviewQueue() {
         priority_score: calculatePriorityScore(account, violationsMap.get(account.id)),
       }));
 
-      return sortByPriority(withPriority, violationsMap as unknown as Map<string, { rule_type: string; actual_value: number | null; rule_threshold: number | null }[]>);
+      const sorted = sortByPriority(withPriority, violationsMap as unknown as Map<string, { rule_type: string; actual_value: number | null; rule_threshold: number | null }[]>);
+
+      // Filter to flagged-only when on the Flags tab
+      if (statusFilter === 'flags') {
+        return sorted.filter(a => (a.flags_count || 0) > 0);
+      }
+      return sorted;
     },
   });
 
@@ -263,6 +321,7 @@ export default function ReviewQueue() {
     all: accounts?.length || 0,
     breached_detected: accounts?.filter(a => a.status === 'breached_detected').length || 0,
     under_review: accounts?.filter(a => a.status === 'under_review').length || 0,
+    flags: accounts?.filter(a => (a.flags_count || 0) > 0).length || 0,
     payout_requested: accounts?.filter(a => ['payout_requested', 'payout_under_review'].includes(a.status)).length || 0,
   };
 
@@ -345,6 +404,34 @@ export default function ReviewQueue() {
             </p>
           )}
         </div>
+
+        {/* Per-tab context: what am I reviewing and why */}
+        {tabContext[statusFilter] && (
+          <Card className="border-l-4 border-l-primary/60 bg-muted/30">
+            <CardHeader className="py-4">
+              <div className="flex items-start gap-3">
+                <Info className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                <div className="space-y-2">
+                  <CardTitle className="text-base">{tabContext[statusFilter].title}</CardTitle>
+                  <div className="grid gap-2 sm:grid-cols-3 text-sm">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">What</p>
+                      <p className="text-foreground/90">{tabContext[statusFilter].what}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Why review</p>
+                      <p className="text-foreground/90">{tabContext[statusFilter].why}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">How to act</p>
+                      <p className="text-foreground/90">{tabContext[statusFilter].action}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+          </Card>
+        )}
 
         {/* Queue list */}
         {isLoading ? (
