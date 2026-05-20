@@ -83,6 +83,54 @@ export function ReviewBrief({ account, violations, flagsCount, lastEventAt }: Re
     };
   }
 
+  // Per-case context: WHY this specific account is in review, and what to check.
+  const why: string[] = [];
+  const checks: string[] = [];
+  const discrepancies: string[] = [];
+
+  if (account.status === 'breached_detected') {
+    why.push('The rule engine detected a hard-rule breach and paused trading. Money/tier changes are blocked until you confirm or reverse.');
+    checks.push('Confirm the breach is real (not bad market data, vendor outage, or stale tick).');
+    checks.push('Compare violation actual vs threshold below — if margin is tiny, double-check the data source.');
+  } else if (account.status === 'under_review') {
+    why.push('A human placed this account on hold. It does not auto-resolve — it sits here until you clear it or escalate.');
+    checks.push('Read the timeline for the original reason it was paused.');
+    checks.push('Check open flags and recent trades for the behavior that triggered the hold.');
+  } else if (account.status === 'payout_requested' || account.status === 'payout_under_review') {
+    why.push('Trader submitted a withdrawal. System pre-screened it (rules, reserve, breaker, fraud) — your job is the final yes/no before money leaves.');
+    checks.push('Verify rule snapshot was honored across the full account lifetime.');
+    checks.push('Confirm no pending flags or recent suspicious activity since the last clean payout.');
+  } else if (flagsCount > 0) {
+    why.push(`${flagsCount} pending flag(s) raised by the system. Advisory only — trading still active — but must be cleared before next payout/tier-up.`);
+    checks.push('Open each flag, read its reason and evidence, then resolve (false positive), acknowledge, or escalate.');
+  }
+
+  // Discrepancy heuristics — surface anything that looks "off"
+  if (drawdownPercent > 8) {
+    discrepancies.push(`Drawdown ${drawdownPercent.toFixed(2)}% is elevated (>8%) — verify against rule limit before approving anything.`);
+  }
+  if (ruleSnapshot && drawdownPercent > ruleSnapshot.max_total_drawdown_percent) {
+    discrepancies.push(`Drawdown ${drawdownPercent.toFixed(2)}% exceeds snapshot limit ${ruleSnapshot.max_total_drawdown_percent}% — likely breach even if not yet flagged.`);
+  }
+  if (ruleSnapshot && dailyLossPercent > ruleSnapshot.max_daily_loss_percent) {
+    discrepancies.push(`Today's loss ${dailyLossPercent.toFixed(2)}% exceeds daily-loss limit ${ruleSnapshot.max_daily_loss_percent}% — check if a violation is missing.`);
+  }
+  if (account.trading_days_count === 0 && (account.status === 'payout_requested' || account.status === 'payout_under_review')) {
+    discrepancies.push('Payout requested with 0 recorded trading days — investigate before approving.');
+  }
+  if (ruleSnapshot && account.trading_days_count < ruleSnapshot.min_trading_days && (account.status === 'payout_requested' || account.status === 'payout_under_review')) {
+    discrepancies.push(`Trading days ${account.trading_days_count} below min ${ruleSnapshot.min_trading_days} for payout eligibility.`);
+  }
+  if (account.last_trade_at) {
+    const daysSinceTrade = differenceInDays(new Date(), new Date(account.last_trade_at));
+    if (daysSinceTrade > 14) {
+      discrepancies.push(`No trades in ${daysSinceTrade} days — account may be dormant; verify intent.`);
+    }
+  }
+  if (violations.length === 0 && account.status === 'breached_detected') {
+    discrepancies.push('Status is breached_detected but no violations recorded — data inconsistency, investigate before action.');
+  }
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -102,6 +150,37 @@ export function ReviewBrief({ account, violations, flagsCount, lastEventAt }: Re
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* WHY this case is in review */}
+        {why.length > 0 && (
+          <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Why you're reviewing this</p>
+            {why.map((w, i) => (
+              <p key={i} className="text-xs text-foreground/90">{w}</p>
+            ))}
+            {checks.length > 0 && (
+              <div className="pt-1">
+                <p className="text-xs font-medium text-muted-foreground mb-1">What to check:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-xs text-foreground/90">
+                  {checks.map((c, i) => <li key={i}>{c}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Discrepancies — anything that looks "off" */}
+        {discrepancies.length > 0 && (
+          <Alert variant="destructive" className="py-2">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            <AlertDescription className="text-xs space-y-1">
+              <p className="font-semibold">Discrepancies detected:</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                {discrepancies.map((d, i) => <li key={i}>{d}</li>)}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Account Summary */}
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div className="flex items-center gap-2">
