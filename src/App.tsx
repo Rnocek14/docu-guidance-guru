@@ -20,6 +20,7 @@ const Signup = lazy(() => import("./pages/Signup"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Checkout = lazy(() => import("./pages/Checkout"));
 const Rules = lazy(() => import("./pages/Rules"));
+const Help = lazy(() => import("./pages/Help"));
 const PublicPayoutShare = lazy(() => import("./pages/PublicPayoutShare"));
 const PayoutWall = lazy(() => import("./pages/PayoutWall"));
 
@@ -91,6 +92,7 @@ const App = () => (
             <Route path="/signup" element={<Signup />} />
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/rules" element={<Rules />} />
+            <Route path="/help" element={<Help />} />
             <Route path="/p/:shortId" element={<PublicPayoutShare />} />
             <Route path="/payouts" element={<PayoutWall />} />
 
