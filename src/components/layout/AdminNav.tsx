@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import {
   LayoutDashboard, Shield, AlertTriangle, Users, Settings,
-  FileText, Flag, CreditCard, Activity, Cpu, Wrench, Plug, LineChart, Gift, Handshake, Gauge, Inbox,
+  FileText, Flag, CreditCard, Activity, Cpu, Wrench, Plug, LineChart, Gift, Handshake, Gauge, Inbox, Eye,
 } from 'lucide-react';
 
 interface NavItem {
@@ -48,6 +48,7 @@ const TOOLS: NavItem[] = [
   { label: 'Affiliates', href: '/admin/affiliates', icon: <Handshake className="h-5 w-5" />, section: 'Tools' },
   { label: 'Share Bonuses', href: '/admin/share-bonuses', icon: <Gift className="h-5 w-5" />, section: 'Tools' },
   { label: 'WealthCharts Setup', href: '/admin/wealthcharts', icon: <Plug className="h-5 w-5" />, section: 'Tools' },
+  { label: 'Competitor Intel', href: '/admin/intel', icon: <Eye className="h-5 w-5" />, section: 'Tools' },
 ];
 
 // Advanced / experimental — keep code, hide UI. Move items here as they age out.
