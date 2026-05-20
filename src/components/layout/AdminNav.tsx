@@ -27,6 +27,7 @@ const DAILY: NavItem[] = [
   { label: 'Mission Control', href: '/admin', icon: <Cpu className="h-5 w-5" />, section: 'daily' },
   { label: 'Review Queue', href: '/risk/queue', icon: <Flag className="h-5 w-5" />, section: 'daily' },
   { label: 'Treasury', href: '/admin/treasury', icon: <Gauge className="h-5 w-5" />, section: 'daily' },
+  { label: 'Email Triage', href: '/admin/support-emails', icon: <Inbox className="h-5 w-5" />, section: 'daily' },
   { label: 'Audit Logs', href: '/admin/audit', icon: <FileText className="h-5 w-5" />, section: 'daily' },
 ];
 
