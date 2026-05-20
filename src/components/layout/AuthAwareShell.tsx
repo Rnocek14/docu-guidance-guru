@@ -16,8 +16,8 @@ interface AuthAwareShellProps {
  * so navigating to public pages from inside the app feels cohesive.
  */
 export function AuthAwareShell({ title, standalone, authed }: AuthAwareShellProps) {
-  const { user, loading } = useAuth();
-  if (loading) return null;
+  const { user, isLoading } = useAuth();
+  if (isLoading) return null;
   if (user) {
     return (
       <DashboardLayout title={title} navItems={traderNavItems}>
