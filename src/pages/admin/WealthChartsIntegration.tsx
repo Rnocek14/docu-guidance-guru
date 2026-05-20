@@ -12,9 +12,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Copy, Check, ExternalLink, KeyRound, Webhook, Link2, FileJson, ShieldCheck, AlertTriangle, BookOpen, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { SUPABASE_FUNCTIONS_URL } from '@/integrations/supabase/client';
 
-const SUPABASE_URL = 'https://sfxmgwkrjwuerfkqxokq.supabase.co';
-const PROJECT_REF = 'sfxmgwkrjwuerfkqxokq';
+// Derive project ref from the canonical functions URL (no hardcoded project ID).
+// SUPABASE_FUNCTIONS_URL is `https://<ref>.supabase.co/functions/v1`.
+const PROJECT_REF = (() => {
+  try {
+    const host = new URL(SUPABASE_FUNCTIONS_URL).host; // <ref>.supabase.co
+    return host.split('.')[0];
+  } catch {
+    return '';
+  }
+})();
 
 const STORAGE_KEY = 'meridian.wealthcharts.intake.v1';
 
