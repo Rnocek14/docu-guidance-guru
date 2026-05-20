@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -54,6 +54,7 @@ function RuleList({ rules }: { rules: { label: string; description: string }[] }
 
 export default function Rules() {
   const tracked = useRef(false);
+  const navigate = useNavigate();
   useEffect(() => {
     if (!tracked.current) { tracked.current = true; track('rules_view'); }
   }, []);
@@ -77,8 +78,8 @@ export default function Rules() {
 
       <main className="container mx-auto px-4 py-12 max-w-4xl space-y-12">
         <div>
-          <Button asChild variant="ghost" size="sm" className="gap-1.5 mb-6">
-            <Link to="/"><ArrowLeft className="h-4 w-4" /> Back</Link>
+          <Button variant="ghost" size="sm" className="gap-1.5 mb-6" onClick={() => navigate(-1)}>
+            <ArrowLeft className="h-4 w-4" /> Back
           </Button>
           <h1 className="text-4xl font-bold mb-4">Evaluation Rules</h1>
           <p className="text-muted-foreground text-lg">
