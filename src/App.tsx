@@ -71,7 +71,20 @@ function PageLoader() {
   );
 }
 
-const queryClient = new QueryClient();
+// Cache queries across page navigations so clicking sidebar links feels
+// instant — previously each route remount refetched (staleTime defaults to 0),
+// producing a ~1s skeleton flash on every click. Realtime subscriptions
+// (see use-realtime-accounts) still invalidate on actual data changes.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      refetchOnMount: false,
+    },
+  },
+});
 
 function ReferralCapture() {
   useEffect(() => { captureReferralFromUrl(); }, []);
