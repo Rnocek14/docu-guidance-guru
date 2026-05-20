@@ -25,6 +25,12 @@ const corsHeaders = {
 }
 
 const FIRECRAWL_URL = 'https://api.firecrawl.dev/v2/scrape'
+const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
+const OPENAI_MODEL = 'gpt-4o-mini'
+
+// Browser-like UA so most landing pages return real HTML rather than a stub.
+const UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Extraction schemas — keep tight so diffs are semantic, not textual
@@ -81,6 +87,131 @@ const FULL_SCHEMA = {
 }
 
 type ScrapeKind = 'weekly' | 'promo_daily'
+type FetchStrategy = 'direct' | 'firecrawl'
+
+// ────────────────────────────────────────────────────────────────────────────
+// Direct fetch + OpenAI normalization (default path, no Firecrawl credits)
+// ────────────────────────────────────────────────────────────────────────────
+function htmlToText(html: string): string {
+  // Strip scripts/styles, then tags. Crude but good enough for an LLM input.
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+async function directFetch(url: string): Promise<string> {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 20_000)
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      redirect: 'follow',
+      headers: {
+        'User-Agent': UA,
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    })
+    if (!res.ok) throw new Error(`fetch ${res.status}`)
+    return await res.text()
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+async function openaiNormalize(
+  text: string,
+  kind: ScrapeKind,
+  apiKey: string,
+): Promise<Record<string, unknown>> {
+  const schemaDescription =
+    kind === 'weekly'
+      ? `Return JSON with this exact shape:
+{
+  "pricing": [ { "account_size_label": string, "list_price_usd": number|null, "promo_price_usd": number|null, "promo_label": string|null, "discount_pct": number|null } ],
+  "active_promo_banner": string|null,
+  "promo_code": string|null,
+  "rules": {
+    "profit_target_usd": number|null, "daily_loss_usd": number|null,
+    "max_drawdown_usd": number|null, "drawdown_type": "static"|"trailing"|"eod_trailing"|null,
+    "payout_split_pct": number|null, "first_payout_cap_usd": number|null,
+    "first_payout_cap_count": number|null, "min_trading_days": number|null,
+    "consistency_rule_pct": number|null, "payout_cadence_days": number|null
+  },
+  "features": [string]
+}`
+      : `Return JSON with this exact shape:
+{
+  "pricing": [ { "account_size_label": string, "list_price_usd": number|null, "promo_price_usd": number|null, "promo_label": string|null, "discount_pct": number|null } ],
+  "active_promo_banner": string|null,
+  "promo_code": string|null
+}`
+
+  const system =
+    'You normalize prop-firm landing pages into strict JSON. Never invent values. ' +
+    'If a field is not explicitly present in the source, use null. ' +
+    'list_price_usd is the crossed-out / original price. promo_price_usd is the discounted price actually charged today. ' +
+    'If only one price is shown, put it in list_price_usd and leave promo_price_usd null. ' +
+    'account_size_label is the marketed account size (e.g. "50K", "100K", "150K"). ' +
+    'Do not include rules you cannot literally find on the page.'
+
+  const userMsg = `${schemaDescription}\n\nSOURCE TEXT (truncated):\n${text.slice(0, 18000)}`
+
+  const res = await fetch(OPENAI_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userMsg },
+      ],
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`openai ${res.status}: ${body.slice(0, 300)}`)
+  }
+  const data = await res.json()
+  const content = data?.choices?.[0]?.message?.content ?? '{}'
+  try {
+    return JSON.parse(content) as Record<string, unknown>
+  } catch {
+    throw new Error('openai returned non-JSON')
+  }
+}
+
+async function directScrape(
+  url: string,
+  kind: ScrapeKind,
+  openaiKey: string,
+): Promise<{ payload: Record<string, unknown>; markdown: string }> {
+  const html = await directFetch(url)
+  const text = htmlToText(html)
+  if (text.length < 200) {
+    throw new Error(`direct fetch returned too little content (${text.length} chars) — site likely JS-rendered or bot-walled`)
+  }
+  const payload = await openaiNormalize(text, kind, openaiKey)
+  return { payload, markdown: text.slice(0, 20000) }
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Firecrawl call
@@ -211,10 +342,12 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY') ?? ''
-    if (!firecrawlKey) {
-      return new Response(JSON.stringify({ error: 'FIRECRAWL_API_KEY missing' }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    const openaiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
+    if (!openaiKey && !firecrawlKey) {
+      return new Response(
+        JSON.stringify({ error: 'Need either OPENAI_API_KEY or FIRECRAWL_API_KEY' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
     }
 
     const db = createClient(supabaseUrl, serviceKey)
@@ -244,8 +377,14 @@ Deno.serve(async (req) => {
       })
     }
 
+    // Optional override: ?strategy=direct|firecrawl forces a single strategy for this run
+    const strategyOverride = (body.strategy ?? url.searchParams.get('strategy') ?? null) as FetchStrategy | null
+
     // Fetch active profiles
-    let q = db.from('competitor_intel_profiles').select('firm_id, urls').eq('active', true)
+    let q = db
+      .from('competitor_intel_profiles')
+      .select('firm_id, urls, fetch_strategy')
+      .eq('active', true)
     if (firmFilter) q = q.eq('firm_id', firmFilter)
     const { data: profiles, error: profilesErr } = await q
     if (profilesErr) throw profilesErr
@@ -256,13 +395,35 @@ Deno.serve(async (req) => {
       const firmId = p.firm_id as string
       const urls = (p.urls ?? {}) as Record<string, string>
       const targetUrl = urls.pricing ?? urls.rules ?? urls.promo ?? ''
+      const strategy: FetchStrategy =
+        strategyOverride ?? ((p.fetch_strategy as FetchStrategy) || 'direct')
       if (!targetUrl) {
         results.push({ firm_id: firmId, status: 'skipped_no_url', changes: 0 })
         continue
       }
 
       try {
-        const { payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey)
+        let payload: Record<string, unknown>
+        let markdown: string
+        let usedStrategy: FetchStrategy = strategy
+        if (strategy === 'firecrawl') {
+          if (!firecrawlKey) throw new Error('firecrawl strategy selected but FIRECRAWL_API_KEY missing')
+          ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey))
+        } else {
+          if (!openaiKey) throw new Error('direct strategy selected but OPENAI_API_KEY missing')
+          try {
+            ;({ payload, markdown } = await directScrape(targetUrl, kind, openaiKey))
+          } catch (directErr) {
+            // Auto-fallback to Firecrawl if available — Cloudflare / JS-rendered sites
+            if (firecrawlKey) {
+              console.warn(`direct failed for ${firmId}, falling back to firecrawl:`, directErr)
+              ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey))
+              usedStrategy = 'firecrawl'
+            } else {
+              throw directErr
+            }
+          }
+        }
 
         // Find previous snapshot of same kind
         const { data: prev } = await db
@@ -281,7 +442,7 @@ Deno.serve(async (req) => {
             firm_id: firmId,
             scrape_kind: kind,
             source_url: targetUrl,
-            payload,
+            payload: { ...payload, _fetch_strategy: usedStrategy },
             raw_markdown: markdown,
             extraction_confidence: payload && Object.keys(payload).length > 0 ? 'medium' : 'low',
           })
