@@ -25,7 +25,7 @@ import {
 
 export interface CompetitorScenario {
   label: string;              // e.g., "Apex Conservative"
-  firmId: 'apex' | 'ftmo';
+  firmId: 'apex' | 'ftmo' | 'mffu' | 'tradeify' | 'tpt' | 'fundednext';
   firmLabel: string;
   variant: string;            // "conservative" | "base" | "aggressive"
   color: string;              // tailwind token for grid marker
@@ -38,6 +38,27 @@ export interface CompetitorScenario {
   /** Clustering intensity multiplier: 1.0 = full, 0.8 = reduced */
   clusteringIntensity: number;
   notes: string;
+  /**
+   * Profile kind:
+   *  - 'simulated': verified profile safe to feed treasury / Monte Carlo math
+   *  - 'market_reference': landing-page intelligence only. DO NOT use to drive
+   *    treasury decisions until promoted to 'simulated' after verification.
+   */
+  kind?: 'simulated' | 'market_reference';
+  /** Source URL the profile was reverse-engineered from. */
+  sourceUrl?: string;
+  /** ISO timestamp the source was last checked. */
+  lastCheckedAt?: string;
+  /** Confidence in the rules captured. */
+  confidence?: 'low' | 'medium' | 'high';
+  /** Advertised list price (sticker, no promo). */
+  listPrice?: number;
+  /** Typical promo / discounted price observed in the market. */
+  promoPrice?: number;
+  /** Rules as advertised on the landing page. Free-form. */
+  advertisedRules?: string;
+  /** Rules verified from actual funded-trader experience. Free-form. */
+  verifiedFundedRules?: string;
 }
 
 // ============================================================================
@@ -324,4 +345,154 @@ export const FTMO_SCENARIOS: CompetitorScenario[] = [
 export const ALL_COMPETITOR_SCENARIOS: CompetitorScenario[] = [
   ...APEX_SCENARIOS,
   ...FTMO_SCENARIOS,
+];
+
+// ============================================================================
+// MARKET REFERENCE PROFILES — landing-page intelligence, NOT treasury inputs
+// ----------------------------------------------------------------------------
+// These profiles capture what competitors advertise so the StructuralRiskMap
+// can plot them honestly. They are intentionally EXCLUDED from
+// ALL_COMPETITOR_SCENARIOS so they cannot accidentally drive Monte Carlo
+// economics or treasury sizing. Promote to a real simulated scenario only
+// after the rules are verified end-to-end (eval → funded → payout).
+//
+// Every entry MUST include: sourceUrl, lastCheckedAt, confidence, and keep
+// listPrice separate from promoPrice. Advertised rules are NOT verified.
+// ============================================================================
+
+const REF_CHECKED_AT = '2026-05-20';
+
+export const MFFU_REFERENCE: CompetitorScenario = {
+  label: 'MyFundedFutures (ref)',
+  firmId: 'mffu',
+  firmLabel: 'MFFU',
+  variant: 'market_reference',
+  color: 'text-purple-400',
+  passRate: 0.08,
+  requestRate: 0.30,
+  clusteringIntensity: 1.0,
+  notes: 'Landing-page reference only. Advertised 90% split, $7.5k × 3 first-payout cap.',
+  kind: 'market_reference',
+  sourceUrl: 'https://myfundedfutures.com',
+  lastCheckedAt: REF_CHECKED_AT,
+  confidence: 'medium',
+  listPrice: 165,
+  promoPrice: 80,
+  advertisedRules: '1-step $3k target, $2k EOD trailing, 90% split, $7.5k first-payout cap × 3.',
+  verifiedFundedRules: undefined,
+  assumptions: buildProfile({
+    price: 165,
+    passMode: 0.08,
+    requestMode: 0.30,
+    payoutSplit: 0.90,
+    firstPayoutCap: 7500,
+    firstPayoutCapCount: 3,
+    lifetimeCapMultiple: null,
+    minMonthsBetweenPayouts: 0,
+    minWinningDaysPerPayout: 5,
+  }),
+};
+
+export const TRADEIFY_REFERENCE: CompetitorScenario = {
+  label: 'Tradeify (ref)',
+  firmId: 'tradeify',
+  firmLabel: 'Tradeify',
+  variant: 'market_reference',
+  color: 'text-emerald-400',
+  passRate: 0.07,
+  requestRate: 0.28,
+  clusteringIntensity: 1.0,
+  notes: 'Landing-page reference only. Advertised "uncapped" payouts after threshold.',
+  kind: 'market_reference',
+  sourceUrl: 'https://tradeify.co',
+  lastCheckedAt: REF_CHECKED_AT,
+  confidence: 'low',
+  listPrice: 137,
+  promoPrice: 55,
+  advertisedRules: '1-step eval, 90% split, no daily cap advertised, fast payouts.',
+  verifiedFundedRules: undefined,
+  assumptions: buildProfile({
+    price: 137,
+    passMode: 0.07,
+    requestMode: 0.28,
+    payoutSplit: 0.90,
+    firstPayoutCap: 2000,
+    firstPayoutCapCount: 1,
+    lifetimeCapMultiple: null,
+    minMonthsBetweenPayouts: 0,
+    minWinningDaysPerPayout: 5,
+  }),
+};
+
+export const TPT_REFERENCE: CompetitorScenario = {
+  label: 'TakeProfit Trader (ref)',
+  firmId: 'tpt',
+  firmLabel: 'TPT',
+  variant: 'market_reference',
+  color: 'text-cyan-400',
+  passRate: 0.08,
+  requestRate: 0.30,
+  clusteringIntensity: 1.0,
+  notes: 'Landing-page reference only. Advertised 80→90% split, $1.5k × 1 first-payout cap.',
+  kind: 'market_reference',
+  sourceUrl: 'https://takeprofittrader.com',
+  lastCheckedAt: REF_CHECKED_AT,
+  confidence: 'medium',
+  listPrice: 150,
+  promoPrice: 75,
+  advertisedRules: '1-step, 80% split until $10k profit then 90%, $1.5k first-payout cap × 1.',
+  verifiedFundedRules: undefined,
+  assumptions: buildProfile({
+    price: 150,
+    passMode: 0.08,
+    requestMode: 0.30,
+    payoutSplit: 0.80,
+    firstPayoutCap: 1500,
+    firstPayoutCapCount: 1,
+    lifetimeCapMultiple: null,
+    minMonthsBetweenPayouts: 0,
+    minWinningDaysPerPayout: 5,
+  }),
+};
+
+export const FUNDEDNEXT_REFERENCE: CompetitorScenario = {
+  label: 'FundedNext Futures (ref)',
+  firmId: 'fundednext',
+  firmLabel: 'FundedNext',
+  variant: 'market_reference',
+  color: 'text-pink-400',
+  passRate: 0.07,
+  requestRate: 0.25,
+  clusteringIntensity: 1.0,
+  notes: 'Landing-page reference only. Newer entrant, terms shift frequently — re-verify.',
+  kind: 'market_reference',
+  sourceUrl: 'https://fundednext.com',
+  lastCheckedAt: REF_CHECKED_AT,
+  confidence: 'low',
+  listPrice: 199,
+  promoPrice: 99,
+  advertisedRules: '1-step futures eval, 90% split advertised, fast payout cadence.',
+  verifiedFundedRules: undefined,
+  assumptions: buildProfile({
+    price: 199,
+    passMode: 0.07,
+    requestMode: 0.25,
+    payoutSplit: 0.90,
+    firstPayoutCap: 2000,
+    firstPayoutCapCount: 1,
+    lifetimeCapMultiple: null,
+    minMonthsBetweenPayouts: 0,
+    minWinningDaysPerPayout: 5,
+  }),
+};
+
+/**
+ * Market-reference profiles. NOT included in ALL_COMPETITOR_SCENARIOS on
+ * purpose — these must not drive treasury math until verified and promoted.
+ */
+export const MARKET_REFERENCE_PROFILES: CompetitorScenario[] = [
+  MFFU_REFERENCE,
+  TRADEIFY_REFERENCE,
+  TPT_REFERENCE,
+  FUNDEDNEXT_REFERENCE,
 ];
