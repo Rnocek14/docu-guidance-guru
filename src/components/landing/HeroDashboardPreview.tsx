@@ -257,27 +257,33 @@ export function HeroDashboardPreview() {
             </MiniCard>
           </div>
 
-          {/* Bottom row: Performance Target + Drawdown Monitor */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="rounded-lg border border-border/40 bg-background/40 p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <Target className="h-3 w-3 text-muted-foreground" />
-                <span className="text-[10px] font-medium">Performance Target</span>
+          {/* Bottom row: Payout Pacing strip — mirrors the real teal lifetime-paid bar */}
+          <div className="rounded-lg border border-primary/20 bg-background/40 p-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-1.5">
+                <CircleDollarSign className="h-3 w-3 text-primary" />
+                <span className="text-[10px] font-medium text-foreground">
+                  <span className="font-mono">$3,180</span> <span className="text-muted-foreground">paid lifetime</span>
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-success/10 text-success font-medium">Target Met</span>
-                <span className="text-[9px] text-muted-foreground">You've reached the profit target.</span>
+              <div className="flex items-center gap-2 text-[9px] text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" />
+                  First payout <span className="font-mono text-foreground">$500</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <Shield className="h-2.5 w-2.5" />
+                  Lifetime cap <span className="font-mono text-foreground">$1,490</span>
+                </span>
               </div>
             </div>
-            <div className="rounded-lg border border-border/40 bg-background/40 p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <AlertTriangle className="h-3 w-3 text-muted-foreground" />
-                <span className="text-[10px] font-medium">Drawdown Monitor</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-success/10 text-success font-medium">Comfortable</span>
-                <span className="text-[9px] text-muted-foreground">Drawdown within acceptable range.</span>
-              </div>
+            <div className="relative h-1.5 rounded-full bg-muted overflow-hidden">
+              <div className="absolute inset-y-0 left-0 bg-primary rounded-full" style={{ width: '60%' }} />
+              <div className="absolute inset-y-0 bg-primary/30" style={{ left: '60%', width: '15%' }} />
+            </div>
+            <div className="flex items-center justify-between mt-1 text-[9px] text-muted-foreground">
+              <span>First cap cleared · paced every <span className="text-foreground">14 days</span> for platform stability</span>
+              <span className="text-primary">3 clean payouts to Pro tier (85/15 split)</span>
             </div>
           </div>
         </div>
