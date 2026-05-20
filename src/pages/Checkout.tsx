@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { TIERS } from "@/lib/pricing-data";
+import { AuthAwareShell } from "@/components/layout/AuthAwareShell";
 
 // Map shared pricing data to checkout TierCard format
 const CHECKOUT_TIERS = TIERS.map((t) => ({
@@ -121,28 +122,8 @@ export default function Checkout() {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-card">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate(-1)}
-            className="gap-1.5"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Plans
-          </Button>
-          <Separator orientation="vertical" className="h-6" />
-          <h1 className="text-lg font-semibold text-foreground">
-            Start Your Evaluation
-          </h1>
-        </div>
-      </header>
-
-      <main className="max-w-6xl mx-auto px-4 py-8 space-y-8">
+  const body = (
+    <div className="max-w-6xl mx-auto space-y-8">
         {/* Step 1: Choose tier */}
         <section>
           <div className="mb-6">
@@ -223,7 +204,35 @@ export default function Checkout() {
             our <Link to="/rules#refunds" className="underline hover:text-foreground">refund policy</Link>.
           </p>
         </section>
-      </main>
     </div>
+  );
+
+  return (
+    <AuthAwareShell
+      title="Buy New Account"
+      authed={body}
+      standalone={
+        <div className="min-h-screen bg-background">
+          <header className="border-b border-border bg-card">
+            <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate(-1)}
+                className="gap-1.5"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to Plans
+              </Button>
+              <Separator orientation="vertical" className="h-6" />
+              <h1 className="text-lg font-semibold text-foreground">
+                Start Your Evaluation
+              </h1>
+            </div>
+          </header>
+          <main className="px-4 py-8">{body}</main>
+        </div>
+      }
+    />
   );
 }
