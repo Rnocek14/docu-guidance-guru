@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { ChartContainer } from '@/components/ui/chart';
 import { TrendingUp } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { format } from 'date-fns';
 
 const chartConfig = {
@@ -96,6 +96,7 @@ export function EquityCurveChart({ accountId, startingBalance, currentBalance: c
       return data;
     },
     enabled: !!accountId,
+    placeholderData: keepPreviousData,
   });
 
   const chartData = useMemo(() => {
