@@ -8,6 +8,7 @@ import { TIERS } from '@/lib/pricing-data';
 import { cn } from '@/lib/utils';
 import { track } from '@/lib/track';
 import { Footer } from '@/components/landing/Footer';
+import { AuthAwareShell } from '@/components/layout/AuthAwareShell';
 
 const evaluationRules = [
   { label: 'Profit Target', description: 'You must reach the profit target percentage on your simulated account to pass the evaluation.' },
@@ -52,36 +53,17 @@ function RuleList({ rules }: { rules: { label: string; description: string }[] }
   );
 }
 
-export default function Rules() {
-  const tracked = useRef(false);
+function RulesContent({ showBack }: { showBack: boolean }) {
   const navigate = useNavigate();
-  useEffect(() => {
-    if (!tracked.current) { tracked.current = true; track('rules_view'); }
-  }, []);
-
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-lg">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <Shield className="h-7 w-7 text-primary" />
-            <span className="text-lg font-bold">Meridian</span>
-          </Link>
-          <Button asChild size="sm" className="gap-1.5">
-            <Link to="/checkout">
-              Start Evaluation <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </Button>
-        </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-12 max-w-4xl space-y-12">
-        <div>
+    <div className="max-w-4xl mx-auto space-y-12">
+      <div>
+        {showBack && (
           <Button variant="ghost" size="sm" className="gap-1.5 mb-6" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
-          <h1 className="text-4xl font-bold mb-4">Evaluation Rules</h1>
+        )}
+        <h1 className="text-4xl font-bold mb-4">Evaluation Rules</h1>
           <p className="text-muted-foreground text-lg">
             Complete transparency. These are the exact rules your account is evaluated against.
             Your purchased evaluation uses the rules shown at checkout. Changes to future evaluations, if any, are announced in advance.
@@ -190,9 +172,41 @@ export default function Rules() {
             </Link>
           </Button>
         </div>
-      </main>
-
-      <Footer />
     </div>
+  );
+}
+
+export default function Rules() {
+  const tracked = useRef(false);
+  useEffect(() => {
+    if (!tracked.current) { tracked.current = true; track('rules_view'); }
+  }, []);
+
+  return (
+    <AuthAwareShell
+      title="Rules"
+      authed={<RulesContent showBack={false} />}
+      standalone={
+        <div className="min-h-screen bg-background text-foreground">
+          <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-lg">
+            <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+              <Link to="/" className="flex items-center gap-2">
+                <Shield className="h-7 w-7 text-primary" />
+                <span className="text-lg font-bold">Meridian</span>
+              </Link>
+              <Button asChild size="sm" className="gap-1.5">
+                <Link to="/checkout">
+                  Start Evaluation <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </Button>
+            </div>
+          </header>
+          <main className="container mx-auto px-4 py-12">
+            <RulesContent showBack />
+          </main>
+          <Footer />
+        </div>
+      }
+    />
   );
 }
