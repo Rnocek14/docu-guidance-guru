@@ -11,6 +11,12 @@ interface QueueCardSummaryProps {
   violations?: Violation[];
   flagsCount: number;
   payoutAmount?: number;
+  // Fallback context — used to infer a breach summary when violations row is missing
+  startingBalance?: number;
+  currentBalance?: number;
+  highestBalance?: number;
+  dailyPnl?: number;
+  ruleSnapshot?: { max_daily_loss_percent?: number; max_total_drawdown_percent?: number } | null;
 }
 
 /**
@@ -21,7 +27,12 @@ export function QueueCardSummary({
   status, 
   violations = [], 
   flagsCount, 
-  payoutAmount 
+  payoutAmount,
+  startingBalance,
+  currentBalance,
+  highestBalance,
+  dailyPnl,
+  ruleSnapshot,
 }: QueueCardSummaryProps) {
   // Payout statuses take priority
   if (['payout_requested', 'payout_under_review'].includes(status)) {
@@ -46,6 +57,37 @@ export function QueueCardSummary({
         </div>
       );
     }
+  }
+
+  // Fallback: status says breach but no violation row — derive from balances + snapshot
+  if (status === 'breached_detected' && startingBalance && currentBalance != null && highestBalance != null) {
+    const ddPct = ((highestBalance - currentBalance) / highestBalance) * 100;
+    const dailyLossPct = Math.abs(Math.min(0, ((dailyPnl ?? 0) / startingBalance) * 100));
+    const ddLimit = ruleSnapshot?.max_total_drawdown_percent ?? 10;
+    const dlLimit = ruleSnapshot?.max_daily_loss_percent ?? 5;
+
+    if (ddPct >= ddLimit) {
+      return (
+        <div className="flex items-center gap-1.5 text-xs text-destructive">
+          <AlertTriangle className="h-3 w-3" />
+          <span>Total drawdown: {ddPct.toFixed(2)}% (limit {ddLimit.toFixed(2)}%) — inferred</span>
+        </div>
+      );
+    }
+    if (dailyLossPct >= dlLimit) {
+      return (
+        <div className="flex items-center gap-1.5 text-xs text-destructive">
+          <AlertTriangle className="h-3 w-3" />
+          <span>Daily loss: {dailyLossPct.toFixed(2)}% (limit {dlLimit.toFixed(2)}%) — inferred</span>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-warning">
+        <AlertTriangle className="h-3 w-3" />
+        <span>Breach status set but no violation row — investigate</span>
+      </div>
+    );
   }
 
   // Show flags count
