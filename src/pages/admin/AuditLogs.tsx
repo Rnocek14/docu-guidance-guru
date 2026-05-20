@@ -150,6 +150,10 @@ export default function AuditLogs() {
                   <SelectItem value="breach">Breaches</SelectItem>
                   <SelectItem value="flag">Flags</SelectItem>
                   <SelectItem value="payout">Payouts</SelectItem>
+                  <SelectItem value="breaker">Breaker</SelectItem>
+                  <SelectItem value="payments">Payments</SelectItem>
+                  <SelectItem value="jurisdiction">Jurisdiction / Geo</SelectItem>
+                  <SelectItem value="ingest">Ingest</SelectItem>
                   <SelectItem value="role">Role Changes</SelectItem>
                   <SelectItem value="cohort">Cohort Changes</SelectItem>
                   <SelectItem value="system">System Actions</SelectItem>
