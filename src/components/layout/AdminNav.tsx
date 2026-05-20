@@ -45,7 +45,6 @@ const TOOLS: NavItem[] = [
   { label: 'Tier Readiness', href: '/admin/tier-readiness', icon: <Shield className="h-5 w-5" />, section: 'Tools' },
   { label: 'Launch Readiness', href: '/admin/readiness', icon: <Shield className="h-5 w-5" />, section: 'Tools' },
   { label: 'QA Scan', href: '/admin/qa-scan', icon: <Activity className="h-5 w-5" />, section: 'Tools' },
-  { label: 'Email Triage', href: '/admin/support-emails', icon: <FileText className="h-5 w-5" />, section: 'Tools' },
   { label: 'Affiliates', href: '/admin/affiliates', icon: <Handshake className="h-5 w-5" />, section: 'Tools' },
   { label: 'Share Bonuses', href: '/admin/share-bonuses', icon: <Gift className="h-5 w-5" />, section: 'Tools' },
   { label: 'WealthCharts Setup', href: '/admin/wealthcharts', icon: <Plug className="h-5 w-5" />, section: 'Tools' },
