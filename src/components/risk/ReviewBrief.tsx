@@ -112,7 +112,12 @@ export function ReviewBrief({ account, violations, flagsCount, lastEventAt }: Re
   if (ruleSnapshot && drawdownPercent > ruleSnapshot.max_total_drawdown_percent) {
     discrepancies.push(`Drawdown ${drawdownPercent.toFixed(2)}% exceeds snapshot limit ${ruleSnapshot.max_total_drawdown_percent}% — likely breach even if not yet flagged.`);
   }
-  if (ruleSnapshot && dailyLossPercent > ruleSnapshot.max_daily_loss_percent) {
+  // Only trust daily_pnl if there was actually a trade today — otherwise it's stale
+  // (daily_pnl is reset at the 5pm ET boundary by cron; without recent trades the value is meaningless).
+  const tradedToday = account.last_trade_at
+    ? differenceInDays(new Date(), new Date(account.last_trade_at)) === 0
+    : false;
+  if (tradedToday && ruleSnapshot && dailyLossPercent > ruleSnapshot.max_daily_loss_percent) {
     discrepancies.push(`Today's loss ${dailyLossPercent.toFixed(2)}% exceeds daily-loss limit ${ruleSnapshot.max_daily_loss_percent}% — check if a violation is missing.`);
   }
   if (account.trading_days_count === 0 && (account.status === 'payout_requested' || account.status === 'payout_under_review')) {
