@@ -32,32 +32,35 @@ const PayoutRequest = lazy(() => import("./pages/trader/PayoutRequest"));
 const AccountDetails = lazy(() => import("./pages/trader/AccountDetails"));
 const ResetCheckout = lazy(() => import("./pages/ResetCheckout"));
 
-const RiskDashboard = lazy(() => import("./pages/risk/RiskDashboard"));
-const ReviewQueue = lazy(() => import("./pages/risk/ReviewQueue"));
+// Risk + admin pages are eagerly imported. The operator (you) hits these
+// dozens of times a day; lazy chunks made every click feel like a full
+// page load because Suspense swaps the sidebar out for a spinner.
+import RiskDashboard from "./pages/risk/RiskDashboard";
+import ReviewQueue from "./pages/risk/ReviewQueue";
+import MissionControl from "./pages/admin/MissionControl";
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import SystemOverview from "./pages/admin/SystemOverview";
+import UsersManagement from "./pages/admin/UsersManagement";
+import CohortsManagement from "./pages/admin/CohortsManagement";
+import AuditLogs from "./pages/admin/AuditLogs";
+import MonteCarloAnalytics from "./pages/admin/MonteCarloAnalytics";
+import LiabilityDashboard from "./pages/admin/LiabilityDashboard";
+import TreasuryDashboard from "./pages/admin/TreasuryDashboard";
+import OpsPlaybook from "./pages/admin/OpsPlaybook";
+import OpsMetrics from "./pages/admin/OpsMetrics";
+import TierReadiness from "./pages/admin/TierReadiness";
+import AdminReadiness from "./pages/admin/AdminReadiness";
+import GovernorDashboard from "./pages/admin/GovernorDashboard";
+import QaScanRunner from "./pages/admin/QaScanRunner";
+import SupportEmails from "./pages/admin/SupportEmails";
+import WealthChartsIntegration from "./pages/admin/WealthChartsIntegration";
+import CohortProjection from "./pages/admin/CohortProjection";
+import ShareBonusQueue from "./pages/admin/ShareBonusQueue";
+import AffiliateAdmin from "./pages/admin/AffiliateAdmin";
 
-const MissionControl = lazy(() => import("./pages/admin/MissionControl"));
-const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
-const SystemOverview = lazy(() => import("./pages/admin/SystemOverview"));
-const UsersManagement = lazy(() => import("./pages/admin/UsersManagement"));
-const CohortsManagement = lazy(() => import("./pages/admin/CohortsManagement"));
-const AuditLogs = lazy(() => import("./pages/admin/AuditLogs"));
-const MonteCarloAnalytics = lazy(() => import("./pages/admin/MonteCarloAnalytics"));
-const LiabilityDashboard = lazy(() => import("./pages/admin/LiabilityDashboard"));
-const TreasuryDashboard = lazy(() => import("./pages/admin/TreasuryDashboard"));
-const OpsPlaybook = lazy(() => import("./pages/admin/OpsPlaybook"));
-const OpsMetrics = lazy(() => import("./pages/admin/OpsMetrics"));
-const TierReadiness = lazy(() => import("./pages/admin/TierReadiness"));
-const AdminReadiness = lazy(() => import("./pages/admin/AdminReadiness"));
-const GovernorDashboard = lazy(() => import("./pages/admin/GovernorDashboard"));
-const QaScanRunner = lazy(() => import("./pages/admin/QaScanRunner"));
-const SupportEmails = lazy(() => import("./pages/admin/SupportEmails"));
-const WealthChartsIntegration = lazy(() => import("./pages/admin/WealthChartsIntegration"));
-const CohortProjection = lazy(() => import("./pages/admin/CohortProjection"));
-const ShareBonusQueue = lazy(() => import("./pages/admin/ShareBonusQueue"));
 const SupportDashboard = lazy(() => import("./pages/support/SupportDashboard"));
 const AffiliateApply = lazy(() => import("./pages/affiliate/AffiliateApply"));
 const AffiliateDashboard = lazy(() => import("./pages/affiliate/AffiliateDashboard"));
-const AffiliateAdmin = lazy(() => import("./pages/admin/AffiliateAdmin"));
 
 function PageLoader() {
   return (
