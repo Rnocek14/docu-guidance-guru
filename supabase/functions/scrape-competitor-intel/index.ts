@@ -301,6 +301,8 @@ function diff(oldPayload: JsonVal, newPayload: JsonVal): Array<{
   const fields = new Set([...Object.keys(o), ...Object.keys(n)])
   const changes: Array<{ field: string; old_value: JsonVal; new_value: JsonVal; severity: 'low' | 'medium' | 'high' }> = []
   for (const f of fields) {
+    // Skip internal/meta fields (prefixed with _) so strategy flips aren't noise
+    if (f.startsWith('_') || f.includes('._')) continue
     const ov = o[f]
     const nv = n[f]
     if (JSON.stringify(ov) !== JSON.stringify(nv)) {
