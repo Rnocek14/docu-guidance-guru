@@ -411,6 +411,11 @@ function FirmDetail({
               <Badge variant="outline" className="font-mono text-xs">
                 {profile.fetch_strategy}
               </Badge>
+              {(payload as { _fallback_used?: string })._fallback_used && (
+                <Badge variant="outline" className="border-amber-500/40 text-amber-300 text-xs">
+                  fallback: {(payload as { _fallback_used?: string })._fallback_used}
+                </Badge>
+              )}
             </CardTitle>
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               {sourceUrl && (

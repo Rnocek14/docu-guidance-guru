@@ -1,13 +1,14 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { TrendingUp, TrendingDown, Minus, Lightbulb } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, Lightbulb, ShieldAlert } from 'lucide-react';
 import { TIERS } from '@/lib/pricing-data';
 import {
   buildComparisonMatrix,
   scoreMeridianPosition,
   generateRecommendations,
   cellSignal,
+  filterComparableSnapshots,
   type SnapshotInput,
 } from '@/lib/competitor-comparison';
 
@@ -30,7 +31,11 @@ const PRIORITY_CLASS = {
 } as const;
 
 export function MarketPositionView({ snapshots }: { snapshots: SnapshotInput[] }) {
-  const matrix = useMemo(() => buildComparisonMatrix(TIERS, snapshots), [snapshots]);
+  const { comparable, excluded } = useMemo(
+    () => filterComparableSnapshots(snapshots),
+    [snapshots],
+  );
+  const matrix = useMemo(() => buildComparisonMatrix(TIERS, comparable), [comparable]);
   const scorecard = useMemo(() => scoreMeridianPosition(matrix), [matrix]);
   const recs = useMemo(() => generateRecommendations(matrix, scorecard), [matrix, scorecard]);
 
@@ -41,6 +46,31 @@ export function MarketPositionView({ snapshots }: { snapshots: SnapshotInput[] }
           No competitor snapshots yet — run a scrape first to unlock market position analysis.
         </CardContent>
       </Card>
+    );
+  }
+
+  if (comparable.length === 0) {
+    return (
+      <div className="space-y-4">
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardHeader className="py-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <ShieldAlert className="h-4 w-4 text-amber-400" />
+              No directly-verified futures competitors available
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm text-muted-foreground">
+            <p>
+              The market-position comparison is intentionally strict: only US-futures firms with a
+              directly-verified scrape are included. Everything currently on file either targets a
+              different product (CFD/forex) or fell back to curated reference values that haven&rsquo;t
+              been re-verified.
+            </p>
+            <p>Re-run scrapes from the Firms tab to refresh verification, or update the source URLs to point at futures-specific pages.</p>
+          </CardContent>
+        </Card>
+        {excluded.length > 0 && <ExcludedList excluded={excluded} />}
+      </div>
     );
   }
 
@@ -167,6 +197,55 @@ export function MarketPositionView({ snapshots }: { snapshots: SnapshotInput[] }
           )}
         </CardContent>
       </Card>
+
+      {excluded.length > 0 && <ExcludedList excluded={excluded} />}
     </div>
+  );
+}
+
+function ExcludedList({
+  excluded,
+}: {
+  excluded: ReturnType<typeof filterComparableSnapshots>['excluded'];
+}) {
+  return (
+    <Card>
+      <CardHeader className="py-3">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <ShieldAlert className="h-4 w-4 text-amber-400" />
+          Excluded from comparison ({excluded.length})
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          These firms are on file but were dropped from the matrix to keep every number honest.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {excluded.map((e) => (
+          <div
+            key={e.firm_id}
+            className="flex items-start justify-between gap-3 rounded-md border border-border/60 bg-card/40 p-3 text-sm"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{e.firm_name}</span>
+                <Badge
+                  variant="outline"
+                  className={
+                    e.category === 'non_futures'
+                      ? 'border-purple-500/40 text-purple-300'
+                      : e.category === 'unverified'
+                      ? 'border-amber-500/40 text-amber-300'
+                      : 'border-slate-500/40 text-slate-300'
+                  }
+                >
+                  {e.category === 'non_futures' ? 'wrong product' : e.category === 'unverified' ? 'unverified' : 'no snapshot'}
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{e.reason}</p>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }

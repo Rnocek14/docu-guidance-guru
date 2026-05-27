@@ -42,7 +42,101 @@ export interface SnapshotInput {
       consistency_rule_pct?: number | null;
       payout_cadence_days?: number | null;
     };
+    _fallback_used?: string | null;
+    _fetch_strategy?: string | null;
   };
+}
+
+// ─── Comparability allowlist ─────────────────────────────────────────────
+//
+// Meridian is a US-style FUTURES prop firm. Only futures firms with
+// directly-verified scrapes are apples-to-apples competitors. Anything else
+// (CFD/forex products, curated-reference fallbacks) gets dropped from the
+// comparison matrix so we never publish a misleading number.
+
+/** Firm IDs whose primary product line is US futures and is comparable to Meridian. */
+export const FUTURES_FIRM_IDS = new Set<FirmId>([
+  'apex',
+  'topstep',
+  'bulenox',
+  'mffu',
+  'tradeify',
+  'tpt',
+]);
+
+/** Firms whose default scrape target serves a non-futures product (CFD/forex). */
+export const NON_FUTURES_FIRMS: Record<FirmId, string> = {
+  ftmo: 'FTMO\u2019s landing page serves their CFD/forex eval, not their US futures product.',
+  fundednext: 'FundedNext\u2019s scrape returns Stellar CFD pricing (6K/15K accounts), not futures.',
+};
+
+export interface ExcludedFirm {
+  firm_id: FirmId;
+  firm_name: string;
+  reason: string;
+  category: 'non_futures' | 'unverified' | 'no_snapshot';
+}
+
+export interface ComparableFilterResult {
+  comparable: SnapshotInput[];
+  excluded: ExcludedFirm[];
+}
+
+/**
+ * Strict filter: keep only futures firms whose latest snapshot was directly
+ * verified (not a curated_reference fallback) and contains real rules + pricing.
+ * Everything else is surfaced in `excluded` with a reason.
+ */
+export function filterComparableSnapshots(snapshots: SnapshotInput[]): ComparableFilterResult {
+  const comparable: SnapshotInput[] = [];
+  const excluded: ExcludedFirm[] = [];
+
+  for (const s of snapshots) {
+    if (NON_FUTURES_FIRMS[s.firm_id]) {
+      excluded.push({
+        firm_id: s.firm_id,
+        firm_name: s.firm_name,
+        reason: NON_FUTURES_FIRMS[s.firm_id],
+        category: 'non_futures',
+      });
+      continue;
+    }
+    if (!FUTURES_FIRM_IDS.has(s.firm_id)) {
+      excluded.push({
+        firm_id: s.firm_id,
+        firm_name: s.firm_name,
+        reason: 'Not on the futures allowlist — product line not yet verified as comparable.',
+        category: 'non_futures',
+      });
+      continue;
+    }
+    const fallback = s.payload?._fallback_used;
+    if (fallback) {
+      excluded.push({
+        firm_id: s.firm_id,
+        firm_name: s.firm_name,
+        reason: `Latest snapshot used the ${fallback} fallback — values are not directly verified.`,
+        category: 'unverified',
+      });
+      continue;
+    }
+    const rules = s.payload?.rules ?? {};
+    const pricing = s.payload?.pricing ?? [];
+    const hasRules = Object.values(rules).some((v) => v != null);
+    const hasPricing = pricing.some((p) => p.list_price_usd != null || p.promo_price_usd != null);
+    if (!hasRules || !hasPricing) {
+      excluded.push({
+        firm_id: s.firm_id,
+        firm_name: s.firm_name,
+        reason: 'Snapshot missing either rules or pricing — not enough data to compare honestly.',
+        category: 'unverified',
+      });
+      continue;
+    }
+    comparable.push(s);
+  }
+
+  return { comparable, excluded };
 }
 
 export type MetricKey =
