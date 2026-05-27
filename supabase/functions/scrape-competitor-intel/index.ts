@@ -375,9 +375,28 @@ function applyCuratedReference(firmId: string, payload: Record<string, unknown>)
   const fallback = CURATED_REFERENCE[firmId]
   if (!fallback) return
   let used = false
-  if (isWeakPricing(payload) && Array.isArray(fallback.pricing)) {
-    payload.pricing = fallback.pricing
-    used = true
+  if (Array.isArray(fallback.pricing)) {
+    const scraped = Array.isArray(payload.pricing) ? (payload.pricing as Record<string, unknown>[]) : []
+    const normLabel = (l: unknown) => String(l ?? '').toUpperCase().replace(/[^0-9K]/g, '')
+    const seen = new Set(
+      scraped
+        .filter((r) => r && typeof r === 'object' && r.account_size_label != null)
+        .map((r) => normLabel(r.account_size_label)),
+    )
+    const merged = [...scraped]
+    for (const row of fallback.pricing as Record<string, unknown>[]) {
+      if (!seen.has(normLabel(row.account_size_label))) {
+        merged.push(row)
+        used = true
+      }
+    }
+    // Sort by numeric account size for stable display
+    merged.sort((a, b) => {
+      const av = parseInt(normLabel((a as Record<string, unknown>).account_size_label)) || 0
+      const bv = parseInt(normLabel((b as Record<string, unknown>).account_size_label)) || 0
+      return av - bv
+    })
+    payload.pricing = merged
   }
   const rules = (payload.rules && typeof payload.rules === 'object' ? payload.rules : {}) as Record<string, unknown>
   const fallbackRules = (fallback.rules && typeof fallback.rules === 'object' ? fallback.rules : {}) as Record<string, unknown>
