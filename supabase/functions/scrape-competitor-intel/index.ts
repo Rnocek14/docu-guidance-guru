@@ -437,6 +437,23 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
   },
 }
 
+// Hard overrides — applied BEFORE null-gap-fill. Used when the scraper
+// reliably extracts a wrong value (e.g. Apex marketed as "2-phase" because
+// the page mentions a Verification step that isn't actually required).
+const REFERENCE_OVERRIDES: Record<string, Record<string, unknown>> = {
+  apex: {
+    phase_count: 1, // Apex is single-evaluation; the "PA" step is funding, not an eval phase
+    activation_fee_usd: 130, // $130/mo (or $340 lifetime) — scraper sometimes picks the lifetime upfront
+    activation_fee_cadence: 'monthly',
+  },
+  tradeify: {
+    phase_count: 1, // Straight-to-sim is single-phase
+  },
+  tpt: {
+    payout_cadence_days: 1, // Daily payouts, not 0
+  },
+}
+
 function applyCuratedReference(firmId: string, payload: Record<string, unknown>): void {
   const fallback = CURATED_REFERENCE[firmId]
   if (!fallback) return
