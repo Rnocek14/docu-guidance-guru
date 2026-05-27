@@ -164,10 +164,16 @@ async function openaiNormalize(
   const system =
     'You normalize prop-firm landing pages into strict JSON. Never invent values. ' +
     'If a field is not explicitly present in the source, use null. ' +
+    'The input may concatenate multiple pages (pricing + rules + promo). Read ALL of them before answering. ' +
     'list_price_usd is the crossed-out / original price. promo_price_usd is the discounted price actually charged today. ' +
     'If only one price is shown, put it in list_price_usd and leave promo_price_usd null. ' +
     'account_size_label is the marketed account size (e.g. "50K", "100K", "150K"). ' +
-    'Do not include rules you cannot literally find on the page.'
+    'For rules: extract profit target, daily loss limit, max drawdown (USD), drawdown type ' +
+    '(static / trailing / eod_trailing), payout split %, first payout cap (USD and count), ' +
+    'minimum trading days, consistency rule %, and payout cadence in days. Convert phrases like ' +
+    '"every 14 days" to 14, "weekly" to 7, "daily" to 1. ' +
+    'For features: short keyword tags only (e.g. "instant_funding", "static_dd", "scaling_plan"). ' +
+    'Do not include rules you cannot literally find in the source text.'
 
   const userMsg = `${schemaDescription}\n\nSOURCE TEXT (truncated):\n${text.slice(0, 40000)}`
 
