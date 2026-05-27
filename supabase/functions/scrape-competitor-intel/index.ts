@@ -440,6 +440,18 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
 function applyCuratedReference(firmId: string, payload: Record<string, unknown>): void {
   const fallback = CURATED_REFERENCE[firmId]
   if (!fallback) return
+  // Step 0: hard overrides — values we *know* the scraper gets wrong.
+  // These replace scraped values, not just null. Source: manual verification.
+  const overrides = REFERENCE_OVERRIDES[firmId]
+  if (overrides) {
+    const rules = (payload.rules && typeof payload.rules === 'object'
+      ? payload.rules
+      : {}) as Record<string, unknown>
+    for (const [k, v] of Object.entries(overrides)) {
+      rules[k] = v
+    }
+    payload.rules = rules
+  }
   const filledFields: string[] = []
   // Snapshot what the scraper actually produced BEFORE we merge anything.
   const scrapedPricing = Array.isArray(payload.pricing) ? (payload.pricing as Record<string, unknown>[]) : []
