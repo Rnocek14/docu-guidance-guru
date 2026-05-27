@@ -429,7 +429,7 @@ Deno.serve(async (req) => {
         let usedStrategy: FetchStrategy = strategy
         if (strategy === 'firecrawl') {
           if (!firecrawlKey) throw new Error('firecrawl strategy selected but FIRECRAWL_API_KEY missing')
-          ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey))
+          ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey, openaiKey))
         } else {
           if (!openaiKey) throw new Error('direct strategy selected but OPENAI_API_KEY missing')
           try {
@@ -440,7 +440,7 @@ Deno.serve(async (req) => {
             // Auto-fallback to Firecrawl if available — Cloudflare / JS-rendered sites
             if (firecrawlKey) {
               try {
-                ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey))
+                ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey, openaiKey))
                 usedStrategy = 'firecrawl'
               } catch (fcErr) {
                 const fcMsg = fcErr instanceof Error ? fcErr.message : 'unknown firecrawl error'
