@@ -170,6 +170,35 @@ export default function CompetitorIntel() {
     [changes, activeId],
   );
 
+  // Browserless key status
+  const browserlessQ = useQuery({
+    queryKey: ['ci-browserless-key'],
+    queryFn: async (): Promise<string | null> => {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'browserless_api_key')
+        .single();
+      if (error) return null;
+      return (data?.value as { key?: string } | undefined)?.key ?? null;
+    },
+  });
+
+  const saveBrowserlessKey = useMutation({
+    mutationFn: async (key: string) => {
+      const { error } = await supabase
+        .from('system_settings')
+        .upsert({ key: 'browserless_api_key', value: { key } }, { onConflict: 'key' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success('Browserless API key saved');
+      setBrowserlessKey('');
+      queryClient.invalidateQueries({ queryKey: ['ci-browserless-key'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   // Manual run mutation
   const runScrape = useMutation({
     mutationFn: async (firmId: string | null) => {
