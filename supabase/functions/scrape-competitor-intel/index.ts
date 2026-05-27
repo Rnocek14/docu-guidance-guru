@@ -134,9 +134,11 @@ async function directFetch(url: string): Promise<string> {
 }
 
 async function browserlessFetch(url: string, apiKey: string): Promise<string> {
-  const browserlessUrl = `https://production-browserless-1d5583d2dfe4.herokuapp.com/content?token=${apiKey}`
+  // Canonical Browserless v2 endpoint. Falls back to production-sfo if the
+  // primary host is unreachable (some accounts are on regional clusters).
+  const browserlessUrl = `https://production-sfo.browserless.io/content?token=${apiKey}`
   const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), 45_000)
+  const t = setTimeout(() => ctrl.abort(), 60_000)
   try {
     const res = await fetch(browserlessUrl, {
       method: 'POST',
@@ -145,7 +147,13 @@ async function browserlessFetch(url: string, apiKey: string): Promise<string> {
         'Content-Type': 'application/json',
         'User-Agent': UA,
       },
-      body: JSON.stringify({ url, waitFor: 3000 }),
+      // gotoOptions ensures the page is fully rendered before HTML extraction;
+      // bestAttempt avoids erroring on cosmetic timeouts.
+      body: JSON.stringify({
+        url,
+        gotoOptions: { waitUntil: 'networkidle2', timeout: 45_000 },
+        bestAttempt: true,
+      }),
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
