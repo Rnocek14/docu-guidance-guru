@@ -243,6 +243,53 @@ async function directScrape(
 // ────────────────────────────────────────────────────────────────────────────
 // Firecrawl call
 // ────────────────────────────────────────────────────────────────────────────
+async function firecrawlMarkdown(url: string, apiKey: string): Promise<string> {
+  const res = await fetch(FIRECRAWL_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      url,
+      formats: ['markdown'],
+      onlyMainContent: true,
+      waitFor: 6000,
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`firecrawl ${res.status}: ${body.slice(0, 200)}`)
+  }
+  const data = await res.json()
+  const doc = data.data ?? data
+  const md = (doc.markdown ?? '') as string
+  if (!md || md.length < 200) {
+    throw new Error(`firecrawl returned too little markdown (${md.length} chars)`)
+  }
+  return md
+}
+
+/**
+ * When a site advertises a single global discount in the banner (e.g.
+ * "40% off all accounts") but the model didn't put discount_pct on each
+ * pricing row, propagate it to rows that have a list price but no discount.
+ */
+function applyBannerDiscountToRows(payload: Record<string, unknown>): void {
+  const rows = payload.pricing
+  const banner = (payload.active_promo_banner as string | null) ?? ''
+  if (!Array.isArray(rows) || !banner) return
+  const m = banner.match(/(\d{1,2}(?:\.\d+)?)\s*%\s*off/i)
+  if (!m) return
+  const pct = Number.parseFloat(m[1])
+  if (!(pct > 0 && pct < 100)) return
+  for (const r of rows as Array<Record<string, unknown>>) {
+    if (r.discount_pct == null && typeof r.list_price_usd === 'number') {
+      r.discount_pct = pct
+    }
+  }
+}
+
 async function firecrawlScrape(
   url: string,
   kind: ScrapeKind,
