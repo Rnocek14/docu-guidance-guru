@@ -476,6 +476,17 @@ export function buildComparisonMatrix(
     rows.push({ key: 'scaling_plan', label: 'Scaling plan', direction: 'neutral', cells });
   }
 
+  // Country / KYC restrictions (qualitative — affects TAM, not comparability)
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, null, 'US + intl. (KYC required)');
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.country_restrictions ?? null;
+      cell(cells, s.firm_id, null, v ?? '—');
+    }
+    rows.push({ key: 'country_restrictions', label: 'Country restrictions', direction: 'neutral', cells });
+  }
+
   {
     const cells: Record<FirmId, MetricCell> = {};
     cell(cells, MERIDIAN, null, 'none');
