@@ -138,11 +138,12 @@ async function browserlessFetch(url: string, apiKey: string): Promise<string> {
  // (Cloudflare interstitial), fall back to the /unblock endpoint which
  // solves bot-detection challenges (Apex, some FTMO pages).
   const baseHost = 'https://production-sfo.browserless.io'
-  const tryEndpoint = async (path: string, body: Record<string, unknown>): Promise<string> => {
+  const tryEndpoint = async (path: string, body: Record<string, unknown>, timeoutMs = 90_000): Promise<string> => {
     const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), 90_000)
+    const t = setTimeout(() => ctrl.abort(), timeoutMs + 10_000)
     try {
-      const res = await fetch(`${baseHost}${path}?token=${apiKey}`, {
+      // Browserless accepts ?timeout=<ms> to extend its internal 30s default.
+      const res = await fetch(`${baseHost}${path}?token=${apiKey}&timeout=${timeoutMs}`, {
         method: 'POST',
         signal: ctrl.signal,
         headers: { 'Content-Type': 'application/json' },
@@ -182,7 +183,7 @@ async function browserlessFetch(url: string, apiKey: string): Promise<string> {
         cookies: false,
         screenshot: false,
         ttl: 0,
-      })
+      }, 120_000)
       if (unblocked && unblocked.length > html.length) html = unblocked
     } catch (e) {
       // /unblock can 402 on free plans — keep the thin content rather than fail.
