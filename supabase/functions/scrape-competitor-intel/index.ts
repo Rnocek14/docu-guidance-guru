@@ -138,7 +138,8 @@ async function browserlessFetch(url: string, apiKey: string): Promise<string> {
  // (Cloudflare interstitial), fall back to the /unblock endpoint which
  // solves bot-detection challenges (Apex, some FTMO pages).
   const baseHost = 'https://production-sfo.browserless.io'
-  const tryEndpoint = async (path: string, body: Record<string, unknown>, timeoutMs = 90_000): Promise<string> => {
+  // Browserless free/starter plans cap timeout at 60,000ms; values above return 400.
+  const tryEndpoint = async (path: string, body: Record<string, unknown>, timeoutMs = 60_000): Promise<string> => {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), timeoutMs + 10_000)
     try {
@@ -166,9 +167,9 @@ async function browserlessFetch(url: string, apiKey: string): Promise<string> {
 
   let html = await tryEndpoint('/content', {
     url,
-    gotoOptions: { waitUntil: 'networkidle2', timeout: 45_000 },
+    gotoOptions: { waitUntil: 'domcontentloaded', timeout: 45_000 },
     bestAttempt: true,
-  })
+  }, 55_000)
   // If suspiciously thin (Cloudflare interstitial, JS gate), retry with /unblock.
   const looksBlocked =
     html.length < 4_000 ||
@@ -183,7 +184,7 @@ async function browserlessFetch(url: string, apiKey: string): Promise<string> {
         cookies: false,
         screenshot: false,
         ttl: 0,
-      }, 120_000)
+      }, 60_000)
       if (unblocked && unblocked.length > html.length) html = unblocked
     } catch (e) {
       // /unblock can 402 on free plans — keep the thin content rather than fail.
