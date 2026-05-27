@@ -229,6 +229,18 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
     },
     features: ['scaling_plan', 'one_time_fee', 'fast_payouts'],
   },
+  bulenox: {
+    rules: {
+      profit_target_usd: 3000,
+      daily_loss_usd: null,
+      max_drawdown_usd: 2500,
+      drawdown_type: 'eod_trailing',
+      first_payout_cap_count: null,
+      min_trading_days: null,
+      consistency_rule_pct: null,
+      payout_cadence_days: null,
+    },
+  },
   mffu: {
     pricing: [
       { account_size_label: '25K', list_price_usd: 153, promo_price_usd: 92, promo_label: '40% off', discount_pct: 40 },
@@ -742,9 +754,7 @@ Deno.serve(async (req) => {
         payload = await openaiNormalize(markdown, kind, openaiKey)
         applyBannerDiscountToRows(payload)
         derivePricing(payload)
-        if (looksLikeBlockedContent(markdown) || isWeakPricing(payload)) {
-          applyCuratedReference(firmId, payload)
-        }
+        applyCuratedReference(firmId, payload)
         markdown = markdown.slice(0, 20_000)
 
         // Find previous snapshot of same kind
