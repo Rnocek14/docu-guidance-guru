@@ -88,7 +88,7 @@ const FULL_SCHEMA = {
 }
 
 type ScrapeKind = 'weekly' | 'promo_daily'
-type FetchStrategy = 'direct' | 'firecrawl'
+type FetchStrategy = 'direct' | 'firecrawl' | 'browserless'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Direct fetch + OpenAI normalization (default path, no Firecrawl credits)
@@ -127,6 +127,30 @@ async function directFetch(url: string): Promise<string> {
       },
     })
     if (!res.ok) throw new Error(`fetch ${res.status}`)
+    return await res.text()
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+async function browserlessFetch(url: string, apiKey: string): Promise<string> {
+  const browserlessUrl = `https://production-browserless-1d5583d2dfe4.herokuapp.com/content?token=${apiKey}`
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 45_000)
+  try {
+    const res = await fetch(browserlessUrl, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': UA,
+      },
+      body: JSON.stringify({ url, waitFor: 3000 }),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`browserless ${res.status}: ${body.slice(0, 200)}`)
+    }
     return await res.text()
   } finally {
     clearTimeout(t)
@@ -443,6 +467,15 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY') ?? ''
     const openaiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
+    let browserlessKey = Deno.env.get('BROWSERLESS_API_KEY') ?? ''
+    if (!browserlessKey) {
+      const { data: bls } = await createClient(supabaseUrl, serviceKey)
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'browserless_api_key')
+        .single()
+      browserlessKey = (bls?.value as { key?: string } | undefined)?.key ?? ''
+    }
     if (!openaiKey && !firecrawlKey) {
       return new Response(
         JSON.stringify({ error: 'Need either OPENAI_API_KEY or FIRECRAWL_API_KEY' }),
@@ -523,7 +556,20 @@ Deno.serve(async (req) => {
             let md = ''
             if (strategy === 'firecrawl') {
               if (!firecrawlKey) throw new Error('FIRECRAWL_API_KEY missing')
-              md = await firecrawlMarkdown(u, firecrawlKey)
+              try {
+                md = await firecrawlMarkdown(u, firecrawlKey)
+              } catch (fcErr) {
+                if (browserlessKey) {
+                  md = htmlToText(await browserlessFetch(u, browserlessKey))
+                  usedStrategy = 'browserless'
+                } else {
+                  throw fcErr
+                }
+              }
+            } else if (strategy === 'browserless') {
+              if (!browserlessKey) throw new Error('BROWSERLESS_API_KEY missing')
+              md = htmlToText(await browserlessFetch(u, browserlessKey))
+              if (md.length < 400) throw new Error(`thin browserless content (${md.length})`)
             } else {
               try {
                 md = htmlToText(await directFetch(u))
@@ -533,6 +579,9 @@ Deno.serve(async (req) => {
                 if (firecrawlKey) {
                   md = await firecrawlMarkdown(u, firecrawlKey)
                   usedStrategy = 'firecrawl'
+                } else if (browserlessKey) {
+                  md = htmlToText(await browserlessFetch(u, browserlessKey))
+                  usedStrategy = 'browserless'
                 } else {
                   throw new Error(dmsg)
                 }
