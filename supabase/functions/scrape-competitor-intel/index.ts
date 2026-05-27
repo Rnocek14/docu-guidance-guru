@@ -211,7 +211,13 @@ function isWeakPricing(payload: Record<string, unknown>): boolean {
 const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
   apex: {
     pricing: [
-      { account_size_label: '25K', list_price_usd: 249, promo_price_usd: 24.9, promo_label: 'SAVENOW', discount_pct: 90 },
+      { account_size_label: '25K',  list_price_usd: 167, promo_price_usd: 16.70,  promo_label: 'SAVENOW', discount_pct: 90 },
+      { account_size_label: '50K',  list_price_usd: 187, promo_price_usd: 18.70,  promo_label: 'SAVENOW', discount_pct: 90 },
+      { account_size_label: '75K',  list_price_usd: 207, promo_price_usd: 20.70,  promo_label: 'SAVENOW', discount_pct: 90 },
+      { account_size_label: '100K', list_price_usd: 297, promo_price_usd: 29.70,  promo_label: 'SAVENOW', discount_pct: 90 },
+      { account_size_label: '150K', list_price_usd: 297, promo_price_usd: 29.70,  promo_label: 'SAVENOW', discount_pct: 90 },
+      { account_size_label: '250K', list_price_usd: 517, promo_price_usd: 51.70,  promo_label: 'SAVENOW', discount_pct: 90 },
+      { account_size_label: '300K', list_price_usd: 657, promo_price_usd: 65.70,  promo_label: 'SAVENOW', discount_pct: 90 },
     ],
     active_promo_banner: 'Any Size Evals up to 90% Off — use code SAVENOW',
     promo_code: 'SAVENOW',
@@ -221,8 +227,8 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       max_drawdown_usd: 1000,
       drawdown_type: 'trailing',
       payout_split_pct: 100,
-      first_payout_cap_usd: null,
-      first_payout_cap_count: null,
+      first_payout_cap_usd: 25000,
+      first_payout_cap_count: 5,
       min_trading_days: 1,
       consistency_rule_pct: 50,
       payout_cadence_days: 5,
@@ -235,11 +241,101 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       daily_loss_usd: null,
       max_drawdown_usd: 2500,
       drawdown_type: 'eod_trailing',
-      first_payout_cap_count: null,
-      min_trading_days: null,
-      consistency_rule_pct: null,
-      payout_cadence_days: null,
+      first_payout_cap_count: 5,
+      min_trading_days: 7,
+      consistency_rule_pct: 30,
+      payout_cadence_days: 14,
     },
+    features: ['eod_trailing', 'scaling_plan', 'reset_discount'],
+  },
+  ftmo: {
+    pricing: [
+      { account_size_label: '10K',  list_price_usd: 89,  promo_price_usd: null, promo_label: null, discount_pct: null },
+      { account_size_label: '25K',  list_price_usd: 155, promo_price_usd: null, promo_label: null, discount_pct: null },
+      { account_size_label: '50K',  list_price_usd: 250, promo_price_usd: null, promo_label: null, discount_pct: null },
+      { account_size_label: '100K', list_price_usd: 345, promo_price_usd: null, promo_label: null, discount_pct: null },
+      { account_size_label: '200K', list_price_usd: 540, promo_price_usd: null, promo_label: null, discount_pct: null },
+    ],
+    rules: {
+      profit_target_usd: 10000,            // 10% of 100K Challenge
+      daily_loss_usd: 5000,                // 5% daily loss
+      max_drawdown_usd: 10000,             // 10% max loss
+      drawdown_type: 'static',
+      payout_split_pct: 80,
+      first_payout_cap_usd: null,
+      first_payout_cap_count: null,
+      min_trading_days: 4,
+      consistency_rule_pct: null,
+      payout_cadence_days: 14,
+    },
+    features: ['two_phase_eval', 'static_drawdown', 'biweekly_payouts'],
+  },
+  fundednext: {
+    pricing: [
+      { account_size_label: '25K',  list_price_usd: 142, promo_price_usd: 106.50, promo_label: 'EIDFNC', discount_pct: 25 },
+      { account_size_label: '50K',  list_price_usd: 269, promo_price_usd: 201.75, promo_label: 'EIDFNC', discount_pct: 25 },
+      { account_size_label: '100K', list_price_usd: 469, promo_price_usd: 351.75, promo_label: 'EIDFNC', discount_pct: 25 },
+      { account_size_label: '150K', list_price_usd: 599, promo_price_usd: 449.25, promo_label: 'EIDFNC', discount_pct: 25 },
+      { account_size_label: '250K', list_price_usd: 899, promo_price_usd: 674.25, promo_label: 'EIDFNC', discount_pct: 25 },
+      { account_size_label: '300K', list_price_usd: 999, promo_price_usd: 749.25, promo_label: 'EIDFNC', discount_pct: 25 },
+    ],
+    active_promo_banner: 'Up to 25% Off on all Stellar Plans',
+    promo_code: 'EIDFNC',
+    rules: {
+      profit_target_usd: 8000,             // 8% Phase 1 / 5% Phase 2 of 100K
+      daily_loss_usd: 5000,                // 5% daily
+      max_drawdown_usd: 10000,             // 10% max
+      drawdown_type: 'static',
+      payout_split_pct: 95,
+      first_payout_cap_usd: null,
+      first_payout_cap_count: null,
+      min_trading_days: 5,
+      consistency_rule_pct: null,
+      payout_cadence_days: 21,
+    },
+    features: ['stellar_plan', 'scaling_plan', 'static_drawdown'],
+  },
+  topstep: {
+    pricing: [
+      { account_size_label: '50K',  list_price_usd: 49,  promo_price_usd: null, promo_label: null, discount_pct: null },
+      { account_size_label: '100K', list_price_usd: 99,  promo_price_usd: null, promo_label: null, discount_pct: null },
+      { account_size_label: '150K', list_price_usd: 149, promo_price_usd: null, promo_label: null, discount_pct: null },
+    ],
+    rules: {
+      profit_target_usd: 6000,             // 100K Combine
+      daily_loss_usd: null,                // trailing only, no daily loss
+      max_drawdown_usd: 3000,              // 100K trailing
+      drawdown_type: 'eod_trailing',
+      payout_split_pct: 90,
+      first_payout_cap_usd: 5000,
+      first_payout_cap_count: 5,
+      min_trading_days: 2,
+      consistency_rule_pct: 50,
+      payout_cadence_days: 7,
+    },
+    features: ['trading_combine', 'express_funded', 'scaling_plan'],
+  },
+  tradeify: {
+    pricing: [
+      { account_size_label: '25K',  list_price_usd: 121, promo_price_usd: 72.60,  promo_label: 'MAY', discount_pct: 40 },
+      { account_size_label: '50K',  list_price_usd: 141, promo_price_usd: 84.60,  promo_label: 'MAY', discount_pct: 40 },
+      { account_size_label: '75K',  list_price_usd: 161, promo_price_usd: 96.60,  promo_label: 'MAY', discount_pct: 40 },
+      { account_size_label: '100K', list_price_usd: 181, promo_price_usd: 108.60, promo_label: 'MAY', discount_pct: 40 },
+      { account_size_label: '150K', list_price_usd: 251, promo_price_usd: 150.60, promo_label: 'MAY', discount_pct: 40 },
+    ],
+    rules: {
+      profit_target_usd: 9000,             // 150K Advanced
+      daily_loss_usd: null,
+      max_drawdown_usd: 4500,
+      drawdown_type: 'eod_trailing',
+      payout_split_pct: 90,
+      first_payout_cap_usd: 1250,
+      first_payout_cap_count: 3,
+      min_trading_days: 5,
+      consistency_rule_pct: 35,
+      payout_cadence_days: 1,
+    },
+    features: ['straight_to_sim', 'eod_trailing', 'fast_payouts'],
   },
   mffu: {
     pricing: [
