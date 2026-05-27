@@ -133,6 +133,30 @@ async function directFetch(url: string): Promise<string> {
   }
 }
 
+async function browserlessFetch(url: string, apiKey: string): Promise<string> {
+  const browserlessUrl = `https://production-browserless-1d5583d2dfe4.herokuapp.com/content?token=${apiKey}`
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 45_000)
+  try {
+    const res = await fetch(browserlessUrl, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': UA,
+      },
+      body: JSON.stringify({ url, waitFor: 3000 }),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`browserless ${res.status}: ${body.slice(0, 200)}`)
+    }
+    return await res.text()
+  } finally {
+    clearTimeout(t)
+  }
+}
+
 async function openaiNormalize(
   text: string,
   kind: ScrapeKind,
