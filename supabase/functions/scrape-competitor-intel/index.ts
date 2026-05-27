@@ -26,7 +26,7 @@ const corsHeaders = {
 
 const FIRECRAWL_URL = 'https://api.firecrawl.dev/v2/scrape'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
-const OPENAI_MODEL = 'gpt-4o-mini'
+const OPENAI_MODEL = 'gpt-4o'
 // build: 2026-05-20-direct-2
 
 // Browser-like UA so most landing pages return real HTML rather than a stub.
@@ -169,7 +169,7 @@ async function openaiNormalize(
     'account_size_label is the marketed account size (e.g. "50K", "100K", "150K"). ' +
     'Do not include rules you cannot literally find on the page.'
 
-  const userMsg = `${schemaDescription}\n\nSOURCE TEXT (truncated):\n${text.slice(0, 18000)}`
+  const userMsg = `${schemaDescription}\n\nSOURCE TEXT (truncated):\n${text.slice(0, 40000)}`
 
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
@@ -180,6 +180,7 @@ async function openaiNormalize(
     body: JSON.stringify({
       model: OPENAI_MODEL,
       temperature: 0,
+      max_tokens: 2000,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
