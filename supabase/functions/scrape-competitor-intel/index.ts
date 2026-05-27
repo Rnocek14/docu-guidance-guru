@@ -194,6 +194,101 @@ async function browserlessFetch(url: string, apiKey: string): Promise<string> {
   return html
 }
 
+function looksLikeBlockedContent(text: string): boolean {
+  return /attention required|sorry, you have been blocked|cloudflare ray id|please enable cookies|just a moment|cf-chl|challenge-platform/i.test(text)
+}
+
+function isWeakPricing(payload: Record<string, unknown>): boolean {
+  const rows = payload.pricing
+  if (!Array.isArray(rows) || rows.length === 0) return true
+  return rows.every((r) => {
+    if (!r || typeof r !== 'object') return true
+    const row = r as Record<string, unknown>
+    return row.account_size_label == null && row.list_price_usd == null && row.promo_price_usd == null
+  })
+}
+
+const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
+  apex: {
+    pricing: [
+      { account_size_label: '25K', list_price_usd: 249, promo_price_usd: 24.9, promo_label: 'SAVENOW', discount_pct: 90 },
+    ],
+    active_promo_banner: 'Any Size Evals up to 90% Off — use code SAVENOW',
+    promo_code: 'SAVENOW',
+    rules: {
+      profit_target_usd: 1500,
+      daily_loss_usd: null,
+      max_drawdown_usd: 1000,
+      drawdown_type: 'trailing',
+      payout_split_pct: 100,
+      first_payout_cap_usd: null,
+      first_payout_cap_count: null,
+      min_trading_days: 1,
+      consistency_rule_pct: 50,
+      payout_cadence_days: 5,
+    },
+    features: ['scaling_plan', 'one_time_fee', 'fast_payouts'],
+  },
+  mffu: {
+    pricing: [
+      { account_size_label: '25K', list_price_usd: 153, promo_price_usd: 92, promo_label: '40% off', discount_pct: 40 },
+      { account_size_label: '50K', list_price_usd: 153, promo_price_usd: 92, promo_label: '40% off', discount_pct: 40 },
+      { account_size_label: '100K', list_price_usd: 157, promo_price_usd: 126, promo_label: '40% off', discount_pct: 20 },
+      { account_size_label: '150K', list_price_usd: 227, promo_price_usd: 114, promo_label: '40% off', discount_pct: 50 },
+    ],
+    rules: {
+      profit_target_usd: 3000,
+      max_drawdown_usd: 2000,
+      drawdown_type: 'eod_trailing',
+      first_payout_cap_usd: 7500,
+      first_payout_cap_count: 3,
+    },
+  },
+  tpt: {
+    pricing: [
+      { account_size_label: '25K', list_price_usd: 150, promo_price_usd: 105, promo_label: 'NOFEE30', discount_pct: 30 },
+      { account_size_label: '50K', list_price_usd: 170, promo_price_usd: 119, promo_label: 'NOFEE30', discount_pct: 30 },
+      { account_size_label: '75K', list_price_usd: 245, promo_price_usd: 171.5, promo_label: 'NOFEE30', discount_pct: 30 },
+      { account_size_label: '100K', list_price_usd: 330, promo_price_usd: 231, promo_label: 'NOFEE30', discount_pct: 30 },
+      { account_size_label: '150K', list_price_usd: 360, promo_price_usd: 252, promo_label: 'NOFEE30', discount_pct: 30 },
+    ],
+    rules: {
+      profit_target_usd: 3000,
+      daily_loss_usd: 1100,
+      max_drawdown_usd: 2000,
+      drawdown_type: 'eod_trailing',
+      first_payout_cap_usd: 1500,
+      first_payout_cap_count: 1,
+    },
+  },
+}
+
+function applyCuratedReference(firmId: string, payload: Record<string, unknown>): void {
+  const fallback = CURATED_REFERENCE[firmId]
+  if (!fallback) return
+  let used = false
+  if (isWeakPricing(payload) && Array.isArray(fallback.pricing)) {
+    payload.pricing = fallback.pricing
+    used = true
+  }
+  const rules = (payload.rules && typeof payload.rules === 'object' ? payload.rules : {}) as Record<string, unknown>
+  const fallbackRules = (fallback.rules && typeof fallback.rules === 'object' ? fallback.rules : {}) as Record<string, unknown>
+  for (const [key, value] of Object.entries(fallbackRules)) {
+    if (rules[key] == null && value != null) {
+      rules[key] = value
+      used = true
+    }
+  }
+  payload.rules = rules
+  for (const key of ['active_promo_banner', 'promo_code', 'features']) {
+    if ((payload[key] == null || (Array.isArray(payload[key]) && (payload[key] as unknown[]).length === 0)) && fallback[key] != null) {
+      payload[key] = fallback[key]
+      used = true
+    }
+  }
+  if (used) payload._fallback_used = 'curated_reference'
+}
+
 async function openaiNormalize(
   text: string,
   kind: ScrapeKind,
@@ -452,11 +547,21 @@ function diff(oldPayload: JsonVal, newPayload: JsonVal): Array<{
     if (f.startsWith('_') || f.includes('._')) continue
     const ov = o[f]
     const nv = n[f]
-    if (JSON.stringify(ov) !== JSON.stringify(nv)) {
+    if (stableStringify(ov) !== stableStringify(nv)) {
       changes.push({ field: f, old_value: ov ?? null, new_value: nv ?? null, severity: severityFor(f) })
     }
   }
   return changes
+}
+
+function stableStringify(value: JsonVal): string {
+  if (value === undefined) return 'null'
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const entries = Object.entries(value as Record<string, JsonVal>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b))
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`
 }
 
 // ────────────────────────────────────────────────────────────────────────────
