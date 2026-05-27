@@ -50,6 +50,8 @@ export interface SnapshotInput {
       news_trading_allowed?: boolean | null;
       payout_methods?: string | null;
       scaling_plan_summary?: string | null;
+      country_restrictions?: string | null;
+      account_size_usd?: number | null;
     };
     _fallback_used?: string | null;
     _fetch_strategy?: string | null;
