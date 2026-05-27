@@ -134,35 +134,58 @@ async function directFetch(url: string): Promise<string> {
 }
 
 async function browserlessFetch(url: string, apiKey: string): Promise<string> {
-  // Canonical Browserless v2 endpoint. Falls back to production-sfo if the
-  // primary host is unreachable (some accounts are on regional clusters).
-  const browserlessUrl = `https://production-sfo.browserless.io/content?token=${apiKey}`
-  const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), 60_000)
-  try {
-    const res = await fetch(browserlessUrl, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': UA,
-      },
-      // gotoOptions ensures the page is fully rendered before HTML extraction;
-      // bestAttempt avoids erroring on cosmetic timeouts.
-      body: JSON.stringify({
-        url,
-        gotoOptions: { waitUntil: 'networkidle2', timeout: 45_000 },
-        bestAttempt: true,
-      }),
-    })
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      throw new Error(`browserless ${res.status}: ${body.slice(0, 200)}`)
+  // Try the standard /content endpoint first. If the response is thin
+ // (Cloudflare interstitial), fall back to the /unblock endpoint which
+ // solves bot-detection challenges (Apex, some FTMO pages).
+  const baseHost = 'https://production-sfo.browserless.io'
+  const tryEndpoint = async (path: string, body: Record<string, unknown>): Promise<string> => {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 90_000)
+    try {
+      const res = await fetch(`${baseHost}${path}?token=${apiKey}`, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '')
+        throw new Error(`browserless ${path} ${res.status}: ${txt.slice(0, 200)}`)
+      }
+      const ct = res.headers.get('content-type') ?? ''
+      if (ct.includes('application/json')) {
+        const j = await res.json()
+        return (j?.content ?? j?.html ?? '') as string
+      }
+      return await res.text()
+    } finally {
+      clearTimeout(t)
     }
-    return await res.text()
-  } finally {
-    clearTimeout(t)
   }
+
+  let html = await tryEndpoint('/content', {
+    url,
+    gotoOptions: { waitUntil: 'networkidle2', timeout: 45_000 },
+    bestAttempt: true,
+  })
+  // If suspiciously thin (Cloudflare interstitial, JS gate), retry with /unblock.
+  if (html.length < 4_000 || /just a moment|cf-chl|challenge-platform/i.test(html)) {
+    try {
+      const unblocked = await tryEndpoint('/unblock', {
+        url,
+        browserWSEndpoint: false,
+        content: true,
+        cookies: false,
+        screenshot: false,
+        ttl: 0,
+      })
+      if (unblocked && unblocked.length > html.length) html = unblocked
+    } catch (e) {
+      // /unblock can 402 on free plans — keep the thin content rather than fail.
+      console.warn('browserless /unblock fallback failed:', e instanceof Error ? e.message : e)
+    }
+  }
+  return html
 }
 
 async function openaiNormalize(
