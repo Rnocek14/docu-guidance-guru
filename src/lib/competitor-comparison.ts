@@ -163,6 +163,12 @@ export type MetricKey =
   | 'min_trading_days'
   | 'consistency_pct'
   | 'reset_fee'
+  | 'activation_fee'
+  | 'phase_count'
+  | 'accounts_allowed'
+  | 'news_trading'
+  | 'payout_methods'
+  | 'scaling_plan'
   | 'active_promo';
 
 export type Direction = 'higher_better' | 'lower_better' | 'neutral';
