@@ -169,7 +169,7 @@ export default function CompetitorIntel() {
 
   // Manual run mutation
   const runScrape = useMutation({
-    mutationFn: async (firmId: string) => {
+    mutationFn: async (firmId: string | null) => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
       const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/scrape-competitor-intel`, {
@@ -178,19 +178,18 @@ export default function CompetitorIntel() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ kind: 'weekly', firm_id: firmId }),
+        body: JSON.stringify(firmId ? { kind: 'weekly', firm_id: firmId } : { kind: 'weekly' }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
       return body;
     },
-    onSuccess: (body, firmId) => {
-      const r = body?.results?.[0];
-      if (r?.status === 'ok') {
-        toast.success(`${firmId} scraped — ${r.changes} change(s)`);
-      } else {
-        toast.warning(`${firmId}: ${r?.error?.slice(0, 200) ?? 'unknown'}`);
-      }
+    onSuccess: (body) => {
+      const results = (body?.results ?? []) as Array<{ firm_id: string; status: string; changes: number; error?: string }>;
+      const ok = results.filter((r) => r.status === 'ok');
+      const bad = results.filter((r) => r.status !== 'ok');
+      if (ok.length) toast.success(`Scraped ${ok.length} firm(s) — ${ok.reduce((a, r) => a + r.changes, 0)} change(s)`);
+      for (const r of bad) toast.warning(`${r.firm_id}: ${r.error?.slice(0, 200) ?? r.status}`);
       queryClient.invalidateQueries({ queryKey: ['ci-snapshots'] });
       queryClient.invalidateQueries({ queryKey: ['ci-changes'] });
     },
@@ -201,10 +200,22 @@ export default function CompetitorIntel() {
     <DashboardLayout title="Competitor Intel" navItems={missionControlNavItems}>
       <div className="space-y-4">
         <header className="space-y-1">
-          <h1 className="text-2xl font-semibold">Competitor Intelligence</h1>
-          <p className="text-sm text-muted-foreground">
-            Observational only — never feeds treasury, Monte Carlo, or pricing decisions. Source quality is labelled on every snapshot.
-          </p>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold">Competitor Intelligence</h1>
+              <p className="text-sm text-muted-foreground">
+                Observational only — never feeds treasury, Monte Carlo, or pricing decisions. Source quality is labelled on every snapshot.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => runScrape.mutate(null)}
+              disabled={runScrape.isPending}
+            >
+              {runScrape.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              <span className="ml-2">Run all firms</span>
+            </Button>
+          </div>
         </header>
 
         <div className="grid gap-4 md:grid-cols-[260px_1fr]">
