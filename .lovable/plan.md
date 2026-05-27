@@ -1,143 +1,74 @@
+# Competitor Intel → Market Position
 
-# Diagnosis: Why the Treasury Sim Says LTV = −$104
+Right now `/admin/intel` is a *raw data viewer* — one firm at a time, no cross-firm comparison, no opinion on where Meridian stands. We'll add an intelligence layer on top of the snapshots you already collect.
 
-I found the answer, and it's not "assumptions are vague" — it's much more concrete than that. **The treasury simulator is missing four production constraints that already exist in this codebase.** The result is a model that systematically overstates payout liability by ~4–5× and produces a false negative-LTV signal.
+## What gets added
 
-## The Smoking Gun
+A new **Market Position** tab at the top of `/admin/intel`, with three sections:
 
-This project has TWO simulators:
+### 1. Side-by-side comparison matrix
+A single table with one column per firm (Meridian, Apex, Topstep, Tradeify, MFFU, TPT, FTMO, FundedNext) and rows for the dimensions that actually matter to a trader's purchase decision:
 
-- `supabase/functions/run-treasury-projection/index.ts` — the one we've been running. Standalone. Hand-rolled defaults. **Missing key production constraints.**
-- `src/lib/monte-carlo.ts` — a 1,655-line production simulator with `DEFAULT_ASSUMPTIONS` explicitly labeled **"CALIBRATED TO INDUSTRY REALITY (2026-03-02)"** referencing QuantVPS, Tradeify, and Topstep benchmarks.
-
-These two simulators were never reconciled. The treasury sim uses a simplified behavior model that the production sim outgrew months ago.
-
-## Side-by-Side: What the Treasury Sim Got Wrong
-
-| Variable | Treasury sim (broken) | Production calibration (real) | Impact |
-|---|---|---|---|
-| `passRate` | 12% | 7% mode (4–12%) | ~OK |
-| `avgPayoutWhenPaid` | $380 | $350 mean / $120 stdDev | ~OK |
-| `payoutRequestRate` | **MISSING — assumes 100%** | **25% mode (15–40%)** | **4× overstated** |
-| `lifetimeCapPerUser` | **MISSING** | **$1,490 hard cap** | unbounded → bounded |
-| `minMonthsBetweenPayouts` | **MISSING** | **1 month** | cadence cap |
-| `minWinningDaysPerPayout` | **MISSING** | **10 days** | retires most blowing-up traders |
-| `payoutCooldownDays` | MISSING | 14 days | reinforces cadence cap |
-| `fixedMonthlyCosts` | $12k | $18k (but solo beta is much less) | known |
-
-## Why This Produced "LTV = −$104"
-
-The treasury sim's per-trader payout obligation is:
-```
-0.14 lifetime pass × 4.4 expected payouts × $380 = $234 obligation / signup
+```text
+                  Meridian  Apex   Topstep  MFFU   Tradeify  TPT    FTMO    FN
+Entry price 50K   $149      $147   $165     $80    $55       $75    —       —
+Profit target     $3,000    $3,000 $3,000   $3,000 $3,000    $3,000 €5,000  $5,000
+Daily loss        $1,500    $1,250 $1,000   $2,000 $1,500    $1,250 €5,000  $2,500
+Max drawdown      $2,500    $2,500 $2,000   $2,500 $2,500    $2,000 €10,000 $5,000
+Payout split      80%       100%   90%      90%    90%       80→90% 80%     90%
+First payout cap  $500×1    $2k×5  $1k×1    $7.5k×3 $2k×1    $1.5k×1 —      —
+Cooldown          14d       8d     14d      0d     0d        0d     14d     14d
+Min trading days  5         3      5        5      5         5      10      5
+Consistency       —         30%    —        —      —         —      —       —
+Lifetime cap      10×       —      —        —      —         —      —       —
+Reset fee         $99       $80    $99      $50    $50       $50    €70     €70
+Source quality    canon     ✅     ✅       ⚠️     ✅        ⚠️     ✅      ⚠️
 ```
 
-But the production constraints say the real obligation is bounded:
-```
-0.08 lifetime pass × 0.25 payoutRequestRate × min($1,490 lifetime cap, ...) 
-≈ 0.02 × $1,490 = ~$30 obligation / signup
-```
+- Meridian column is pinned left and pulled from `pricing-data.ts` + `tier-economics.ts` (no scraping).
+- Competitor columns come from each firm's latest `competitor_intel_snapshots` row.
+- Each cell color-codes whether Meridian is **tighter** (red, harder for trader) or **looser** (green, friendlier) than that firm.
+- Missing cells render as `—` honestly (no fake data).
 
-That's an **~8× difference** in expected payout liability per signup. With net inflow ~$161/signup, the corrected number is roughly:
-```
-LTV ≈ $161 net inflow − $30 payout obligation − $24 variable cost ≈ +$107 / signup
-```
+### 2. "Where Meridian stands" scorecard
+Five plain-English verdicts, computed from the matrix:
 
-**The math flips from −$104 to roughly +$107 just by importing production constraints.** No assumption change required.
+- **Price position** — "Meridian is in the top quartile on entry price ($149 vs $55–$165 median $90). You're priced like premium, not budget."
+- **Trader generosity** — "Lowest payout split in the set (80% vs 90% median). Tightest first-payout cap ($500 vs $2k median)."
+- **Rule strictness** — "Drawdown and daily loss rules sit in the middle of the pack. Cooldown of 14d is on the strict end."
+- **Unique constraints** — "Only firm in the set with a lifetime payout cap (10×). No competitor advertises this."
+- **What you lack** — "No 100% split tier. No fast-payout option. No promo banner currently live (3 of 7 competitors have one)."
 
-## Why It Was Hidden Until Now
+### 3. Strategic recommendations
+A short ranked list of action items the system can defend with data:
 
-- The original treasury sim was written before Bug #1 (liability-adjusted trough) was fixed. Without liability accounting, it never showed runaway obligations and nobody noticed it wasn't modeling caps.
-- Once Bug #1 was fixed, the unbounded payout obligation finally surfaced — but as a "scary insight," not as "your sim is missing 4 production constraints."
-- The two simulators have different purposes (per-trader vs cohort-aging) and were never explicitly reconciled.
+- "Apex is running a 60% promo (`PUMPKIN60`). 3 competitors are below $80 effective price. Consider a time-boxed Founder's promo or accept that you're a premium-only brand."
+- "Your $500 first-payout cap is 4× tighter than the median. This is fine if your messaging owns it ('we pay what we promise'), but expect price-shoppers to bounce — measure checkout conversion against TPT/Tradeify."
+- "MFFU and Tradeify advertise 0-day cooldowns. Your 14d cooldown is a real friction point for active traders — consider a 7d Pro tier."
+- "FTMO is the only firm with a refund model. Not worth matching; different business model and you've already chosen tighter rules."
 
-The user's instinct ("the assumptions are wrong") was directionally right but the actual issue is even more concrete: the constraints exist in code already, they just aren't wired into the treasury model.
+The recommendations are generated by a deterministic ruleset (not an LLM) — each one references the specific cells in the matrix that triggered it, so you can verify the logic.
 
----
+## Where this lives
 
-# The Plan
+- New tab control at the top of `CompetitorIntel.tsx`: **Firms** (existing detail view) | **Market Position** (new).
+- New component `src/components/admin/competitor-intel/MarketPositionView.tsx` that consumes the existing `snapshots` query plus `TIERS` from `pricing-data.ts`.
+- New pure helper `src/lib/competitor-comparison.ts` containing:
+  - `buildComparisonMatrix(meridian, snapshots)` → typed rows
+  - `scoreMeridianPosition(matrix)` → the five scorecard verdicts
+  - `generateRecommendations(matrix, scorecard)` → the ranked actions
+  All three are unit-testable and free of UI.
 
-## Phase 1 — Reconcile the Treasury Sim with Production Calibration
+## Out of scope (on purpose)
 
-Edit `supabase/functions/run-treasury-projection/index.ts`:
+- No new scraping logic — uses existing snapshots.
+- No changes to treasury / Monte Carlo. This stays observational, per the existing `market_reference` rule.
+- No LLM calls. Verdicts are rules-based so they're auditable.
+- No public-facing comparison page changes (`ComparisonTable.tsx` stays as-is).
 
-1. **Import the SSOT.** Reference (mirror) `DEFAULT_ASSUMPTIONS` and `SimulationKnobs` from `src/lib/monte-carlo.ts` directly inside the edge function (edge functions can't import from `src/`, so mirror with a "SOURCE OF TRUTH" comment block and a CI assertion test that fails if values drift).
+## Files touched
 
-2. **Add `payoutRequestRate`** to behavior model. Apply it to the funded population before computing payout requests:
-   ```ts
-   const requestingFunded = funded * beh.payoutRequestRate.mode
-   const payoutRequestsThisMonth = requestingFunded * beh.payoutsPerPaidAccountPerMonth.mode
-   ```
-
-3. **Add `lifetimeCapPerUser` accounting.** Track cumulative paid amount per cohort (or as an aggregate stock). When a cohort's average cumulative paid amount approaches `lifetimeCap`, decay its `payoutProbPerMonth` toward zero. This is the single most important fix.
-
-4. **Add `minMonthsBetweenPayouts`** as a hard cap on `payoutsPerPaidAccountPerMonth`. Currently 1, so this caps cadence at 1/month per requesting trader.
-
-5. **Update fixed opex default to a "lean beta" tier.** Add a `costMode` input: `lean` ($3k/mo), `staffed` ($12k/mo), `scaled` ($18k/mo). Default to `lean` for beta scenarios.
-
-6. **Add a `methodology` field** to results: `liability_adjusted_v2_lifetime_capped`. Bump the schema marker so the dashboard knows the new runs are post-calibration.
-
-## Phase 2 — Re-Derive LTV and Republish Decomposition v2
-
-Rerun the same 5 decompositions (`/mnt/documents/treasury_decomposition_v2.md`) using the corrected model:
-
-- Unit economics (expect LTV to flip from −$104 to roughly +$100, give or take)
-- Cohort waterfall (no change — already correct)
-- Revenue attribution (no change — already correct)
-- Small-beta survival scenarios (expect tiny beta to flip from "trough −$264k, 0% survival" to "survivable")
-- Sensitivity ranking (expect `lifetimeCapPerUser` and `payoutRequestRate` to top the list)
-
-Output: a clean v2 markdown report side-by-side with v1, with a "what changed" section showing the corrected numbers vs the broken ones.
-
-## Phase 3 — Build the Viability Region Map (the user's actual ask)
-
-A standalone analytical script (no UI, no edge function) that produces a 3-axis grid:
-
-- **Axis 1: `fixedMonthlyOpex`** — [$2k, $4k, $6k, $8k, $12k, $18k]
-- **Axis 2: `avgPayoutWhenPaid`** — [$200, $300, $380, $500]
-- **Axis 3: `payoutRequestRate` × `payoutsPerPaidAccountPerMonth`** — combined as "effective payout extraction velocity" with 5 levels (low → high)
-
-For each cell (6 × 4 × 5 = 120 combinations), run 30 Monte Carlo trials with corrected model and record:
-
-- 24-month liability-adjusted trough (P50, P5)
-- Insolvency probability
-- L2 freeze months
-- **Classification:** `viable` (P50 trough > 0, L2 < 3 mo) / `marginal` (P50 > −$20k) / `insolvent` (P50 < −$20k)
-
-Output: `/mnt/documents/treasury_viability_map_v1.md` with:
-- A heatmap-style table per opex tier showing the viability region across payout-size × velocity
-- A textual summary: "Meridian is viable when [opex ≤ $X] AND [avgPayout ≤ $Y OR velocity ≤ Z]"
-- The minimum opex headroom required at each (avgPayout, velocity) point
-
-## Phase 4 — Cross-Validate Against the Existing Competitor Profiles
-
-The codebase already has `src/lib/competitor-profiles.ts` with Apex- and FTMO-derived calibrations. Run the corrected treasury sim against:
-- Apex Conservative profile (high pass throttle, $2k cap × 5, fast cadence)
-- FTMO refund-model variant
-- Meridian Starter (current production knobs)
-
-If the corrected Meridian model lands in a plausibly-survivable zone vs the competitor benchmarks, the calibration is validated. If not, the next investigation step is `payoutRequestRate` — that's the only assumption I'm still genuinely unsure about, and it's the one that should be checked against any seed-data the project has.
-
-## What I'm NOT Doing (And Why)
-
-- **Not adding UI for the viability map.** Markdown report is faster, denser, and what the user has been consuming. UI later if useful.
-- **Not researching external prop firm payout data via web search.** The project already calibrated against QuantVPS/Tradeify/Topstep three months ago — those numbers are baked into `monte-carlo.ts`. Re-researching would be redundant.
-- **Not building a separate "beta mode" simulator.** The corrected treasury sim with `costMode: 'lean'` IS the beta simulator.
-- **Not touching production payout logic.** This is all simulator-side. Production payout/breaker/cap code is correct; the sim was simply unaware of it.
-
-## Deliverables
-
-1. Patched `supabase/functions/run-treasury-projection/index.ts` with imported production constraints
-2. `treasury_decomposition_v2.md` — corrected LTV and decomposition
-3. `treasury_viability_map_v1.md` — the 3-axis region map
-4. A short verdict at the end: **"At opex ≤ $X and trader behavior in region Y, Meridian is viable. Here's the minimum required reserve and the safe scaling velocity."**
-
-## Risk / Confidence
-
-- High confidence the LTV flips positive once `lifetimeCapPerUser` and `payoutRequestRate` are wired in. The math is mechanical, not modeled.
-- Medium confidence on the exact `payoutRequestRate` value (production says 25% mode; if it's actually 50% in real Meridian data we don't have yet, the picture is less rosy).
-- Low risk of regressions — all changes are inside the projection edge function. No production payout code is touched.
-
-## Suggested Order
-
-Phase 1 → Phase 2 → Phase 3 → Phase 4. Phase 1+2 is roughly one edit cycle. Phase 3 is a single bun script. Phase 4 is half an hour. Total: one focused session.
+- `src/pages/admin/CompetitorIntel.tsx` — add tab switcher
+- `src/components/admin/competitor-intel/MarketPositionView.tsx` — new
+- `src/lib/competitor-comparison.ts` — new (pure logic)
+- `src/lib/competitor-comparison.test.ts` — new (unit tests for scoring + recommendations)
