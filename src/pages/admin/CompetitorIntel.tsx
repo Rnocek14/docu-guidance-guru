@@ -10,6 +10,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, RefreshCw, ExternalLink, AlertTriangle, Eye, EyeOff, Save, KeyRound } from 'lucide-react';
 import { missionControlNavItems } from '@/components/layout/AdminNav';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { MarketPositionView } from '@/components/admin/competitor-intel/MarketPositionView';
+import type { SnapshotInput } from '@/lib/competitor-comparison';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 type Profile = {
@@ -170,6 +173,21 @@ export default function CompetitorIntel() {
     [changes, activeId],
   );
 
+  const latestSnapshotInputs: SnapshotInput[] = useMemo(() => {
+    const out: SnapshotInput[] = [];
+    for (const p of profiles) {
+      const s = latestByFirm.get(p.firm_id);
+      if (!s) continue;
+      out.push({
+        firm_id: p.firm_id,
+        firm_name: p.name,
+        captured_at: s.captured_at,
+        payload: s.payload as SnapshotInput['payload'],
+      });
+    }
+    return out;
+  }, [profiles, latestByFirm]);
+
   // Browserless key status
   const browserlessQ = useQuery({
     queryKey: ['ci-browserless-key'],
@@ -294,7 +312,18 @@ export default function CompetitorIntel() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-[260px_1fr]">
+        <Tabs defaultValue="market">
+          <TabsList>
+            <TabsTrigger value="market">Market Position</TabsTrigger>
+            <TabsTrigger value="firms">Firms (raw)</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="market" className="mt-4">
+            <MarketPositionView snapshots={latestSnapshotInputs} />
+          </TabsContent>
+
+          <TabsContent value="firms" className="mt-4">
+            <div className="grid gap-4 md:grid-cols-[260px_1fr]">
           {/* Firm list */}
           <Card>
             <CardHeader className="py-3">
@@ -343,7 +372,9 @@ export default function CompetitorIntel() {
               />
             )}
           </div>
-        </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </DashboardLayout>
   );
