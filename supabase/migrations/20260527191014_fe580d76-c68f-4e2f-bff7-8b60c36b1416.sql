@@ -1,0 +1,3 @@
+UPDATE public.competitor_intel_profiles SET urls = jsonb_build_object('pricing','https://apextraderfunding.com/pricing/','rules','https://apextraderfunding.com/pricing/') WHERE firm_id='apex';
+UPDATE public.competitor_intel_profiles SET urls = jsonb_build_object('pricing','https://bulenox.com/','rules','https://bulenox.com/') WHERE firm_id='bulenox';
+UPDATE public.competitor_intel_profiles SET urls = jsonb_build_object('pricing','https://ftmo.com/en/','rules','https://ftmo.com/en/'), fetch_strategy='direct' WHERE firm_id='ftmo';
