@@ -374,9 +374,19 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
 function applyCuratedReference(firmId: string, payload: Record<string, unknown>): void {
   const fallback = CURATED_REFERENCE[firmId]
   if (!fallback) return
-  let used = false
+  const filledFields: string[] = []
+  // Snapshot what the scraper actually produced BEFORE we merge anything.
+  const scrapedPricing = Array.isArray(payload.pricing) ? (payload.pricing as Record<string, unknown>[]) : []
+  const scrapedRules = (payload.rules && typeof payload.rules === 'object'
+    ? payload.rules
+    : {}) as Record<string, unknown>
+  const scraperHadPricing = scrapedPricing.some(
+    (r) => r && typeof r === 'object' && (r.list_price_usd != null || r.promo_price_usd != null),
+  )
+  const scraperHadRules = Object.values(scrapedRules).some((v) => v != null)
+
   if (Array.isArray(fallback.pricing)) {
-    const scraped = Array.isArray(payload.pricing) ? (payload.pricing as Record<string, unknown>[]) : []
+    const scraped = scrapedPricing
     const normLabel = (l: unknown) => String(l ?? '').toUpperCase().replace(/[^0-9K]/g, '')
     const seen = new Set(
       scraped
@@ -387,7 +397,7 @@ function applyCuratedReference(firmId: string, payload: Record<string, unknown>)
     for (const row of fallback.pricing as Record<string, unknown>[]) {
       if (!seen.has(normLabel(row.account_size_label))) {
         merged.push(row)
-        used = true
+        filledFields.push(`pricing[${row.account_size_label}]`)
       }
     }
     // Sort by numeric account size for stable display
@@ -403,17 +413,27 @@ function applyCuratedReference(firmId: string, payload: Record<string, unknown>)
   for (const [key, value] of Object.entries(fallbackRules)) {
     if (rules[key] == null && value != null) {
       rules[key] = value
-      used = true
+      filledFields.push(`rules.${key}`)
     }
   }
   payload.rules = rules
   for (const key of ['active_promo_banner', 'promo_code', 'features']) {
     if ((payload[key] == null || (Array.isArray(payload[key]) && (payload[key] as unknown[]).length === 0)) && fallback[key] != null) {
       payload[key] = fallback[key]
-      used = true
+      filledFields.push(key)
     }
   }
-  if (used) payload._fallback_used = 'curated_reference'
+  if (filledFields.length === 0) return
+  // If the scraper produced neither real pricing nor any rules, the entire
+  // record is reference data — flag it as fully unverified so the strict
+  // comparison filter drops it. Otherwise it's a partial gap-fill on top of
+  // a real scrape; record which fields were merged but keep it verifiable.
+  if (!scraperHadPricing && !scraperHadRules) {
+    payload._fallback_used = 'curated_reference'
+  } else {
+    payload._fallback_used = 'partial'
+  }
+  payload._fallback_fields = filledFields
 }
 
 async function openaiNormalize(
