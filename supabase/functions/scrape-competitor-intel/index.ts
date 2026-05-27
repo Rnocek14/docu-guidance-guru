@@ -76,6 +76,15 @@ const FULL_SCHEMA = {
         min_trading_days: { type: ['number', 'null'] },
         consistency_rule_pct: { type: ['number', 'null'] },
         payout_cadence_days: { type: ['number', 'null'] },
+        reset_fee_usd: { type: ['number', 'null'] },
+        activation_fee_usd: { type: ['number', 'null'] },
+        activation_fee_cadence: { type: ['string', 'null'] }, // 'one_time' | 'monthly'
+        phase_count: { type: ['number', 'null'] }, // 1 = instant/eval-only, 2 = eval+verification
+        accounts_allowed_max: { type: ['number', 'null'] },
+        trailing_dd_lock_usd: { type: ['number', 'null'] }, // profit point where trailing DD stops trailing
+        news_trading_allowed: { type: ['boolean', 'null'] },
+        payout_methods: { type: ['string', 'null'] }, // free-text e.g. "ACH, wire, crypto"
+        scaling_plan_summary: { type: ['string', 'null'] }, // one-line description
       },
     },
     features: {
