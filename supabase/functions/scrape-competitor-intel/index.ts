@@ -742,6 +742,9 @@ Deno.serve(async (req) => {
         payload = await openaiNormalize(markdown, kind, openaiKey)
         applyBannerDiscountToRows(payload)
         derivePricing(payload)
+        if (looksLikeBlockedContent(markdown) || isWeakPricing(payload)) {
+          applyCuratedReference(firmId, payload)
+        }
         markdown = markdown.slice(0, 20_000)
 
         // Find previous snapshot of same kind
