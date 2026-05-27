@@ -85,6 +85,8 @@ const FULL_SCHEMA = {
         news_trading_allowed: { type: ['boolean', 'null'] },
         payout_methods: { type: ['string', 'null'] }, // free-text e.g. "ACH, wire, crypto"
         scaling_plan_summary: { type: ['string', 'null'] }, // one-line description
+        country_restrictions: { type: ['string', 'null'] }, // short list of blocked / allowed-only countries
+        account_size_usd: { type: ['number', 'null'] }, // numeric size that the scraped rules apply to (e.g. 50000)
       },
     },
     features: {
