@@ -312,7 +312,18 @@ export default function CompetitorIntel() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-[260px_1fr]">
+        <Tabs defaultValue="market">
+          <TabsList>
+            <TabsTrigger value="market">Market Position</TabsTrigger>
+            <TabsTrigger value="firms">Firms (raw)</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="market" className="mt-4">
+            <MarketPositionView snapshots={latestSnapshotInputs} />
+          </TabsContent>
+
+          <TabsContent value="firms" className="mt-4">
+            <div className="grid gap-4 md:grid-cols-[260px_1fr]">
           {/* Firm list */}
           <Card>
             <CardHeader className="py-3">
@@ -361,7 +372,9 @@ export default function CompetitorIntel() {
               />
             )}
           </div>
-        </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </DashboardLayout>
   );
