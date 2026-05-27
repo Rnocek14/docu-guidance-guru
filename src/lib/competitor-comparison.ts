@@ -323,6 +323,23 @@ export function buildComparisonMatrix(
     rows.push({ key: 'first_payout_cap', label: 'First payout cap', direction: 'higher_better', cells });
   }
 
+  // Qualitative row: what happens AFTER the first-payout cap window expires.
+  // None of the surveyed competitors advertise a lifetime/hard max payout —
+  // they cap the first N payouts then go uncapped per cycle. Meridian's
+  // structure is honest: pacing + reserve + breaker gates, no "uncapped" claim.
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, null, 'Pacing + reserve gated', 'no lifetime cap');
+    for (const s of snapshots) {
+      const capCount = s.payload?.rules?.first_payout_cap_count ?? null;
+      const capUsd = s.payload?.rules?.first_payout_cap_usd ?? null;
+      const hasFirstCap = capCount != null || capUsd != null;
+      const display = hasFirstCap ? 'Uncapped after first N' : 'Uncapped per cycle';
+      cell(cells, s.firm_id, null, display, 'no lifetime cap');
+    }
+    rows.push({ key: 'lifetime_cap_structure', label: 'Lifetime cap structure', direction: 'neutral', cells });
+  }
+
   {
     const cells: Record<FirmId, MetricCell> = {};
     cell(cells, MERIDIAN, meridian.payoutCooldown, fmtDays(meridian.payoutCooldown));
