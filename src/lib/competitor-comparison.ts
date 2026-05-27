@@ -41,6 +41,15 @@ export interface SnapshotInput {
       min_trading_days?: number | null;
       consistency_rule_pct?: number | null;
       payout_cadence_days?: number | null;
+      reset_fee_usd?: number | null;
+      activation_fee_usd?: number | null;
+      activation_fee_cadence?: string | null;
+      phase_count?: number | null;
+      accounts_allowed_max?: number | null;
+      trailing_dd_lock_usd?: number | null;
+      news_trading_allowed?: boolean | null;
+      payout_methods?: string | null;
+      scaling_plan_summary?: string | null;
     };
     _fallback_used?: string | null;
     _fetch_strategy?: string | null;
