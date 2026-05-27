@@ -109,6 +109,8 @@ function fmtPct(n: number | null | undefined): string {
 export default function CompetitorIntel() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [browserlessKey, setBrowserlessKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
 
   const profilesQ = useQuery({
     queryKey: ['ci-profiles'],
