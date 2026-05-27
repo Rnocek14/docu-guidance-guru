@@ -10,6 +10,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, RefreshCw, ExternalLink, AlertTriangle, Eye, EyeOff, Save, KeyRound } from 'lucide-react';
 import { missionControlNavItems } from '@/components/layout/AdminNav';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { MarketPositionView } from '@/components/admin/competitor-intel/MarketPositionView';
+import type { SnapshotInput } from '@/lib/competitor-comparison';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 type Profile = {
@@ -169,6 +172,21 @@ export default function CompetitorIntel() {
     () => (activeId ? changes.filter((c) => c.firm_id === activeId) : []),
     [changes, activeId],
   );
+
+  const latestSnapshotInputs: SnapshotInput[] = useMemo(() => {
+    const out: SnapshotInput[] = [];
+    for (const p of profiles) {
+      const s = latestByFirm.get(p.firm_id);
+      if (!s) continue;
+      out.push({
+        firm_id: p.firm_id,
+        firm_name: p.name,
+        captured_at: s.captured_at,
+        payload: s.payload as SnapshotInput['payload'],
+      });
+    }
+    return out;
+  }, [profiles, latestByFirm]);
 
   // Browserless key status
   const browserlessQ = useQuery({
