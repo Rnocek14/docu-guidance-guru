@@ -46,20 +46,6 @@ const rows: CompareRow[] = [
     us: 'Key actions logged for review',
     usOk: true,
   },
-  {
-    feature: 'Payout Split',
-    others: 'Typically 80–90%',
-    othersOk: null,
-    us: '80–85% (sustainable model)',
-    usOk: true,
-  },
-  {
-    feature: 'Profit Target',
-    others: 'Typically 6–8%',
-    othersOk: null,
-    us: '10% (rigorous evaluation)',
-    usOk: true,
-  },
 ];
 
 function StatusIcon({ ok }: { ok: boolean | null }) {
