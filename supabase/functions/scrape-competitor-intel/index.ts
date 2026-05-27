@@ -194,9 +194,34 @@ async function openaiNormalize(
   const data = await res.json()
   const content = data?.choices?.[0]?.message?.content ?? '{}'
   try {
-    return JSON.parse(content) as Record<string, unknown>
+    const parsed = JSON.parse(content) as Record<string, unknown>
+    derivePricing(parsed)
+    return parsed
   } catch {
     throw new Error('openai returned non-JSON')
+  }
+}
+
+/**
+ * Fill in promo_price_usd / list_price_usd / discount_pct when two of the
+ * three are present. Models often extract list + discount but skip the
+ * arithmetic for promo, leaving the UI showing "—" in the Promo column.
+ */
+function derivePricing(payload: Record<string, unknown>): void {
+  const rows = payload.pricing
+  if (!Array.isArray(rows)) return
+  for (const r of rows as Array<Record<string, unknown>>) {
+    const list = typeof r.list_price_usd === 'number' ? r.list_price_usd : null
+    const promo = typeof r.promo_price_usd === 'number' ? r.promo_price_usd : null
+    const disc = typeof r.discount_pct === 'number' ? r.discount_pct : null
+
+    if (list != null && disc != null && promo == null && disc > 0 && disc < 100) {
+      r.promo_price_usd = Math.round(list * (1 - disc / 100) * 100) / 100
+    } else if (list != null && promo != null && disc == null && list > 0 && promo < list) {
+      r.discount_pct = Math.round(((list - promo) / list) * 10000) / 100
+    } else if (promo != null && disc != null && list == null && disc > 0 && disc < 100) {
+      r.list_price_usd = Math.round((promo / (1 - disc / 100)) * 100) / 100
+    }
   }
 }
 
