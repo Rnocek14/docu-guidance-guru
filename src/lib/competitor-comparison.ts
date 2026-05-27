@@ -111,11 +111,14 @@ export function filterComparableSnapshots(snapshots: SnapshotInput[]): Comparabl
       continue;
     }
     const fallback = s.payload?._fallback_used;
-    if (fallback) {
+    // Only exclude FULL curated_reference fallbacks (scraper got nothing).
+    // Partial gap-fills on top of a real scrape are still comparable; the UI
+    // surfaces a "partially enriched" badge for transparency.
+    if (fallback === 'curated_reference') {
       excluded.push({
         firm_id: s.firm_id,
         firm_name: s.firm_name,
-        reason: `Latest snapshot used the ${fallback} fallback — values are not directly verified.`,
+        reason: 'Scraper returned no usable data — entire snapshot is curated reference, not verified live.',
         category: 'unverified',
       });
       continue;
