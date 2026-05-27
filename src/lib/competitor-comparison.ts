@@ -149,6 +149,7 @@ export type MetricKey =
   | 'max_drawdown'
   | 'payout_split'
   | 'first_payout_cap'
+  | 'lifetime_cap_structure'
   | 'cooldown_days'
   | 'min_trading_days'
   | 'consistency_pct'
