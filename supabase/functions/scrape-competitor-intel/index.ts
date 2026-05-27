@@ -553,7 +553,8 @@ async function openaiNormalize(
     "activation_fee_cadence": "one_time"|"monthly"|null,
     "phase_count": number|null, "accounts_allowed_max": number|null,
     "trailing_dd_lock_usd": number|null, "news_trading_allowed": boolean|null,
-    "payout_methods": string|null, "scaling_plan_summary": string|null
+    "payout_methods": string|null, "scaling_plan_summary": string|null,
+    "country_restrictions": string|null, "account_size_usd": number|null
   },
   "features": [string]
 }`
