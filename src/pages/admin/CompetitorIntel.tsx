@@ -250,6 +250,50 @@ export default function CompetitorIntel() {
           </div>
         </header>
 
+        {/* Browserless API key */}
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <KeyRound className="h-4 w-4" />
+              Browserless API Key
+              <Badge variant="outline" className={browserlessQ.data ? 'border-emerald-500/40 text-emerald-400' : 'border-slate-500/40 text-slate-400'}>
+                {browserlessQ.data ? 'Configured' : 'Not set'}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Input
+                  type={showKey ? 'text' : 'password'}
+                  placeholder="Paste your Browserless API key…"
+                  value={browserlessKey}
+                  onChange={(e) => setBrowserlessKey(e.target.value)}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey((s) => !s)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => saveBrowserlessKey.mutate(browserlessKey)}
+                disabled={!browserlessKey || saveBrowserlessKey.isPending}
+              >
+                {saveBrowserlessKey.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                <span className="ml-2">Save</span>
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Needed for Apex, Topstep, and FTMO which sit behind Cloudflare. Stored securely in system settings.
+            </p>
+          </CardContent>
+        </Card>
+
         <div className="grid gap-4 md:grid-cols-[260px_1fr]">
           {/* Firm list */}
           <Card>
