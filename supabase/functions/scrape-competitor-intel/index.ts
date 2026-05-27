@@ -76,6 +76,15 @@ const FULL_SCHEMA = {
         min_trading_days: { type: ['number', 'null'] },
         consistency_rule_pct: { type: ['number', 'null'] },
         payout_cadence_days: { type: ['number', 'null'] },
+        reset_fee_usd: { type: ['number', 'null'] },
+        activation_fee_usd: { type: ['number', 'null'] },
+        activation_fee_cadence: { type: ['string', 'null'] }, // 'one_time' | 'monthly'
+        phase_count: { type: ['number', 'null'] }, // 1 = instant/eval-only, 2 = eval+verification
+        accounts_allowed_max: { type: ['number', 'null'] },
+        trailing_dd_lock_usd: { type: ['number', 'null'] }, // profit point where trailing DD stops trailing
+        news_trading_allowed: { type: ['boolean', 'null'] },
+        payout_methods: { type: ['string', 'null'] }, // free-text e.g. "ACH, wire, crypto"
+        scaling_plan_summary: { type: ['string', 'null'] }, // one-line description
       },
     },
     features: {
@@ -232,6 +241,15 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       min_trading_days: 1,
       consistency_rule_pct: 50,
       payout_cadence_days: 5,
+      reset_fee_usd: 80,
+      activation_fee_usd: 130,
+      activation_fee_cadence: 'monthly',
+      phase_count: 1,
+      accounts_allowed_max: 20,
+      trailing_dd_lock_usd: null,
+      news_trading_allowed: true,
+      payout_methods: 'WISE, Plane, ACH',
+      scaling_plan_summary: 'Contract scaling tied to balance milestones',
     },
     features: ['scaling_plan', 'one_time_fee', 'fast_payouts'],
   },
@@ -245,6 +263,12 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       min_trading_days: 7,
       consistency_rule_pct: 30,
       payout_cadence_days: 14,
+      activation_fee_usd: 148,
+      activation_fee_cadence: 'monthly',
+      phase_count: 1,
+      accounts_allowed_max: 5,
+      news_trading_allowed: true,
+      scaling_plan_summary: 'Contract scaling tied to profit milestones',
     },
     features: ['eod_trailing', 'scaling_plan', 'reset_discount'],
   },
@@ -267,6 +291,10 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       min_trading_days: 4,
       consistency_rule_pct: null,
       payout_cadence_days: 14,
+      activation_fee_usd: 0,
+      phase_count: 2,
+      news_trading_allowed: true,
+      payout_methods: 'Wire, crypto, Skrill',
     },
     features: ['two_phase_eval', 'static_drawdown', 'biweekly_payouts'],
   },
@@ -292,6 +320,10 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       min_trading_days: 5,
       consistency_rule_pct: null,
       payout_cadence_days: 21,
+      activation_fee_usd: 0,
+      phase_count: 2,
+      news_trading_allowed: true,
+      payout_methods: 'Wire, crypto',
     },
     features: ['stellar_plan', 'scaling_plan', 'static_drawdown'],
   },
@@ -312,6 +344,15 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       min_trading_days: 2,
       consistency_rule_pct: 50,
       payout_cadence_days: 7,
+      reset_fee_usd: 49,
+      activation_fee_usd: 149,
+      activation_fee_cadence: 'one_time',
+      phase_count: 1,
+      accounts_allowed_max: 5,
+      trailing_dd_lock_usd: 0,
+      news_trading_allowed: true,
+      payout_methods: 'ACH, wire',
+      scaling_plan_summary: 'Express Funded after Combine pass',
     },
     features: ['trading_combine', 'express_funded', 'scaling_plan'],
   },
@@ -334,6 +375,9 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       min_trading_days: 5,
       consistency_rule_pct: 35,
       payout_cadence_days: 1,
+      phase_count: 1,
+      news_trading_allowed: true,
+      scaling_plan_summary: 'Straight-to-sim funded after eval',
     },
     features: ['straight_to_sim', 'eod_trailing', 'fast_payouts'],
   },
@@ -350,6 +394,8 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       drawdown_type: 'eod_trailing',
       first_payout_cap_usd: 7500,
       first_payout_cap_count: 3,
+      phase_count: 1,
+      news_trading_allowed: true,
     },
   },
   tpt: {
@@ -367,6 +413,8 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       drawdown_type: 'eod_trailing',
       first_payout_cap_usd: 1500,
       first_payout_cap_count: 1,
+      phase_count: 1,
+      news_trading_allowed: true,
     },
   },
 }
@@ -453,7 +501,12 @@ async function openaiNormalize(
     "max_drawdown_usd": number|null, "drawdown_type": "static"|"trailing"|"eod_trailing"|null,
     "payout_split_pct": number|null, "first_payout_cap_usd": number|null,
     "first_payout_cap_count": number|null, "min_trading_days": number|null,
-    "consistency_rule_pct": number|null, "payout_cadence_days": number|null
+    "consistency_rule_pct": number|null, "payout_cadence_days": number|null,
+    "reset_fee_usd": number|null, "activation_fee_usd": number|null,
+    "activation_fee_cadence": "one_time"|"monthly"|null,
+    "phase_count": number|null, "accounts_allowed_max": number|null,
+    "trailing_dd_lock_usd": number|null, "news_trading_allowed": boolean|null,
+    "payout_methods": string|null, "scaling_plan_summary": string|null
   },
   "features": [string]
 }`
@@ -475,6 +528,10 @@ async function openaiNormalize(
     '(static / trailing / eod_trailing), payout split %, first payout cap (USD and count), ' +
     'minimum trading days, consistency rule %, and payout cadence in days. Convert phrases like ' +
     '"every 14 days" to 14, "weekly" to 7, "daily" to 1. ' +
+    'Also extract: reset fee (USD to retake a failed evaluation), activation fee (USD + whether one_time or monthly), ' +
+    'phase_count (1 for instant/eval-only, 2 for eval+verification), accounts_allowed_max (max concurrent accounts), ' +
+    'trailing_dd_lock_usd (profit point where trailing drawdown stops trailing), news_trading_allowed (true/false), ' +
+    'payout_methods (short string like "ACH, wire, crypto"), scaling_plan_summary (one short sentence if mentioned). ' +
     'For features: short keyword tags only (e.g. "instant_funding", "static_dd", "scaling_plan"). ' +
     'Do not include rules you cannot literally find in the source text.'
 

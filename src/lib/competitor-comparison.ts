@@ -41,6 +41,15 @@ export interface SnapshotInput {
       min_trading_days?: number | null;
       consistency_rule_pct?: number | null;
       payout_cadence_days?: number | null;
+      reset_fee_usd?: number | null;
+      activation_fee_usd?: number | null;
+      activation_fee_cadence?: string | null;
+      phase_count?: number | null;
+      accounts_allowed_max?: number | null;
+      trailing_dd_lock_usd?: number | null;
+      news_trading_allowed?: boolean | null;
+      payout_methods?: string | null;
+      scaling_plan_summary?: string | null;
     };
     _fallback_used?: string | null;
     _fetch_strategy?: string | null;
@@ -154,6 +163,12 @@ export type MetricKey =
   | 'min_trading_days'
   | 'consistency_pct'
   | 'reset_fee'
+  | 'activation_fee'
+  | 'phase_count'
+  | 'accounts_allowed'
+  | 'news_trading'
+  | 'payout_methods'
+  | 'scaling_plan'
   | 'active_promo';
 
 export type Direction = 'higher_better' | 'lower_better' | 'neutral';
@@ -373,8 +388,80 @@ export function buildComparisonMatrix(
   {
     const cells: Record<FirmId, MetricCell> = {};
     cell(cells, MERIDIAN, meridian.resetFee, fmtUsd(meridian.resetFee));
-    for (const s of snapshots) cell(cells, s.firm_id, null, '—');
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.reset_fee_usd ?? null;
+      cell(cells, s.firm_id, v, fmtUsd(v));
+    }
     rows.push({ key: 'reset_fee', label: 'Reset fee', direction: 'lower_better', cells });
+  }
+
+  // Activation / monthly fee on funded accounts (often hidden cost)
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, 0, fmtUsd(0), 'none');
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.activation_fee_usd ?? null;
+      const cadence = s.payload?.rules?.activation_fee_cadence;
+      const qualifier = v && cadence ? cadence.replace('_', ' ') : undefined;
+      cell(cells, s.firm_id, v, fmtUsd(v), qualifier);
+    }
+    rows.push({ key: 'activation_fee', label: 'Activation fee', direction: 'lower_better', cells });
+  }
+
+  // Phase count: 1 = instant/eval-only, 2 = eval + verification
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, 1, '1', 'eval only');
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.phase_count ?? null;
+      cell(cells, s.firm_id, v, v == null ? '—' : `${v}`);
+    }
+    rows.push({ key: 'phase_count', label: 'Eval phases', direction: 'lower_better', cells });
+  }
+
+  // Max concurrent accounts a trader can hold
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, null, '—');
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.accounts_allowed_max ?? null;
+      cell(cells, s.firm_id, v, v == null ? '—' : `${v}`);
+    }
+    rows.push({ key: 'accounts_allowed', label: 'Max accounts', direction: 'higher_better', cells });
+  }
+
+  // News trading allowed?
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, null, '—');
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.news_trading_allowed;
+      const display = v == null ? '—' : v ? 'Allowed' : 'Banned';
+      cell(cells, s.firm_id, v == null ? null : v ? 1 : 0, display);
+    }
+    rows.push({ key: 'news_trading', label: 'News trading', direction: 'higher_better', cells });
+  }
+
+  // Payout methods (qualitative)
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, null, '—');
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.payout_methods ?? null;
+      cell(cells, s.firm_id, null, v ?? '—');
+    }
+    rows.push({ key: 'payout_methods', label: 'Payout methods', direction: 'neutral', cells });
+  }
+
+  // Scaling plan summary (qualitative)
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, null, '—');
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.scaling_plan_summary ?? null;
+      cell(cells, s.firm_id, null, v ?? '—');
+    }
+    rows.push({ key: 'scaling_plan', label: 'Scaling plan', direction: 'neutral', cells });
   }
 
   {
