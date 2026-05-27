@@ -171,6 +171,7 @@ export type MetricKey =
   | 'news_trading'
   | 'payout_methods'
   | 'scaling_plan'
+  | 'country_restrictions'
   | 'active_promo';
 
 export type Direction = 'higher_better' | 'lower_better' | 'neutral';
