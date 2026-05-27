@@ -26,7 +26,7 @@ const corsHeaders = {
 
 const FIRECRAWL_URL = 'https://api.firecrawl.dev/v2/scrape'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
-const OPENAI_MODEL = 'gpt-4o-mini'
+const OPENAI_MODEL = 'gpt-4o'
 // build: 2026-05-20-direct-2
 
 // Browser-like UA so most landing pages return real HTML rather than a stub.
@@ -164,12 +164,18 @@ async function openaiNormalize(
   const system =
     'You normalize prop-firm landing pages into strict JSON. Never invent values. ' +
     'If a field is not explicitly present in the source, use null. ' +
+    'The input may concatenate multiple pages (pricing + rules + promo). Read ALL of them before answering. ' +
     'list_price_usd is the crossed-out / original price. promo_price_usd is the discounted price actually charged today. ' +
     'If only one price is shown, put it in list_price_usd and leave promo_price_usd null. ' +
     'account_size_label is the marketed account size (e.g. "50K", "100K", "150K"). ' +
-    'Do not include rules you cannot literally find on the page.'
+    'For rules: extract profit target, daily loss limit, max drawdown (USD), drawdown type ' +
+    '(static / trailing / eod_trailing), payout split %, first payout cap (USD and count), ' +
+    'minimum trading days, consistency rule %, and payout cadence in days. Convert phrases like ' +
+    '"every 14 days" to 14, "weekly" to 7, "daily" to 1. ' +
+    'For features: short keyword tags only (e.g. "instant_funding", "static_dd", "scaling_plan"). ' +
+    'Do not include rules you cannot literally find in the source text.'
 
-  const userMsg = `${schemaDescription}\n\nSOURCE TEXT (truncated):\n${text.slice(0, 18000)}`
+  const userMsg = `${schemaDescription}\n\nSOURCE TEXT (truncated):\n${text.slice(0, 40000)}`
 
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
@@ -180,6 +186,7 @@ async function openaiNormalize(
     body: JSON.stringify({
       model: OPENAI_MODEL,
       temperature: 0,
+      max_tokens: 2000,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
@@ -242,6 +249,53 @@ async function directScrape(
 // ────────────────────────────────────────────────────────────────────────────
 // Firecrawl call
 // ────────────────────────────────────────────────────────────────────────────
+async function firecrawlMarkdown(url: string, apiKey: string): Promise<string> {
+  const res = await fetch(FIRECRAWL_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      url,
+      formats: ['markdown'],
+      onlyMainContent: true,
+      waitFor: 6000,
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`firecrawl ${res.status}: ${body.slice(0, 200)}`)
+  }
+  const data = await res.json()
+  const doc = data.data ?? data
+  const md = (doc.markdown ?? '') as string
+  if (!md || md.length < 200) {
+    throw new Error(`firecrawl returned too little markdown (${md.length} chars)`)
+  }
+  return md
+}
+
+/**
+ * When a site advertises a single global discount in the banner (e.g.
+ * "40% off all accounts") but the model didn't put discount_pct on each
+ * pricing row, propagate it to rows that have a list price but no discount.
+ */
+function applyBannerDiscountToRows(payload: Record<string, unknown>): void {
+  const rows = payload.pricing
+  const banner = (payload.active_promo_banner as string | null) ?? ''
+  if (!Array.isArray(rows) || !banner) return
+  const m = banner.match(/(\d{1,2}(?:\.\d+)?)\s*%\s*off/i)
+  if (!m) return
+  const pct = Number.parseFloat(m[1])
+  if (!(pct > 0 && pct < 100)) return
+  for (const r of rows as Array<Record<string, unknown>>) {
+    if (r.discount_pct == null && typeof r.list_price_usd === 'number') {
+      r.discount_pct = pct
+    }
+  }
+}
+
 async function firecrawlScrape(
   url: string,
   kind: ScrapeKind,
@@ -258,7 +312,7 @@ async function firecrawlScrape(
       url,
       formats: ['markdown'],
       onlyMainContent: true,
-      waitFor: 2500,
+      waitFor: 6000,
     }),
   })
   if (!res.ok) {
@@ -440,7 +494,12 @@ Deno.serve(async (req) => {
     for (const p of profiles ?? []) {
       const firmId = p.firm_id as string
       const urls = (p.urls ?? {}) as Record<string, string>
-      const targetUrl = urls.pricing ?? urls.rules ?? urls.promo ?? ''
+      // Scrape ALL configured URLs (pricing + rules + promo) and merge their
+      // markdown so the extractor sees facts spread across multiple pages.
+      const urlList = [urls.pricing, urls.rules, urls.promo].filter(
+        (u, i, a) => !!u && a.indexOf(u) === i,
+      ) as string[]
+      const targetUrl = urlList[0] ?? ''
       const strategy: FetchStrategy =
         strategyOverride ?? ((p.fetch_strategy as FetchStrategy) || 'direct')
       if (!targetUrl) {
@@ -449,33 +508,50 @@ Deno.serve(async (req) => {
       }
 
       try {
-        let payload: Record<string, unknown>
-        let markdown: string
+        let payload: Record<string, unknown> = {}
+        let markdown: string = ''
         let usedStrategy: FetchStrategy = strategy
-        if (strategy === 'firecrawl') {
-          if (!firecrawlKey) throw new Error('firecrawl strategy selected but FIRECRAWL_API_KEY missing')
-          ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey, openaiKey))
-        } else {
-          if (!openaiKey) throw new Error('direct strategy selected but OPENAI_API_KEY missing')
+
+        // Pull raw markdown from every configured URL (don't normalize each
+        // one in isolation — concatenate first, then run a single extraction
+        // pass so the model can correlate pricing on one page with rules on
+        // another).
+        const chunks: string[] = []
+        const errs: string[] = []
+        for (const u of urlList) {
           try {
-            ;({ payload, markdown } = await directScrape(targetUrl, kind, openaiKey))
-          } catch (directErr) {
-            const directMsg = directErr instanceof Error ? directErr.message : 'unknown direct error'
-            console.error(`direct failed for ${firmId}: ${directMsg}`)
-            // Auto-fallback to Firecrawl if available — Cloudflare / JS-rendered sites
-            if (firecrawlKey) {
-              try {
-                ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey, openaiKey))
-                usedStrategy = 'firecrawl'
-              } catch (fcErr) {
-                const fcMsg = fcErr instanceof Error ? fcErr.message : 'unknown firecrawl error'
-                throw new Error(`direct: ${directMsg} | firecrawl: ${fcMsg}`)
-              }
+            let md = ''
+            if (strategy === 'firecrawl') {
+              if (!firecrawlKey) throw new Error('FIRECRAWL_API_KEY missing')
+              md = await firecrawlMarkdown(u, firecrawlKey)
             } else {
-              throw directErr
+              try {
+                md = htmlToText(await directFetch(u))
+                if (md.length < 400) throw new Error(`thin html (${md.length})`)
+              } catch (directErr) {
+                const dmsg = directErr instanceof Error ? directErr.message : 'direct err'
+                if (firecrawlKey) {
+                  md = await firecrawlMarkdown(u, firecrawlKey)
+                  usedStrategy = 'firecrawl'
+                } else {
+                  throw new Error(dmsg)
+                }
+              }
             }
+            chunks.push(`\n\n=== SOURCE: ${u} ===\n${md}`)
+          } catch (e) {
+            errs.push(`${u}: ${e instanceof Error ? e.message : 'err'}`)
           }
         }
+        if (chunks.length === 0) {
+          throw new Error(`all URLs failed — ${errs.join(' | ')}`)
+        }
+        markdown = chunks.join('\n').slice(0, 60_000)
+        if (!openaiKey) throw new Error('OPENAI_API_KEY missing')
+        payload = await openaiNormalize(markdown, kind, openaiKey)
+        applyBannerDiscountToRows(payload)
+        derivePricing(payload)
+        markdown = markdown.slice(0, 20_000)
 
         // Find previous snapshot of same kind
         const { data: prev } = await db
