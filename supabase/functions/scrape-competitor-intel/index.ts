@@ -88,7 +88,7 @@ const FULL_SCHEMA = {
 }
 
 type ScrapeKind = 'weekly' | 'promo_daily'
-type FetchStrategy = 'direct' | 'firecrawl'
+type FetchStrategy = 'direct' | 'firecrawl' | 'browserless'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Direct fetch + OpenAI normalization (default path, no Firecrawl credits)
