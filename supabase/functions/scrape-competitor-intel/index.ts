@@ -85,6 +85,8 @@ const FULL_SCHEMA = {
         news_trading_allowed: { type: ['boolean', 'null'] },
         payout_methods: { type: ['string', 'null'] }, // free-text e.g. "ACH, wire, crypto"
         scaling_plan_summary: { type: ['string', 'null'] }, // one-line description
+        country_restrictions: { type: ['string', 'null'] }, // short list of blocked / allowed-only countries
+        account_size_usd: { type: ['number', 'null'] }, // numeric size that the scraped rules apply to (e.g. 50000)
       },
     },
     features: {
@@ -250,6 +252,8 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       news_trading_allowed: true,
       payout_methods: 'WISE, Plane, ACH',
       scaling_plan_summary: 'Contract scaling tied to balance milestones',
+      country_restrictions: 'Blocks several sanctioned jurisdictions; US allowed',
+      account_size_usd: 50000,
     },
     features: ['scaling_plan', 'one_time_fee', 'fast_payouts'],
   },
@@ -269,6 +273,8 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       accounts_allowed_max: 5,
       news_trading_allowed: true,
       scaling_plan_summary: 'Contract scaling tied to profit milestones',
+      country_restrictions: 'Global; KYC required',
+      account_size_usd: 50000,
     },
     features: ['eod_trailing', 'scaling_plan', 'reset_discount'],
   },
@@ -295,6 +301,8 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       phase_count: 2,
       news_trading_allowed: true,
       payout_methods: 'Wire, crypto, Skrill',
+      country_restrictions: 'Blocks US, Iran, North Korea, Syria, Cuba',
+      account_size_usd: 100000,
     },
     features: ['two_phase_eval', 'static_drawdown', 'biweekly_payouts'],
   },
@@ -324,6 +332,8 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       phase_count: 2,
       news_trading_allowed: true,
       payout_methods: 'Wire, crypto',
+      country_restrictions: 'Blocks US, sanctioned jurisdictions',
+      account_size_usd: 100000,
     },
     features: ['stellar_plan', 'scaling_plan', 'static_drawdown'],
   },
@@ -353,6 +363,8 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       news_trading_allowed: true,
       payout_methods: 'ACH, wire',
       scaling_plan_summary: 'Express Funded after Combine pass',
+      country_restrictions: 'Global except sanctioned countries',
+      account_size_usd: 100000,
     },
     features: ['trading_combine', 'express_funded', 'scaling_plan'],
   },
@@ -378,6 +390,8 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       phase_count: 1,
       news_trading_allowed: true,
       scaling_plan_summary: 'Straight-to-sim funded after eval',
+      country_restrictions: 'Global; KYC at payout',
+      account_size_usd: 150000,
     },
     features: ['straight_to_sim', 'eod_trailing', 'fast_payouts'],
   },
@@ -396,6 +410,8 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       first_payout_cap_count: 3,
       phase_count: 1,
       news_trading_allowed: true,
+      country_restrictions: 'Global; standard sanctions list',
+      account_size_usd: 50000,
     },
   },
   tpt: {
@@ -415,13 +431,44 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       first_payout_cap_count: 1,
       phase_count: 1,
       news_trading_allowed: true,
+      country_restrictions: 'US-focused; limited international',
+      account_size_usd: 50000,
     },
+  },
+}
+
+// Hard overrides — applied BEFORE null-gap-fill. Used when the scraper
+// reliably extracts a wrong value (e.g. Apex marketed as "2-phase" because
+// the page mentions a Verification step that isn't actually required).
+const REFERENCE_OVERRIDES: Record<string, Record<string, unknown>> = {
+  apex: {
+    phase_count: 1, // Apex is single-evaluation; the "PA" step is funding, not an eval phase
+    activation_fee_usd: 130, // $130/mo (or $340 lifetime) — scraper sometimes picks the lifetime upfront
+    activation_fee_cadence: 'monthly',
+  },
+  tradeify: {
+    phase_count: 1, // Straight-to-sim is single-phase
+  },
+  tpt: {
+    payout_cadence_days: 1, // Daily payouts, not 0
   },
 }
 
 function applyCuratedReference(firmId: string, payload: Record<string, unknown>): void {
   const fallback = CURATED_REFERENCE[firmId]
   if (!fallback) return
+  // Step 0: hard overrides — values we *know* the scraper gets wrong.
+  // These replace scraped values, not just null. Source: manual verification.
+  const overrides = REFERENCE_OVERRIDES[firmId]
+  if (overrides) {
+    const rules = (payload.rules && typeof payload.rules === 'object'
+      ? payload.rules
+      : {}) as Record<string, unknown>
+    for (const [k, v] of Object.entries(overrides)) {
+      rules[k] = v
+    }
+    payload.rules = rules
+  }
   const filledFields: string[] = []
   // Snapshot what the scraper actually produced BEFORE we merge anything.
   const scrapedPricing = Array.isArray(payload.pricing) ? (payload.pricing as Record<string, unknown>[]) : []
@@ -506,7 +553,8 @@ async function openaiNormalize(
     "activation_fee_cadence": "one_time"|"monthly"|null,
     "phase_count": number|null, "accounts_allowed_max": number|null,
     "trailing_dd_lock_usd": number|null, "news_trading_allowed": boolean|null,
-    "payout_methods": string|null, "scaling_plan_summary": string|null
+    "payout_methods": string|null, "scaling_plan_summary": string|null,
+    "country_restrictions": string|null, "account_size_usd": number|null
   },
   "features": [string]
 }`

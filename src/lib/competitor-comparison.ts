@@ -50,6 +50,8 @@ export interface SnapshotInput {
       news_trading_allowed?: boolean | null;
       payout_methods?: string | null;
       scaling_plan_summary?: string | null;
+      country_restrictions?: string | null;
+      account_size_usd?: number | null;
     };
     _fallback_used?: string | null;
     _fetch_strategy?: string | null;
@@ -169,6 +171,7 @@ export type MetricKey =
   | 'news_trading'
   | 'payout_methods'
   | 'scaling_plan'
+  | 'country_restrictions'
   | 'active_promo';
 
 export type Direction = 'higher_better' | 'lower_better' | 'neutral';
@@ -302,7 +305,16 @@ export function buildComparisonMatrix(
     cell(cells, MERIDIAN, meridianDaily, fmtUsd(meridianDaily));
     for (const s of snapshots) {
       const v = s.payload?.rules?.daily_loss_usd ?? null;
-      cell(cells, s.firm_id, v, fmtUsd(v));
+      // Trailing-only futures firms (Apex, Topstep, Bulenox, MFFU, Tradeify)
+      // genuinely have NO daily loss rule — show "None" instead of an
+      // ambiguous em-dash that would imply missing data.
+      const dd = (s.payload?.rules?.drawdown_type ?? '').toLowerCase();
+      const isTrailingOnly = dd.includes('trailing');
+      if (v == null && isTrailingOnly) {
+        cell(cells, s.firm_id, null, 'None', 'trailing DD only');
+      } else {
+        cell(cells, s.firm_id, v, fmtUsd(v));
+      }
     }
     rows.push({ key: 'daily_loss', label: 'Daily loss limit', direction: 'higher_better', cells });
   }
@@ -462,6 +474,17 @@ export function buildComparisonMatrix(
       cell(cells, s.firm_id, null, v ?? '—');
     }
     rows.push({ key: 'scaling_plan', label: 'Scaling plan', direction: 'neutral', cells });
+  }
+
+  // Country / KYC restrictions (qualitative — affects TAM, not comparability)
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, null, 'US + intl. (KYC required)');
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.country_restrictions ?? null;
+      cell(cells, s.firm_id, null, v ?? '—');
+    }
+    rows.push({ key: 'country_restrictions', label: 'Country restrictions', direction: 'neutral', cells });
   }
 
   {
