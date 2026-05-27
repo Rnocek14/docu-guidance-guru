@@ -556,7 +556,16 @@ Deno.serve(async (req) => {
             let md = ''
             if (strategy === 'firecrawl') {
               if (!firecrawlKey) throw new Error('FIRECRAWL_API_KEY missing')
-              md = await firecrawlMarkdown(u, firecrawlKey)
+              try {
+                md = await firecrawlMarkdown(u, firecrawlKey)
+              } catch (fcErr) {
+                if (browserlessKey) {
+                  md = htmlToText(await browserlessFetch(u, browserlessKey))
+                  usedStrategy = 'browserless'
+                } else {
+                  throw fcErr
+                }
+              }
             } else if (strategy === 'browserless') {
               if (!browserlessKey) throw new Error('BROWSERLESS_API_KEY missing')
               md = htmlToText(await browserlessFetch(u, browserlessKey))
