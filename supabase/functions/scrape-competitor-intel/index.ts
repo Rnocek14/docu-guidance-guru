@@ -221,8 +221,8 @@ async function firecrawlScrape(
   url: string,
   kind: ScrapeKind,
   apiKey: string,
+  openaiKey: string,
 ): Promise<{ payload: Record<string, unknown>; markdown: string }> {
-  const schema = kind === 'weekly' ? FULL_SCHEMA : PROMO_SCHEMA
   const res = await fetch(FIRECRAWL_URL, {
     method: 'POST',
     headers: {
@@ -231,9 +231,9 @@ async function firecrawlScrape(
     },
     body: JSON.stringify({
       url,
-      formats: ['markdown', { type: 'json', schema }],
+      formats: ['markdown'],
       onlyMainContent: true,
-      waitFor: 1500,
+      waitFor: 2500,
     }),
   })
   if (!res.ok) {
@@ -242,8 +242,14 @@ async function firecrawlScrape(
   }
   const data = await res.json()
   const doc = data.data ?? data
-  const payload = (doc.json ?? doc.extract ?? {}) as Record<string, unknown>
   const markdown = (doc.markdown ?? '') as string
+  if (!markdown || markdown.length < 200) {
+    throw new Error(`firecrawl returned too little markdown (${markdown.length} chars)`)
+  }
+  if (!openaiKey) throw new Error('OPENAI_API_KEY required to normalize firecrawl markdown')
+  // Reuse the same OpenAI normalizer as the direct path — much more reliable
+  // than Firecrawl's own JSON-schema extractor on heavy landing pages.
+  const payload = await openaiNormalize(markdown, kind, openaiKey)
   return { payload, markdown: markdown.slice(0, 20000) }
 }
 
@@ -423,7 +429,7 @@ Deno.serve(async (req) => {
         let usedStrategy: FetchStrategy = strategy
         if (strategy === 'firecrawl') {
           if (!firecrawlKey) throw new Error('firecrawl strategy selected but FIRECRAWL_API_KEY missing')
-          ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey))
+          ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey, openaiKey))
         } else {
           if (!openaiKey) throw new Error('direct strategy selected but OPENAI_API_KEY missing')
           try {
@@ -434,7 +440,7 @@ Deno.serve(async (req) => {
             // Auto-fallback to Firecrawl if available — Cloudflare / JS-rendered sites
             if (firecrawlKey) {
               try {
-                ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey))
+                ;({ payload, markdown } = await firecrawlScrape(targetUrl, kind, firecrawlKey, openaiKey))
                 usedStrategy = 'firecrawl'
               } catch (fcErr) {
                 const fcMsg = fcErr instanceof Error ? fcErr.message : 'unknown firecrawl error'
