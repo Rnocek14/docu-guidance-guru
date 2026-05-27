@@ -462,7 +462,12 @@ async function openaiNormalize(
     "max_drawdown_usd": number|null, "drawdown_type": "static"|"trailing"|"eod_trailing"|null,
     "payout_split_pct": number|null, "first_payout_cap_usd": number|null,
     "first_payout_cap_count": number|null, "min_trading_days": number|null,
-    "consistency_rule_pct": number|null, "payout_cadence_days": number|null
+    "consistency_rule_pct": number|null, "payout_cadence_days": number|null,
+    "reset_fee_usd": number|null, "activation_fee_usd": number|null,
+    "activation_fee_cadence": "one_time"|"monthly"|null,
+    "phase_count": number|null, "accounts_allowed_max": number|null,
+    "trailing_dd_lock_usd": number|null, "news_trading_allowed": boolean|null,
+    "payout_methods": string|null, "scaling_plan_summary": string|null
   },
   "features": [string]
 }`
@@ -484,6 +489,10 @@ async function openaiNormalize(
     '(static / trailing / eod_trailing), payout split %, first payout cap (USD and count), ' +
     'minimum trading days, consistency rule %, and payout cadence in days. Convert phrases like ' +
     '"every 14 days" to 14, "weekly" to 7, "daily" to 1. ' +
+    'Also extract: reset fee (USD to retake a failed evaluation), activation fee (USD + whether one_time or monthly), ' +
+    'phase_count (1 for instant/eval-only, 2 for eval+verification), accounts_allowed_max (max concurrent accounts), ' +
+    'trailing_dd_lock_usd (profit point where trailing drawdown stops trailing), news_trading_allowed (true/false), ' +
+    'payout_methods (short string like "ACH, wire, crypto"), scaling_plan_summary (one short sentence if mentioned). ' +
     'For features: short keyword tags only (e.g. "instant_funding", "static_dd", "scaling_plan"). ' +
     'Do not include rules you cannot literally find in the source text.'
 
