@@ -169,9 +169,13 @@ async function browserlessFetch(url: string, apiKey: string): Promise<string> {
     bestAttempt: true,
   })
   // If suspiciously thin (Cloudflare interstitial, JS gate), retry with /unblock.
-  if (html.length < 4_000 || /just a moment|cf-chl|challenge-platform/i.test(html)) {
+  const looksBlocked =
+    html.length < 4_000 ||
+    /just a moment|cf-chl|challenge-platform|attention required|sorry, you have been blocked|cloudflare/i.test(html)
+  if (looksBlocked) {
     try {
-      const unblocked = await tryEndpoint('/unblock', {
+      // Browserless v2 unblock endpoint (Chrome). Returns JSON { content, ... }.
+      const unblocked = await tryEndpoint('/chrome/unblock', {
         url,
         browserWSEndpoint: false,
         content: true,
