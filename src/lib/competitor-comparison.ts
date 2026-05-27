@@ -305,7 +305,16 @@ export function buildComparisonMatrix(
     cell(cells, MERIDIAN, meridianDaily, fmtUsd(meridianDaily));
     for (const s of snapshots) {
       const v = s.payload?.rules?.daily_loss_usd ?? null;
-      cell(cells, s.firm_id, v, fmtUsd(v));
+      // Trailing-only futures firms (Apex, Topstep, Bulenox, MFFU, Tradeify)
+      // genuinely have NO daily loss rule — show "None" instead of an
+      // ambiguous em-dash that would imply missing data.
+      const dd = (s.payload?.rules?.drawdown_type ?? '').toLowerCase();
+      const isTrailingOnly = dd.includes('trailing');
+      if (v == null && isTrailingOnly) {
+        cell(cells, s.firm_id, null, 'None', 'trailing DD only');
+      } else {
+        cell(cells, s.firm_id, v, fmtUsd(v));
+      }
     }
     rows.push({ key: 'daily_loss', label: 'Daily loss limit', direction: 'higher_better', cells });
   }
