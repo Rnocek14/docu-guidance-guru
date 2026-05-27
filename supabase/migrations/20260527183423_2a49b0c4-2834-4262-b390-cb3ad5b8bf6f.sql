@@ -1,0 +1,1 @@
+UPDATE public.competitor_intel_profiles SET fetch_strategy = 'browserless' WHERE firm_id IN ('apex', 'topstep', 'ftmo');
