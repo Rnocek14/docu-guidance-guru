@@ -326,6 +326,15 @@ export function recommendCohort(
     return solvent;
   }
 
+  const entryUsable = countUsable(entryValues);
+  const ptUsable = countUsable(profitTargetPctValues);
+  const dlUsable = countUsable(dailyLossPctValues);
+  const dailyLossExcluded = totalFirms - dlUsable;
+  const ddUsable = countUsable(maxDrawdownPctValues);
+  const spUsable = countUsable(splitValues);
+  const fcUsable = countUsable(firstCapValues);
+  const cdUsable = countUsable(cooldownValues);
+
   const entryFee = row(
     'entry_fee',
     'Entry fee',
@@ -336,6 +345,7 @@ export function recommendCohort(
     Math.round(tier.price * 1.2),
     'Pricing whiplash guardrail: cannot drop below 70% of current entry fee.',
     'Pricing whiplash guardrail: cannot exceed 120% of current entry fee.',
+    { usableCount: entryUsable, exclusionNote: coverageNote(entryUsable, 'an entry fee for this size') },
   );
   const profitTargetPct = row(
     'profit_target_percent',
@@ -347,6 +357,7 @@ export function recommendCohort(
     12,
     'Min target band: <8% is too easy to pass and breaks reserve assumptions.',
     'Max target band: >12% pushes pass rate below break-even.',
+    { usableCount: ptUsable, exclusionNote: coverageNote(ptUsable, 'a profit target') },
   );
   const dailyLossPct = row(
     'max_daily_loss_percent',
@@ -358,9 +369,13 @@ export function recommendCohort(
     5,
     'Cannot drop below 3% — trader churn spikes on tight intraday limits.',
     'Cannot exceed 5% — current cohort spec ceiling.',
-    dailyLossExcluded > 0
-      ? { exclusionNote: `${dailyLossExcluded} of ${sampleCount} firms have no daily-loss rule (trailing-only) and were excluded — median is biased toward stricter firms.` }
-      : {},
+    {
+      usableCount: dlUsable,
+      exclusionNote:
+        dailyLossExcluded > 0
+          ? `${dailyLossExcluded} of ${totalFirms} firms have no daily-loss rule (trailing-only or scrape miss) and were excluded — median is biased toward stricter firms.`
+          : undefined,
+    },
   );
   const maxDrawdownPct = row(
     'max_total_drawdown_percent',
@@ -372,6 +387,7 @@ export function recommendCohort(
     10,
     'Cannot drop below 4% — survivability collapses.',
     'Cannot exceed 10% — current cohort spec ceiling.',
+    { usableCount: ddUsable, exclusionNote: coverageNote(ddUsable, 'a max drawdown') },
   );
   const splitPct = row(
     'payout_split_percent',
@@ -383,6 +399,7 @@ export function recommendCohort(
     95,
     `Cannot drop below ${floors.splitPct}% — current floor (today's TIER_ECONOMICS value, not MC-derived).`,
     'Cap at 95% — anything higher leaves no margin for breaker reserves.',
+    { usableCount: spUsable, exclusionNote: coverageNote(spUsable, 'a payout split') },
   );
   const firstCap = row(
     'first_payout_cap_amount',
@@ -394,6 +411,7 @@ export function recommendCohort(
     tier.price * 15,
     `Cannot drop below $${floors.firstPayoutCap} — current floor (today's TIER_ECONOMICS value, not MC-derived).`,
     `Cap at 15× entry fee — beyond this, lifetime ratio breaks.`,
+    { usableCount: fcUsable, exclusionNote: coverageNote(fcUsable, 'a first-payout cap') },
   );
   const cooldownDays = row(
     'payout_cooldown_days',
