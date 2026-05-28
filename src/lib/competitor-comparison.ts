@@ -155,9 +155,13 @@ export function filterComparableSnapshots(snapshots: SnapshotInput[]): Comparabl
 
 export type MetricKey =
   | 'entry_price_50k'
+  | 'account_size'
   | 'profit_target'
+  | 'profit_target_pct'
   | 'daily_loss'
+  | 'daily_loss_pct'
   | 'max_drawdown'
+  | 'max_drawdown_pct'
   | 'payout_split'
   | 'first_payout_cap'
   | 'lifetime_cap_structure'
@@ -226,6 +230,10 @@ function fmtPct(n: number | null | undefined): string {
 function fmtDays(n: number | null | undefined): string {
   if (n == null) return '—';
   return `${n}d`;
+}
+function fmtPctOne(n: number | null | undefined): string {
+  if (n == null) return '—';
+  return `${n.toFixed(1)}%`;
 }
 
 function pick50kPrice(snap: SnapshotInput): { price: number | null; isPromo: boolean } {
