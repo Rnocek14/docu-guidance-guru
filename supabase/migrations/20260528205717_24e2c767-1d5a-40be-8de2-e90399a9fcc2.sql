@@ -1,0 +1,1 @@
+UPDATE public.competitor_intel_profiles SET fetch_strategy = 'direct', updated_at = now() WHERE firm_id = 'lucid';
