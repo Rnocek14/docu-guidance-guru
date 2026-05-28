@@ -8,7 +8,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import type { SnapshotInput } from '@/lib/competitor-comparison';
-import { _internal, MIN_SAMPLE_SIZE, type TierId } from '@/lib/competitor-recommendation';
+import { _internal, MIN_SAMPLE_SIZE, type TierId, type RulesByFirmSize } from '@/lib/competitor-recommendation';
 
 const { TIER_BUCKETS } = _internal;
 
@@ -37,7 +37,17 @@ function inBucket(size: number, tier: TierId): boolean {
 
 type Coverage = 'rules' | 'price' | 'none';
 
-function coverage(snap: SnapshotInput, tier: TierId): Coverage {
+function coverage(
+  snap: SnapshotInput,
+  tier: TierId,
+  rulesByFirmSize?: RulesByFirmSize,
+): Coverage {
+  // Prefer the new per-(firm, size) rules table when available.
+  const sizes = Object.keys(rulesByFirmSize?.[snap.firm_id] ?? {})
+    .map((k) => Number(k))
+    .filter((n) => Number.isFinite(n));
+  if (sizes.some((s) => inBucket(s, tier))) return 'rules';
+  // Legacy fallback: snapshot's single bundled rules row.
   const rulesSize = snap.payload?.rules?.account_size_usd ?? null;
   if (rulesSize != null && inBucket(rulesSize, tier)) return 'rules';
   const sizes = (snap.payload?.pricing ?? [])
@@ -47,10 +57,16 @@ function coverage(snap: SnapshotInput, tier: TierId): Coverage {
   return 'none';
 }
 
-export function ScraperCoverageCard({ snapshots }: { snapshots: SnapshotInput[] }) {
+export function ScraperCoverageCard({
+  snapshots,
+  rulesByFirmSize,
+}: {
+  snapshots: SnapshotInput[];
+  rulesByFirmSize?: RulesByFirmSize;
+}) {
   const rows = snapshots.map((s) => ({
     snap: s,
-    cells: TIERS.map((t) => ({ tier: t.id, status: coverage(s, t.id) })),
+    cells: TIERS.map((t) => ({ tier: t.id, status: coverage(s, t.id, rulesByFirmSize) })),
   }));
 
   const tierCounts = TIERS.map((t) => ({
