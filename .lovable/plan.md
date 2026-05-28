@@ -1,57 +1,67 @@
-# Fix Per-Size Scraper — Recovery Plan
+## Problem
 
-## What's wrong
+The cohort recommender takes a per-field median across competitor snapshots. Today that median is biased in two ways:
 
-A `weekly` scrape just ran for all 11 active firms. Result:
+1. **Implausible zeros are treated as real values.** If a scraper extracts `daily_loss_usd: 0`, `reset_fee_usd: 0`, `payout_split_pct: 0`, etc., those 0s get fed into the median and pull it toward zero. Live example: `ftmo@100k` and `fundednext@100k` have `reset_fee_usd: 0` — almost certainly a scrape miss, not a real free reset.
+2. **Selective absence is only flagged for daily-loss.** Other fields (`first_payout_cap_usd`, `reset_fee_usd`, `payout_split_pct`) are missing for many firms in the cohort, but the UI shows the median with no warning. A median of "the 3 firms that publish a first-payout cap" is presented as if it represented the whole cohort.
 
-- 9 firms wrote snapshots successfully.
-- 2 firms hard-failed: `alpha` (OpenAI 429 TPM) and `lucid` (thin browserless content).
-- **0 firms wrote any `competitor_firm_rules` rows.** Every snapshot payload is missing the `rules_by_size` key entirely — meaning the per-size extraction block from the recent rewrite never reached the snapshot insert with data.
-
-Root causes, in order of likelihood:
-
-1. **OpenAI TPM ceiling (30k tokens/min for gpt-4o on this org).** Each firm does 1 base extraction + N per-size extractions back-to-back. With 3–5 sizes per firm × 11 firms running sequentially, the per-size calls 429 and the `catch` swallows the error → `rulesBySize` stays `{}` → `rules_by_size` is set to an empty object → upsert loop has 0 rows → table stays empty. We even see alpha 429 on the *base* call.
-2. **No retry / backoff** on the OpenAI call, so a single 429 wipes out that size permanently for the run.
-3. **Silent swallow.** `per-size extraction failed for X@Y` only goes to `console.warn`; nothing surfaces in the UI or the snapshot, so the run looks "green" while producing zero new rules.
-4. **Hard-failed firms (`alpha`, `lucid`) have no fallback.** One thin fetch or one 429 kills the entire firm for the cycle.
+So yes — if your own daily loss is 5% and the cohort median lands at 0% because every other firm reported `null` or a junk `0`, the recommendation is wrong.
 
 ## Fix
 
-### 1. OpenAI client hardening (`supabase/functions/scrape-competitor-intel/index.ts`)
+### 1. Coerce implausible zeros to null in `competitor-recommendation.ts`
 
-- Add retry-with-backoff around `openaiNormalize`: on HTTP 429, parse `Please try again in Xms` from the body, sleep that long (cap at 30s), retry up to 3 times.
-- Switch the per-size extraction to `gpt-4o-mini` (much higher TPM, plenty for "extract these rules at size $X"). Keep `gpt-4o` for the base extraction only.
-- Sleep ~250ms between per-size calls inside a firm to stay under TPM.
+For fields where 0 is structurally not a real rule, treat `0` (and negatives) as missing before going into the median:
 
-### 2. Make per-size capture observable
+| Field | Treat 0 as null? |
+|---|---|
+| `daily_loss_usd` | yes |
+| `max_drawdown_usd` | yes |
+| `profit_target_usd` | yes |
+| `payout_split_pct` | yes (0% split is not a real product) |
+| `first_payout_cap_usd` | yes (use null = "no cap" instead) |
+| `reset_fee_usd` | **no** — keep 0, some firms genuinely have free resets. But require the snapshot's `extraction_confidence >= 0.5` to count; otherwise drop. |
+| `payout_cadence_days` | **no** — 0 means instant/on-demand, valid. |
 
-- Track `rulesBySizeErrors: Record<number, string>` next to `rulesBySize`.
-- Write both into the snapshot payload (`rules_by_size`, `rules_by_size_errors`).
-- Return per-firm `sizes_captured` / `sizes_failed` counts in the function's JSON response so the admin "Re-scrape" button shows real numbers instead of just "ok".
+Add a small helper `nonZeroOrNull(v)` and apply it inside the `.map(...)` callbacks feeding each `median(...)` call.
 
-### 3. Always seed the base size
+### 2. Track per-field coverage and surface it
 
-The base extraction already returns one rules object with `account_size_usd`. Currently we only insert it into `rulesBySize` if it happens to match a configured size. Change to: **always** upsert the base size as a `competitor_firm_rules` row, regardless of whether it's in `sizes_to_scrape`. That guarantees at least 1 row per firm even if every per-size call fails.
+Extend `RecommendationRow` with:
 
-### 4. Fetch-step resilience for `lucid`
+```ts
+sampleCount: number;   // firms with a usable value for this field
+totalFirms: number;    // firms in the bucket
+exclusionNote?: string;
+```
 
-`lucid` failed with `thin browserless content (62)` on both URLs. Add `firecrawl` to its profile's `fetch_strategy` fallback chain (browserless → firecrawl). One-line profile update via `insert` tool, no schema change.
+Compute `sampleCount` inline next to each median. When `sampleCount < totalFirms / 2`, attach an `exclusionNote` like:
 
-### 5. Run order
+```
+Only 3 of 7 firms in this bucket publish a first-payout cap — median may not be representative.
+```
 
-- Apply code changes.
-- Insert `fetch_strategy` update for `lucid`.
-- Re-run `kind=weekly` from the admin UI.
-- Verify: `SELECT firm_id, COUNT(*) FROM competitor_firm_rules GROUP BY firm_id;` should show ≥1 row for every active firm, and Pro / Elite firms should show 2–3 rows each.
+Already done for daily-loss; generalize the pattern to all sparse fields.
+
+### 3. Surface coverage in the UI
+
+In `RecommendedCohortCard.tsx` (and `MarketPositionView.tsx` where relevant), render the coverage badge next to each row: `n/N firms`. When the exclusionNote is present, show the existing amber-warning style already used for daily-loss.
+
+### 4. Tests
+
+Extend `competitor-recommendation.test.ts`:
+- Cohort where every competitor reports `daily_loss_usd: 0` → median should be `null`, not `0`, and a coverage warning fires.
+- Cohort where 1 of 5 firms has `first_payout_cap_usd` set → median uses that 1 firm but row carries `exclusionNote`.
+- `reset_fee_usd: 0` from a high-confidence snapshot is kept; from a low-confidence snapshot is dropped.
 
 ## Out of scope
 
-- Removing the OpenAI 429 by upgrading the org's TPM tier (user action).
-- Replacing browserless with a different vendor.
-- UI changes beyond surfacing the new per-firm capture counts.
+- Re-running the scraper. This is purely a math/UX fix on top of whatever the scraper already stored.
+- Switching away from median (mean / trimmed mean). Median is still the right central-tendency estimator once the junk-zero and sparsity issues are handled.
 
 ## Files touched
 
-- `supabase/functions/scrape-competitor-intel/index.ts` — retry/backoff, model swap for per-size, base-size always upsert, error capture in payload, richer JSON response.
-- `src/components/admin/competitor-intel/ScraperCoverageCard.tsx` — surface `sizes_captured / sizes_total` from the last run (small read-only addition).
-- One `insert`-tool data update for `lucid.fetch_strategy`.
+- `src/lib/competitor-recommendation.ts` — zero-coercion helper, per-field coverage, exclusionNote generalization
+- `src/lib/competitor-recommendation.test.ts` — new cases above
+- `src/components/admin/competitor-intel/RecommendedCohortCard.tsx` — coverage badge + warning surface
+- `src/components/admin/competitor-intel/MarketPositionView.tsx` — coverage badge on the comparison rows

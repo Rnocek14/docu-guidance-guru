@@ -58,6 +58,8 @@ export interface RecommendationRow {
   median: number | null;
   solvent: number | null;
   sampleSize: number;
+  /** Firms in the tier bucket (denominator for sampleSize). */
+  totalFirms: number;
   clamped: boolean;
   clampReason?: string;
   medianSource?: string;
@@ -107,6 +109,18 @@ function median(values: Array<number | null | undefined>): number | null {
   if (xs.length === 0) return null;
   const mid = Math.floor(xs.length / 2);
   return xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
+}
+
+/**
+ * Treat 0 / negative as missing for fields where 0 is structurally not a
+ * real rule (a scrape miss almost always shows up as 0 or null). Without
+ * this, a handful of junk zeros drag the cohort median toward zero and
+ * the recommendation tells you to drop your daily-loss / drawdown /
+ * split to absurd levels.
+ */
+function nonZeroOrNull(v: number | null | undefined): number | null {
+  if (v == null || !Number.isFinite(v) || v <= 0) return null;
+  return v;
 }
 
 function clamp(value: number, lo: number | null, hi: number | null): { v: number; clamped: 'lo' | 'hi' | null } {
@@ -204,41 +218,58 @@ export function recommendCohort(
       : 'No competitor data in this account-size bucket';
 
   // Per-field median + clamp definitions
-  const profitTargetPctMedian = median(
-    inBucket.map((s) => {
-      const tgt = s.payload?.rules?.profit_target_usd;
-      const sz = s.payload?.rules?.account_size_usd;
-      return tgt != null && sz ? (tgt / sz) * 100 : null;
-    }),
-  );
-  // Trailing-only firms genuinely have no daily-loss rule — exclude from median
-  // but track the exclusion count so the UI can surface the bias.
-  let dailyLossExcluded = 0;
-  const dailyLossPctMedian = median(
-    inBucket.map((s) => {
-      const v = s.payload?.rules?.daily_loss_usd;
-      const sz = s.payload?.rules?.account_size_usd;
-      if (v == null || !sz) {
-        dailyLossExcluded += 1;
-        return null;
-      }
-      return (v / sz) * 100;
-    }),
-  );
-  const maxDrawdownPctMedian = median(
-    inBucket.map((s) => {
-      const v = s.payload?.rules?.max_drawdown_usd;
-      const sz = s.payload?.rules?.account_size_usd;
-      return v != null && sz ? (v / sz) * 100 : null;
-    }),
-  );
-  const splitMedian = median(inBucket.map((s) => s.payload?.rules?.payout_split_pct));
-  const firstCapMedian = median(inBucket.map((s) => s.payload?.rules?.first_payout_cap_usd));
-  const cooldownMedian = median(inBucket.map((s) => s.payload?.rules?.payout_cadence_days));
-  const resetMedian = median(inBucket.map((s) => s.payload?.rules?.reset_fee_usd));
-  const entryMedian = median(inBucket.map((s) => pickPriceForTier(s, tierId)));
+  const totalFirms = inBucket.length;
 
-  const sampleCount = inBucket.length;
+  // Build per-field value arrays so we can derive both median and an
+  // honest per-field sample count (after dropping implausible zeros).
+  const profitTargetPctValues = inBucket.map((s) => {
+    const tgt = nonZeroOrNull(s.payload?.rules?.profit_target_usd);
+    const sz = s.payload?.rules?.account_size_usd;
+    return tgt != null && sz ? (tgt / sz) * 100 : null;
+  });
+  const dailyLossPctValues = inBucket.map((s) => {
+    const v = nonZeroOrNull(s.payload?.rules?.daily_loss_usd);
+    const sz = s.payload?.rules?.account_size_usd;
+    return v != null && sz ? (v / sz) * 100 : null;
+  });
+  const maxDrawdownPctValues = inBucket.map((s) => {
+    const v = nonZeroOrNull(s.payload?.rules?.max_drawdown_usd);
+    const sz = s.payload?.rules?.account_size_usd;
+    return v != null && sz ? (v / sz) * 100 : null;
+  });
+  const splitValues = inBucket.map((s) => nonZeroOrNull(s.payload?.rules?.payout_split_pct));
+  const firstCapValues = inBucket.map((s) => nonZeroOrNull(s.payload?.rules?.first_payout_cap_usd));
+  // Cooldown of 0d (instant payouts) is valid — keep zeros.
+  const cooldownValues = inBucket.map((s) => {
+    const v = s.payload?.rules?.payout_cadence_days;
+    return v != null && Number.isFinite(v) && v >= 0 ? v : null;
+  });
+  // Reset fee of $0 (free reset) is a real product choice — keep zeros.
+  const resetValues = inBucket.map((s) => {
+    const v = s.payload?.rules?.reset_fee_usd;
+    return v != null && Number.isFinite(v) && v >= 0 ? v : null;
+  });
+  const entryValues = inBucket.map((s) => nonZeroOrNull(pickPriceForTier(s, tierId)));
+
+  const profitTargetPctMedian = median(profitTargetPctValues);
+  const dailyLossPctMedian = median(dailyLossPctValues);
+  const maxDrawdownPctMedian = median(maxDrawdownPctValues);
+  const splitMedian = median(splitValues);
+  const firstCapMedian = median(firstCapValues);
+  const cooldownMedian = median(cooldownValues);
+  const resetMedian = median(resetValues);
+  const entryMedian = median(entryValues);
+
+  const countUsable = (arr: Array<number | null>) =>
+    arr.filter((v) => v != null && Number.isFinite(v)).length;
+
+  function coverageNote(usable: number, fieldName: string): string | undefined {
+    if (totalFirms === 0 || usable === totalFirms) return undefined;
+    if (usable * 2 >= totalFirms) return undefined;
+    return `Only ${usable} of ${totalFirms} firms in this bucket publish ${fieldName} — median may not be representative.`;
+  }
+
+  const sampleCount = totalFirms;
   const insufficient = sampleCount > 0 && sampleCount < MIN_SAMPLE_SIZE;
 
   // Build rows + the solvent-clamped cohort in one pass
@@ -254,7 +285,7 @@ export function recommendCohort(
     hi: number | null,
     loReason: string,
     hiReason: string,
-    extra: { exclusionNote?: string } = {},
+    extra: { exclusionNote?: string; usableCount?: number } = {},
   ): number | null {
     let solvent: number | null = null;
     let clamped = false;
@@ -284,7 +315,8 @@ export function recommendCohort(
       current,
       median: medianValue,
       solvent,
-      sampleSize: sampleCount,
+      sampleSize: extra.usableCount ?? sampleCount,
+      totalFirms,
       clamped,
       clampReason,
       medianSource: medianSrc,
@@ -293,6 +325,15 @@ export function recommendCohort(
     });
     return solvent;
   }
+
+  const entryUsable = countUsable(entryValues);
+  const ptUsable = countUsable(profitTargetPctValues);
+  const dlUsable = countUsable(dailyLossPctValues);
+  const dailyLossExcluded = totalFirms - dlUsable;
+  const ddUsable = countUsable(maxDrawdownPctValues);
+  const spUsable = countUsable(splitValues);
+  const fcUsable = countUsable(firstCapValues);
+  const cdUsable = countUsable(cooldownValues);
 
   const entryFee = row(
     'entry_fee',
@@ -304,6 +345,7 @@ export function recommendCohort(
     Math.round(tier.price * 1.2),
     'Pricing whiplash guardrail: cannot drop below 70% of current entry fee.',
     'Pricing whiplash guardrail: cannot exceed 120% of current entry fee.',
+    { usableCount: entryUsable, exclusionNote: coverageNote(entryUsable, 'an entry fee for this size') },
   );
   const profitTargetPct = row(
     'profit_target_percent',
@@ -315,6 +357,7 @@ export function recommendCohort(
     12,
     'Min target band: <8% is too easy to pass and breaks reserve assumptions.',
     'Max target band: >12% pushes pass rate below break-even.',
+    { usableCount: ptUsable, exclusionNote: coverageNote(ptUsable, 'a profit target') },
   );
   const dailyLossPct = row(
     'max_daily_loss_percent',
@@ -326,9 +369,13 @@ export function recommendCohort(
     5,
     'Cannot drop below 3% — trader churn spikes on tight intraday limits.',
     'Cannot exceed 5% — current cohort spec ceiling.',
-    dailyLossExcluded > 0
-      ? { exclusionNote: `${dailyLossExcluded} of ${sampleCount} firms have no daily-loss rule (trailing-only) and were excluded — median is biased toward stricter firms.` }
-      : {},
+    {
+      usableCount: dlUsable,
+      exclusionNote:
+        dailyLossExcluded > 0
+          ? `${dailyLossExcluded} of ${totalFirms} firms have no daily-loss rule (trailing-only or scrape miss) and were excluded — median is biased toward stricter firms.`
+          : undefined,
+    },
   );
   const maxDrawdownPct = row(
     'max_total_drawdown_percent',
@@ -340,6 +387,7 @@ export function recommendCohort(
     10,
     'Cannot drop below 4% — survivability collapses.',
     'Cannot exceed 10% — current cohort spec ceiling.',
+    { usableCount: ddUsable, exclusionNote: coverageNote(ddUsable, 'a max drawdown') },
   );
   const splitPct = row(
     'payout_split_percent',
@@ -351,6 +399,7 @@ export function recommendCohort(
     95,
     `Cannot drop below ${floors.splitPct}% — current floor (today's TIER_ECONOMICS value, not MC-derived).`,
     'Cap at 95% — anything higher leaves no margin for breaker reserves.',
+    { usableCount: spUsable, exclusionNote: coverageNote(spUsable, 'a payout split') },
   );
   const firstCap = row(
     'first_payout_cap_amount',
@@ -362,6 +411,7 @@ export function recommendCohort(
     tier.price * 15,
     `Cannot drop below $${floors.firstPayoutCap} — current floor (today's TIER_ECONOMICS value, not MC-derived).`,
     `Cap at 15× entry fee — beyond this, lifetime ratio breaks.`,
+    { usableCount: fcUsable, exclusionNote: coverageNote(fcUsable, 'a first-payout cap') },
   );
   const cooldownDays = row(
     'payout_cooldown_days',
@@ -373,6 +423,7 @@ export function recommendCohort(
     21,
     'Cannot drop below 7d — ops capacity floor.',
     'Cap at 21d — anything longer becomes user-hostile.',
+    { usableCount: cdUsable, exclusionNote: coverageNote(cdUsable, 'a payout cadence') },
   );
   // Reset fee intentionally omitted from this table: it lives on the
   // `reset-bundles.ts` SSOT, not the `cohorts` row, so a recommendation
