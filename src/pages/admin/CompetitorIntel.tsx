@@ -235,6 +235,19 @@ export default function CompetitorIntel() {
       return body;
     },
     onSuccess: (body) => {
+      // Background-processing path: 11-firm sweep returns 202 immediately and
+      // finishes async. UI just refreshes after a short delay.
+      if (body?.status === 'processing') {
+        toast.success(
+          body.message ?? `Scrape started for ${body.accepted ?? 'all'} firm(s) — running in background.`
+        );
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ['ci-snapshots'] });
+          queryClient.invalidateQueries({ queryKey: ['ci-changes'] });
+          queryClient.invalidateQueries({ queryKey: ['ci-firm-rules'] });
+        }, 60_000);
+        return;
+      }
       const results = (body?.results ?? []) as Array<{
         firm_id: string;
         status: string;

@@ -957,7 +957,7 @@ Deno.serve(async (req) => {
     const { data: profiles, error: profilesErr } = await q
     if (profilesErr) throw profilesErr
 
-    const results: Array<{
+    type FirmResult = {
       firm_id: string
       status: string
       changes: number
@@ -965,9 +965,13 @@ Deno.serve(async (req) => {
       sizes_total?: number
       sizes_captured?: number
       sizes_failed?: number
-    }> = []
+    }
+    const results: FirmResult[] = []
 
-    for (const p of profiles ?? []) {
+    // Sequential per-firm scrape body, extracted so we can run it inline (single
+    // firm) or in the background (all firms — would otherwise blow the 150s
+    // edge-runtime budget with 11 firms × up to 5 OpenAI calls each).
+    const runOneFirm = async (p: typeof profiles[number]): Promise<void> => {
       const firmId = p.firm_id as string
       const urls = (p.urls ?? {}) as Record<string, string>
       // Scrape ALL configured URLs (pricing + rules + promo) and merge their
@@ -980,7 +984,7 @@ Deno.serve(async (req) => {
         strategyOverride ?? ((p.fetch_strategy as FetchStrategy) || 'direct')
       if (!targetUrl) {
         results.push({ firm_id: firmId, status: 'skipped_no_url', changes: 0 })
-        continue
+        return
       }
 
       try {
@@ -1174,9 +1178,44 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ ok: true, kind, results }), {
-      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    const profileList = profiles ?? []
+
+    // If a specific firm was requested, run inline — single firm fits well
+    // within the 150s edge budget and the caller wants the result immediately.
+    // Otherwise kick the full sweep into the background and return 202.
+    if (firmFilter || profileList.length <= 1) {
+      for (const p of profileList) {
+        await runOneFirm(p)
+      }
+      return new Response(JSON.stringify({ ok: true, kind, results }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const background = (async () => {
+      for (const p of profileList) {
+        try {
+          await runOneFirm(p)
+        } catch (e) {
+          console.error('background firm crash:', e)
+        }
+      }
+      console.log(`background scrape complete — ${results.length} firm result(s)`)
+    })()
+    // EdgeRuntime is the Deno Deploy global; guard for type-checkers.
+    const rt = (globalThis as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime
+    if (rt?.waitUntil) rt.waitUntil(background)
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        kind,
+        accepted: profileList.length,
+        status: 'processing',
+        message: 'Scrape running in background. Refresh in ~60s to see new rules.',
+      }),
+      { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    )
   } catch (e) {
     console.error('scrape-competitor-intel fatal:', e)
     return new Response(JSON.stringify({ error: 'Internal error' }), {
