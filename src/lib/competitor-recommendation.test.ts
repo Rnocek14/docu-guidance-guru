@@ -56,6 +56,18 @@ describe('recommendCohort', () => {
     expect(split.median).toBeNull();
     expect(split.solvent).toBe(80);
     expect(r.sourceFirms).toEqual([]);
+    // No data → solvent == current on every field → status is 'no_change'.
+    expect(r.status).toBe('no_change');
+  });
+
+  it('flags status="insufficient_data" when n=1 or 2', () => {
+    const r1 = recommendCohort('starter', [makeSnap('apex', 50_000, { payout_split_pct: 90 }, 147)]);
+    expect(r1.status).toBe('insufficient_data');
+    const r2 = recommendCohort('starter', [
+      makeSnap('apex', 50_000, { payout_split_pct: 90 }, 147),
+      makeSnap('topstep', 50_000, { payout_split_pct: 90 }, 165),
+    ]);
+    expect(r2.status).toBe('insufficient_data');
   });
 
   it('passes through a competitor split that sits inside the solvency band', () => {
@@ -70,10 +82,16 @@ describe('recommendCohort', () => {
     expect(split.solvent).toBe(90);
     expect(split.clamped).toBe(false);
     expect(r.proposedCohort.payout_split_percent).toBe(90);
+    expect(r.status).toBe('ok');
+    expect(r.changedFields).toContain('payout_split_percent');
   });
 
   it('caps a runaway 99% split at the 95% ceiling', () => {
-    const snaps = [makeSnap('x', 50_000, { payout_split_pct: 99 }, 100)];
+    const snaps = [
+      makeSnap('x', 50_000, { payout_split_pct: 99 }, 100),
+      makeSnap('y', 50_000, { payout_split_pct: 99 }, 100),
+      makeSnap('z', 50_000, { payout_split_pct: 99 }, 100),
+    ];
     const r = recommendCohort('starter', snaps);
     const split = r.rows.find((x) => x.field === 'payout_split_percent')!;
     expect(split.median).toBe(99);
@@ -105,6 +123,13 @@ describe('recommendCohort', () => {
     expect(pro.sourceFirms).toEqual(['apex100']);
     const elite = recommendCohort('elite', snaps);
     expect(elite.sourceFirms).toEqual(['apex200']);
+    // n=1 in each bucket → insufficient_data, not ok.
+    expect(pro.status).toBe('insufficient_data');
+  });
+
+  it('omits reset fee row (lives on reset-bundles SSOT, not cohorts row)', () => {
+    const r = recommendCohort('starter', []);
+    expect(r.rows.find((x) => x.field === 'reset_fee')).toBeUndefined();
   });
 
   it('produces a proposedCohort with all required fields', () => {
