@@ -554,6 +554,7 @@ async function openaiNormalize(
   kind: ScrapeKind,
   apiKey: string,
   ruleAccountSizeUsd?: number,
+  modelOverride?: string,
 ): Promise<Record<string, unknown>> {
   const schemaDescription =
     kind === 'weekly'
@@ -608,26 +609,43 @@ async function openaiNormalize(
 
   const userMsg = `${schemaDescription}\n\nSOURCE TEXT (truncated):\n${text.slice(0, 40000)}`
 
-  const res = await fetch(OPENAI_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      temperature: 0,
-      max_tokens: 2000,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: userMsg },
-      ],
-    }),
+  const requestBody = JSON.stringify({
+    model: modelOverride ?? OPENAI_MODEL,
+    temperature: 0,
+    max_tokens: 2000,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: userMsg },
+    ],
   })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`openai ${res.status}: ${body.slice(0, 300)}`)
+
+  let res: Response | null = null
+  let lastBody = ''
+  for (let attempt = 0; attempt < 3; attempt++) {
+    res = await fetch(OPENAI_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: requestBody,
+    })
+    if (res.ok) break
+    lastBody = await res.text()
+    if (res.status === 429 || res.status === 503) {
+      // Parse "Please try again in 178ms" / "in 2.5s" from OpenAI's rate-limit body.
+      const m = lastBody.match(/try again in ([0-9.]+)(ms|s)/i)
+      let waitMs = m ? Math.ceil(parseFloat(m[1]) * (m[2] === 's' ? 1000 : 1)) : 1500 * (attempt + 1)
+      // Add jitter; cap at 30s.
+      waitMs = Math.min(30_000, waitMs + 250 + Math.floor(Math.random() * 500))
+      await new Promise((r) => setTimeout(r, waitMs))
+      continue
+    }
+    throw new Error(`openai ${res.status}: ${lastBody.slice(0, 300)}`)
+  }
+  if (!res || !res.ok) {
+    throw new Error(`openai ${res?.status ?? 'no-response'}: ${lastBody.slice(0, 300)}`)
   }
   const data = await res.json()
   const content = data?.choices?.[0]?.message?.content ?? '{}'
