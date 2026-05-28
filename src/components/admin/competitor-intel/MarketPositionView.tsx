@@ -12,6 +12,7 @@ import {
   type SnapshotInput,
 } from '@/lib/competitor-comparison';
 import { RecommendedCohortCard } from './RecommendedCohortCard';
+import { ScraperCoverageCard } from './ScraperCoverageCard';
 
 const SIGNAL_CLASS = {
   friendly: 'text-emerald-400',
@@ -77,6 +78,9 @@ export function MarketPositionView({ snapshots }: { snapshots: SnapshotInput[] }
 
   return (
     <div className="space-y-4">
+      {/* Scraper coverage — surface data gaps BEFORE trusting recommendations */}
+      <ScraperCoverageCard snapshots={comparable} />
+
       {/* Recommended cohort */}
       <RecommendedCohortCard snapshots={comparable} />
 
