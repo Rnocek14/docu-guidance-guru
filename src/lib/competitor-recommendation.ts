@@ -22,12 +22,23 @@ const TIER_BUCKETS: Record<TierId, { target: number; min: number; max: number }>
   elite: { target: 200_000, min: 125_001, max: 300_000 },
 };
 
-/** Solvency floors derived from current `TIER_ECONOMICS` — cannot drop below these. */
-const SOLVENCY_FLOORS: Record<TierId, { splitPct: number; firstPayoutCap: number }> = {
+/**
+ * NOTE: These are NOT Monte-Carlo–derived solvency floors. They are the
+ * *current* `TIER_ECONOMICS` values, used as "do not loosen below today"
+ * guards until a real MC-derived floor table lands. Tooltip copy must say
+ * "current floor", not "solvency floor", to avoid implying false rigor.
+ * TODO(meridian): replace with `monte-carlo.ts` ruin-probability lookups.
+ */
+const CURRENT_FLOORS: Record<TierId, { splitPct: number; firstPayoutCap: number }> = {
   starter: { splitPct: 80, firstPayoutCap: 500 },
   pro: { splitPct: 80, firstPayoutCap: 750 },
   elite: { splitPct: 80, firstPayoutCap: 1000 },
 };
+
+/** Minimum competitor snapshots required before we publish a numeric recommendation. */
+export const MIN_SAMPLE_SIZE = 3;
+/** % drift below which a field is considered "no meaningful change". */
+const NO_CHANGE_EPSILON = 0.5;
 
 export interface RecommendationRow {
   field: string;
@@ -40,6 +51,10 @@ export interface RecommendationRow {
   clamped: boolean;
   clampReason?: string;
   medianSource?: string;
+  /** Optional note explaining excluded snapshots (e.g. trailing-only firms). */
+  exclusionNote?: string;
+  /** Whether the solvent value differs meaningfully from current. */
+  changed?: boolean;
 }
 
 export interface ProposedCohort {
@@ -66,6 +81,10 @@ export interface CohortRecommendation {
   proposedCohort: ProposedCohort;
   sourceSnapshotIds: string[];
   sourceFirms: string[];
+  /** Overall recommendation state. Drives UI banner + button enable. */
+  status: 'ok' | 'insufficient_data' | 'no_change';
+  /** Fields where solvent differs meaningfully from current. */
+  changedFields: string[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -122,7 +141,7 @@ export function recommendCohort(
 ): CohortRecommendation {
   const tier = tierFromTiers(tierId);
   const bucket = TIER_BUCKETS[tierId];
-  const floors = SOLVENCY_FLOORS[tierId];
+  const floors = CURRENT_FLOORS[tierId];
 
   const inBucket = snapshotsInBucket(comparableSnapshots, tierId);
   const sourceFirms = inBucket.map((s) => s.firm_name);
@@ -140,12 +159,18 @@ export function recommendCohort(
       return tgt != null && sz ? (tgt / sz) * 100 : null;
     }),
   );
+  // Trailing-only firms genuinely have no daily-loss rule — exclude from median
+  // but track the exclusion count so the UI can surface the bias.
+  let dailyLossExcluded = 0;
   const dailyLossPctMedian = median(
     inBucket.map((s) => {
       const v = s.payload?.rules?.daily_loss_usd;
       const sz = s.payload?.rules?.account_size_usd;
-      // Trailing-only firms genuinely have no daily-loss rule — exclude from median.
-      return v != null && sz ? (v / sz) * 100 : null;
+      if (v == null || !sz) {
+        dailyLossExcluded += 1;
+        return null;
+      }
+      return (v / sz) * 100;
     }),
   );
   const maxDrawdownPctMedian = median(
@@ -162,6 +187,7 @@ export function recommendCohort(
   const entryMedian = median(inBucket.map((s) => pickPriceForTier(s, tierId)));
 
   const sampleCount = inBucket.length;
+  const insufficient = sampleCount > 0 && sampleCount < MIN_SAMPLE_SIZE;
 
   // Build rows + the solvent-clamped cohort in one pass
   const rows: RecommendationRow[] = [];
@@ -176,6 +202,7 @@ export function recommendCohort(
     hi: number | null,
     loReason: string,
     hiReason: string,
+    extra: { exclusionNote?: string } = {},
   ): number | null {
     let solvent: number | null = null;
     let clamped = false;
@@ -194,6 +221,10 @@ export function recommendCohort(
       // No competitor data → keep current value as the solvent recommendation.
       solvent = current;
     }
+    const changed =
+      solvent != null && current != null
+        ? Math.abs(solvent - current) > Math.max(NO_CHANGE_EPSILON, Math.abs(current) * 0.01)
+        : false;
     rows.push({
       field,
       label,
@@ -205,6 +236,8 @@ export function recommendCohort(
       clamped,
       clampReason,
       medianSource: medianSrc,
+      exclusionNote: extra.exclusionNote,
+      changed,
     });
     return solvent;
   }
@@ -241,6 +274,9 @@ export function recommendCohort(
     5,
     'Cannot drop below 3% — trader churn spikes on tight intraday limits.',
     'Cannot exceed 5% — current cohort spec ceiling.',
+    dailyLossExcluded > 0
+      ? { exclusionNote: `${dailyLossExcluded} of ${sampleCount} firms have no daily-loss rule (trailing-only) and were excluded — median is biased toward stricter firms.` }
+      : {},
   );
   const maxDrawdownPct = row(
     'max_total_drawdown_percent',
@@ -261,7 +297,7 @@ export function recommendCohort(
     splitMedian,
     floors.splitPct,
     95,
-    `Cannot drop below ${floors.splitPct}% — current solvency floor (see tier-economics.ts).`,
+    `Cannot drop below ${floors.splitPct}% — current floor (today's TIER_ECONOMICS value, not MC-derived).`,
     'Cap at 95% — anything higher leaves no margin for breaker reserves.',
   );
   const firstCap = row(
@@ -272,7 +308,7 @@ export function recommendCohort(
     firstCapMedian,
     floors.firstPayoutCap,
     tier.price * 15,
-    `Cannot drop below $${floors.firstPayoutCap} — current solvency floor.`,
+    `Cannot drop below $${floors.firstPayoutCap} — current floor (today's TIER_ECONOMICS value, not MC-derived).`,
     `Cap at 15× entry fee — beyond this, lifetime ratio breaks.`,
   );
   const cooldownDays = row(
@@ -286,17 +322,11 @@ export function recommendCohort(
     'Cannot drop below 7d — ops capacity floor.',
     'Cap at 21d — anything longer becomes user-hostile.',
   );
-  const resetFee = row(
-    'reset_fee',
-    'Reset fee',
-    'usd',
-    tier.resetFee,
-    resetMedian,
-    50,
-    99,
-    'Cannot drop below $50 — margin floor.',
-    'Cap at $99 — pricing parity ceiling.',
-  );
+  // Reset fee intentionally omitted from this table: it lives on the
+  // `reset-bundles.ts` SSOT, not the `cohorts` row, so a recommendation
+  // here would be cosmetic and misleading. Add a paired reset-bundles
+  // draft tool separately if/when that's needed.
+  void resetMedian;
 
   const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -315,9 +345,13 @@ export function recommendCohort(
     payout_cooldown_days: cooldownDays ?? tier.payoutCooldown,
     description: `Recommendation derived from ${sampleCount} competitor snapshot(s) in the ${bucket.target / 1000}K bucket on ${todayIso}. Clamped to current solvency floors.`,
   };
-  // Silence unused warnings — reset fee is intentionally not part of the cohort row
-  // (it lives on a separate reset-bundles SSOT), but it's surfaced in the table.
-  void resetFee;
+
+  const changedFields = rows.filter((r) => r.changed).map((r) => r.field);
+  const status: CohortRecommendation['status'] = insufficient
+    ? 'insufficient_data'
+    : changedFields.length === 0
+      ? 'no_change'
+      : 'ok';
 
   return {
     tierId,
@@ -327,7 +361,9 @@ export function recommendCohort(
     proposedCohort,
     sourceSnapshotIds,
     sourceFirms,
+    status,
+    changedFields,
   };
 }
 
-export const _internal = { median, clamp, TIER_BUCKETS, SOLVENCY_FLOORS };
+export const _internal = { median, clamp, TIER_BUCKETS, CURRENT_FLOORS };

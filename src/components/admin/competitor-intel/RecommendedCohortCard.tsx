@@ -4,10 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ArrowRight, Lock, Sparkles } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Info, Lock, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { recommendCohort, type TierId, type RecommendationRow } from '@/lib/competitor-recommendation';
+import { MIN_SAMPLE_SIZE, recommendCohort, type TierId, type RecommendationRow } from '@/lib/competitor-recommendation';
 import type { SnapshotInput } from '@/lib/competitor-comparison';
 
 const TIERS: TierId[] = ['starter', 'pro', 'elite'];
@@ -55,7 +55,11 @@ export function RecommendedCohortCard({ snapshots }: { snapshots: SnapshotInput[
     }
   }
 
-  const noData = rec.sourceFirms.length === 0;
+  const sampleN = rec.sourceFirms.length;
+  const noData = sampleN === 0;
+  const insufficient = rec.status === 'insufficient_data';
+  const noChange = rec.status === 'no_change';
+  const canApply = rec.status === 'ok';
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -91,8 +95,24 @@ export function RecommendedCohortCard({ snapshots }: { snapshots: SnapshotInput[
         <CardContent className="space-y-3 p-0">
           {noData && (
             <div className="mx-4 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-200">
-              No competitor snapshots match the {rec.accountSize.toLocaleString()} bucket. The solvent
-              column falls back to your current config — re-run scrapes to get a real recommendation.
+              No competitor snapshots match the {rec.accountSize.toLocaleString()} bucket. Re-run scrapes to get a real recommendation.
+            </div>
+          )}
+          {insufficient && (
+            <div className="mx-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-200">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <div>
+                Insufficient data: only {sampleN} comparable firm{sampleN === 1 ? '' : 's'} in this bucket (need ≥{MIN_SAMPLE_SIZE}).
+                Medians off a tiny sample are noise, not signal. Recommendation disabled.
+              </div>
+            </div>
+          )}
+          {noChange && (
+            <div className="mx-4 flex items-start gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3 text-xs text-emerald-300">
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <div>
+                You're already inside the competitive band on every field. No cohort change recommended.
+              </div>
             </div>
           )}
           <div className="overflow-x-auto">
@@ -118,13 +138,15 @@ export function RecommendedCohortCard({ snapshots }: { snapshots: SnapshotInput[
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="top" className="max-w-xs text-xs">
-                          {r.medianSource}
-                          {r.sampleSize > 0 && ` · n=${r.sampleSize}`}
+                          <div>{r.medianSource}{r.sampleSize > 0 ? ` · n=${r.sampleSize}` : ''}</div>
+                          {r.exclusionNote && (
+                            <div className="mt-1 text-amber-300">{r.exclusionNote}</div>
+                          )}
                         </TooltipContent>
                       </Tooltip>
                     </td>
                     <td className="bg-primary/5 px-3 py-2">
-                      <div className="flex items-center gap-1.5 text-primary">
+                      <div className={`flex items-center gap-1.5 ${r.changed ? 'text-primary' : 'text-muted-foreground'}`}>
                         <span className="font-medium">{formatValue(r.solvent, r.format)}</span>
                         {r.clamped && (
                           <Tooltip>
@@ -136,6 +158,9 @@ export function RecommendedCohortCard({ snapshots }: { snapshots: SnapshotInput[
                             </TooltipContent>
                           </Tooltip>
                         )}
+                        {r.changed && !r.clamped && (
+                          <Badge variant="outline" className="h-4 px-1 text-[10px]">Δ</Badge>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -145,12 +170,12 @@ export function RecommendedCohortCard({ snapshots }: { snapshots: SnapshotInput[
           </div>
           <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
             <div className="text-xs text-muted-foreground">
-              {rec.sourceFirms.length > 0
-                ? `Based on ${rec.sourceFirms.length} firm(s): ${rec.sourceFirms.join(', ')}`
+              {sampleN > 0
+                ? `Based on n=${sampleN}: ${rec.sourceFirms.join(', ')}`
                 : 'No comparable competitor data in this bucket.'}
             </div>
-            <Button size="sm" onClick={() => setModalOpen(true)} disabled={noData}>
-              Preview as draft cohort
+            <Button size="sm" onClick={() => setModalOpen(true)} disabled={!canApply}>
+              Preview {rec.changedFields.length} change{rec.changedFields.length === 1 ? '' : 's'}
               <ArrowRight className="ml-1 h-3 w-3" />
             </Button>
           </div>
@@ -166,14 +191,36 @@ export function RecommendedCohortCard({ snapshots }: { snapshots: SnapshotInput[
               <Badge variant="outline">intake_active=false</Badge>). Nothing live changes until you activate it in Cohorts Management.
             </DialogDescription>
           </DialogHeader>
-          <pre className="max-h-[400px] overflow-auto rounded-md border border-border bg-muted/30 p-3 text-xs">
-            {JSON.stringify(rec.proposedCohort, null, 2)}
-          </pre>
+          <div className="max-h-[400px] overflow-auto rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/30 text-left text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2">Field</th>
+                  <th className="px-3 py-2">Current</th>
+                  <th className="px-3 py-2"></th>
+                  <th className="px-3 py-2">Proposed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rec.rows.filter((r) => r.changed).map((r) => (
+                  <tr key={r.field} className="border-t border-border/40">
+                    <td className="px-3 py-2 font-medium">{r.label}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{formatValue(r.current, r.format)}</td>
+                    <td className="px-3 py-2 text-muted-foreground">→</td>
+                    <td className="px-3 py-2 font-medium text-primary">{formatValue(r.solvent, r.format)}</td>
+                  </tr>
+                ))}
+                {rec.rows.filter((r) => r.changed).length === 0 && (
+                  <tr><td colSpan={4} className="px-3 py-3 text-xs text-muted-foreground">No field changes.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setModalOpen(false)} disabled={submitting}>
               Cancel
             </Button>
-            <Button onClick={handleApply} disabled={submitting}>
+            <Button onClick={handleApply} disabled={submitting || !canApply}>
               {submitting ? 'Creating…' : 'Create draft cohort'}
             </Button>
           </DialogFooter>
