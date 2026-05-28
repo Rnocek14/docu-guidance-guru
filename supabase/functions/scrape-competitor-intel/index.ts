@@ -248,7 +248,7 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       activation_fee_cadence: 'monthly',
       phase_count: 1,
       accounts_allowed_max: 20,
-      trailing_dd_lock_usd: null,
+      trailing_dd_lock_usd: 100, // Trailing DD locks at initial balance + $100 once hit
       news_trading_allowed: true,
       payout_methods: 'WISE, Plane, ACH',
       scaling_plan_summary: 'Contract scaling tied to balance milestones',
@@ -267,10 +267,12 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       min_trading_days: 7,
       consistency_rule_pct: 30,
       payout_cadence_days: 14,
+      reset_fee_usd: 98,
       activation_fee_usd: 148,
       activation_fee_cadence: 'monthly',
       phase_count: 1,
       accounts_allowed_max: 5,
+      trailing_dd_lock_usd: 0, // EOD trailing locks at initial balance
       news_trading_allowed: true,
       scaling_plan_summary: 'Contract scaling tied to profit milestones',
       country_restrictions: 'Global; KYC required',
@@ -295,10 +297,12 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       first_payout_cap_usd: null,
       first_payout_cap_count: null,
       min_trading_days: 4,
-      consistency_rule_pct: null,
+      consistency_rule_pct: null, // FTMO does not enforce a consistency rule
       payout_cadence_days: 14,
+      reset_fee_usd: 0, // No reset — failed challenges require rebuy
       activation_fee_usd: 0,
       phase_count: 2,
+      trailing_dd_lock_usd: null, // Static drawdown — no trailing lock
       news_trading_allowed: true,
       payout_methods: 'Wire, crypto, Skrill',
       country_restrictions: 'Blocks US, Iran, North Korea, Syria, Cuba',
@@ -326,10 +330,12 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       first_payout_cap_usd: null,
       first_payout_cap_count: null,
       min_trading_days: 5,
-      consistency_rule_pct: null,
+      consistency_rule_pct: null, // FundedNext does not enforce a consistency rule
       payout_cadence_days: 21,
+      reset_fee_usd: 0, // No reset — failed challenges require rebuy
       activation_fee_usd: 0,
       phase_count: 2,
+      trailing_dd_lock_usd: null, // Static drawdown — no trailing lock
       news_trading_allowed: true,
       payout_methods: 'Wire, crypto',
       country_restrictions: 'Blocks US, sanctioned jurisdictions',
@@ -388,6 +394,10 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       consistency_rule_pct: 35,
       payout_cadence_days: 1,
       phase_count: 1,
+      reset_fee_usd: 99,
+      activation_fee_usd: 139, // One-time PA activation
+      activation_fee_cadence: 'one_time',
+      trailing_dd_lock_usd: 0, // EOD trailing locks at initial balance
       news_trading_allowed: true,
       scaling_plan_summary: 'Straight-to-sim funded after eval',
       country_restrictions: 'Global; KYC at payout',
@@ -408,6 +418,11 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       drawdown_type: 'eod_trailing',
       first_payout_cap_usd: 7500,
       first_payout_cap_count: 3,
+      min_trading_days: 1, // No minimum — at least one trading day
+      consistency_rule_pct: 40,
+      reset_fee_usd: 80,
+      activation_fee_usd: 0,
+      trailing_dd_lock_usd: 0, // EOD trailing locks at initial balance
       phase_count: 1,
       news_trading_allowed: true,
       country_restrictions: 'Global; standard sanctions list',
@@ -429,6 +444,9 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       drawdown_type: 'eod_trailing',
       first_payout_cap_usd: 1500,
       first_payout_cap_count: 1,
+      consistency_rule_pct: 20,
+      reset_fee_usd: 98,
+      trailing_dd_lock_usd: 0, // EOD trailing locks at initial balance
       phase_count: 1,
       news_trading_allowed: true,
       country_restrictions: 'US-focused; limited international',
