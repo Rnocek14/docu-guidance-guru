@@ -235,13 +235,31 @@ export default function CompetitorIntel() {
       return body;
     },
     onSuccess: (body) => {
-      const results = (body?.results ?? []) as Array<{ firm_id: string; status: string; changes: number; error?: string }>;
+      const results = (body?.results ?? []) as Array<{
+        firm_id: string;
+        status: string;
+        changes: number;
+        error?: string;
+        sizes_total?: number;
+        sizes_captured?: number;
+        sizes_failed?: number;
+      }>;
       const ok = results.filter((r) => r.status === 'ok');
       const bad = results.filter((r) => r.status !== 'ok');
-      if (ok.length) toast.success(`Scraped ${ok.length} firm(s) — ${ok.reduce((a, r) => a + r.changes, 0)} change(s)`);
+      if (ok.length) {
+        const capt = ok.reduce((a, r) => a + (r.sizes_captured ?? 0), 0);
+        const tot = ok.reduce((a, r) => a + (r.sizes_total ?? 0), 0);
+        toast.success(
+          `Scraped ${ok.length} firm(s) — ${ok.reduce((a, r) => a + r.changes, 0)} change(s), ${capt}/${tot} sizes captured`
+        );
+      }
+      for (const r of ok.filter((r) => (r.sizes_failed ?? 0) > 0)) {
+        toast.warning(`${r.firm_id}: ${r.sizes_failed} of ${r.sizes_total} sizes failed`);
+      }
       for (const r of bad) toast.warning(`${r.firm_id}: ${r.error?.slice(0, 200) ?? r.status}`);
       queryClient.invalidateQueries({ queryKey: ['ci-snapshots'] });
       queryClient.invalidateQueries({ queryKey: ['ci-changes'] });
+      queryClient.invalidateQueries({ queryKey: ['ci-firm-rules'] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
