@@ -285,7 +285,7 @@ export function recommendCohort(
     hi: number | null,
     loReason: string,
     hiReason: string,
-    extra: { exclusionNote?: string } = {},
+    extra: { exclusionNote?: string; usableCount?: number } = {},
   ): number | null {
     let solvent: number | null = null;
     let clamped = false;
@@ -315,7 +315,8 @@ export function recommendCohort(
       current,
       median: medianValue,
       solvent,
-      sampleSize: sampleCount,
+      sampleSize: extra.usableCount ?? sampleCount,
+      totalFirms,
       clamped,
       clampReason,
       medianSource: medianSrc,
