@@ -218,41 +218,58 @@ export function recommendCohort(
       : 'No competitor data in this account-size bucket';
 
   // Per-field median + clamp definitions
-  const profitTargetPctMedian = median(
-    inBucket.map((s) => {
-      const tgt = s.payload?.rules?.profit_target_usd;
-      const sz = s.payload?.rules?.account_size_usd;
-      return tgt != null && sz ? (tgt / sz) * 100 : null;
-    }),
-  );
-  // Trailing-only firms genuinely have no daily-loss rule — exclude from median
-  // but track the exclusion count so the UI can surface the bias.
-  let dailyLossExcluded = 0;
-  const dailyLossPctMedian = median(
-    inBucket.map((s) => {
-      const v = s.payload?.rules?.daily_loss_usd;
-      const sz = s.payload?.rules?.account_size_usd;
-      if (v == null || !sz) {
-        dailyLossExcluded += 1;
-        return null;
-      }
-      return (v / sz) * 100;
-    }),
-  );
-  const maxDrawdownPctMedian = median(
-    inBucket.map((s) => {
-      const v = s.payload?.rules?.max_drawdown_usd;
-      const sz = s.payload?.rules?.account_size_usd;
-      return v != null && sz ? (v / sz) * 100 : null;
-    }),
-  );
-  const splitMedian = median(inBucket.map((s) => s.payload?.rules?.payout_split_pct));
-  const firstCapMedian = median(inBucket.map((s) => s.payload?.rules?.first_payout_cap_usd));
-  const cooldownMedian = median(inBucket.map((s) => s.payload?.rules?.payout_cadence_days));
-  const resetMedian = median(inBucket.map((s) => s.payload?.rules?.reset_fee_usd));
-  const entryMedian = median(inBucket.map((s) => pickPriceForTier(s, tierId)));
+  const totalFirms = inBucket.length;
 
-  const sampleCount = inBucket.length;
+  // Build per-field value arrays so we can derive both median and an
+  // honest per-field sample count (after dropping implausible zeros).
+  const profitTargetPctValues = inBucket.map((s) => {
+    const tgt = nonZeroOrNull(s.payload?.rules?.profit_target_usd);
+    const sz = s.payload?.rules?.account_size_usd;
+    return tgt != null && sz ? (tgt / sz) * 100 : null;
+  });
+  const dailyLossPctValues = inBucket.map((s) => {
+    const v = nonZeroOrNull(s.payload?.rules?.daily_loss_usd);
+    const sz = s.payload?.rules?.account_size_usd;
+    return v != null && sz ? (v / sz) * 100 : null;
+  });
+  const maxDrawdownPctValues = inBucket.map((s) => {
+    const v = nonZeroOrNull(s.payload?.rules?.max_drawdown_usd);
+    const sz = s.payload?.rules?.account_size_usd;
+    return v != null && sz ? (v / sz) * 100 : null;
+  });
+  const splitValues = inBucket.map((s) => nonZeroOrNull(s.payload?.rules?.payout_split_pct));
+  const firstCapValues = inBucket.map((s) => nonZeroOrNull(s.payload?.rules?.first_payout_cap_usd));
+  // Cooldown of 0d (instant payouts) is valid — keep zeros.
+  const cooldownValues = inBucket.map((s) => {
+    const v = s.payload?.rules?.payout_cadence_days;
+    return v != null && Number.isFinite(v) && v >= 0 ? v : null;
+  });
+  // Reset fee of $0 (free reset) is a real product choice — keep zeros.
+  const resetValues = inBucket.map((s) => {
+    const v = s.payload?.rules?.reset_fee_usd;
+    return v != null && Number.isFinite(v) && v >= 0 ? v : null;
+  });
+  const entryValues = inBucket.map((s) => nonZeroOrNull(pickPriceForTier(s, tierId)));
+
+  const profitTargetPctMedian = median(profitTargetPctValues);
+  const dailyLossPctMedian = median(dailyLossPctValues);
+  const maxDrawdownPctMedian = median(maxDrawdownPctValues);
+  const splitMedian = median(splitValues);
+  const firstCapMedian = median(firstCapValues);
+  const cooldownMedian = median(cooldownValues);
+  const resetMedian = median(resetValues);
+  const entryMedian = median(entryValues);
+
+  const countUsable = (arr: Array<number | null>) =>
+    arr.filter((v) => v != null && Number.isFinite(v)).length;
+
+  function coverageNote(usable: number, fieldName: string): string | undefined {
+    if (totalFirms === 0 || usable === totalFirms) return undefined;
+    if (usable * 2 >= totalFirms) return undefined;
+    return `Only ${usable} of ${totalFirms} firms in this bucket publish ${fieldName} — median may not be representative.`;
+  }
+
+  const sampleCount = totalFirms;
   const insufficient = sampleCount > 0 && sampleCount < MIN_SAMPLE_SIZE;
 
   // Build rows + the solvent-clamped cohort in one pass
