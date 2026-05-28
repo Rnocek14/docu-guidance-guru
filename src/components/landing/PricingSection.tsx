@@ -131,8 +131,9 @@ export function PricingSection() {
       <div className="container mx-auto px-4">
         <div className="text-center mb-12">
           <h2 className="text-3xl sm:text-4xl font-bold mb-4">Choose Your Evaluation</h2>
-          <p className="text-muted-foreground text-lg max-w-xl mx-auto mb-8">
-            Simple pricing. Transparent rules. All tiers use the same evaluation criteria.
+          <p className="text-muted-foreground text-lg max-w-2xl mx-auto mb-8">
+            Smaller first payouts so we can actually pay them. Rules locked at purchase.
+            No surprise changes mid-evaluation.
           </p>
 
           {/* Rule toggle */}
