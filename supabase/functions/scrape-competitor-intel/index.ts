@@ -957,7 +957,7 @@ Deno.serve(async (req) => {
     const { data: profiles, error: profilesErr } = await q
     if (profilesErr) throw profilesErr
 
-    const results: Array<{
+    type FirmResult = {
       firm_id: string
       status: string
       changes: number
@@ -965,9 +965,13 @@ Deno.serve(async (req) => {
       sizes_total?: number
       sizes_captured?: number
       sizes_failed?: number
-    }> = []
+    }
+    const results: FirmResult[] = []
 
-    for (const p of profiles ?? []) {
+    // Sequential per-firm scrape body, extracted so we can run it inline (single
+    // firm) or in the background (all firms — would otherwise blow the 150s
+    // edge-runtime budget with 11 firms × up to 5 OpenAI calls each).
+    const runOneFirm = async (p: typeof profiles[number]): Promise<void> => {
       const firmId = p.firm_id as string
       const urls = (p.urls ?? {}) as Record<string, string>
       // Scrape ALL configured URLs (pricing + rules + promo) and merge their
@@ -980,7 +984,7 @@ Deno.serve(async (req) => {
         strategyOverride ?? ((p.fetch_strategy as FetchStrategy) || 'direct')
       if (!targetUrl) {
         results.push({ firm_id: firmId, status: 'skipped_no_url', changes: 0 })
-        continue
+        return
       }
 
       try {
