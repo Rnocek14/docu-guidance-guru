@@ -1046,6 +1046,7 @@ Deno.serve(async (req) => {
           ? (p.sizes_to_scrape as number[])
           : []
         const rulesBySize: Record<number, Record<string, unknown>> = {}
+        const rulesBySizeErrors: Record<number, string> = {}
         if (kind === 'weekly' && sizesToScrape.length > 0) {
           const defaultRules = (payload?.rules ?? {}) as Record<string, unknown>
           const defaultSize = typeof defaultRules.account_size_usd === 'number'
@@ -1057,19 +1058,31 @@ Deno.serve(async (req) => {
           for (const size of sizesToScrape) {
             if (rulesBySize[size]) continue
             try {
-              const sizedPayload = await openaiNormalize(markdown, kind, openaiKey, size)
+              // Use gpt-4o-mini for per-size extraction: much higher TPM ceiling
+              // and the prompt is narrow ("just pull rules for size $X").
+              const sizedPayload = await openaiNormalize(markdown, kind, openaiKey, size, 'gpt-4o-mini')
               const sizedRules = sizedPayload?.rules
               if (sizedRules && typeof sizedRules === 'object') {
                 rulesBySize[size] = { ...(sizedRules as Record<string, unknown>), account_size_usd: size }
+              } else {
+                rulesBySizeErrors[size] = 'no rules in source for this size'
               }
             } catch (sizeErr) {
-              console.warn(
-                `per-size extraction failed for ${firmId}@${size}:`,
-                sizeErr instanceof Error ? sizeErr.message : sizeErr,
-              )
+              const msg = sizeErr instanceof Error ? sizeErr.message : String(sizeErr)
+              rulesBySizeErrors[size] = msg
+              console.warn(`per-size extraction failed for ${firmId}@${size}:`, msg)
             }
+            // Pace per-size calls so we don't burn the org's per-minute token budget.
+            await new Promise((r) => setTimeout(r, 250))
+          }
+          // Always seed the base-extraction size into the rules table, even if
+          // it's not in sizes_to_scrape. Guarantees ≥1 row per firm so the
+          // recommendation engine has something to anchor on.
+          if (defaultSize && !rulesBySize[defaultSize]) {
+            rulesBySize[defaultSize] = { ...defaultRules }
           }
           ;(payload as Record<string, unknown>).rules_by_size = rulesBySize
+          ;(payload as Record<string, unknown>).rules_by_size_errors = rulesBySizeErrors
         }
 
         // Find previous snapshot of same kind
@@ -1138,7 +1151,14 @@ Deno.serve(async (req) => {
           }
         }
 
-        results.push({ firm_id: firmId, status: 'ok', changes: changeCount })
+        results.push({
+          firm_id: firmId,
+          status: 'ok',
+          changes: changeCount,
+          sizes_total: sizesToScrape.length,
+          sizes_captured: Object.keys(rulesBySize).length,
+          sizes_failed: Object.keys(rulesBySizeErrors).length,
+        })
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'unknown'
         console.error(`scrape failed for ${firmId}:`, msg)
