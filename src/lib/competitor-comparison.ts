@@ -73,6 +73,9 @@ export const FUTURES_FIRM_IDS = new Set<FirmId>([
   'mffu',
   'tradeify',
   'tpt',
+  'alpha',
+  'halcyon',
+  'lucid',
 ]);
 
 /** Firms whose default scrape target serves a non-futures product (CFD/forex). */
