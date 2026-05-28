@@ -957,7 +957,15 @@ Deno.serve(async (req) => {
     const { data: profiles, error: profilesErr } = await q
     if (profilesErr) throw profilesErr
 
-    const results: Array<{ firm_id: string; status: string; changes: number; error?: string }> = []
+    const results: Array<{
+      firm_id: string
+      status: string
+      changes: number
+      error?: string
+      sizes_total?: number
+      sizes_captured?: number
+      sizes_failed?: number
+    }> = []
 
     for (const p of profiles ?? []) {
       const firmId = p.firm_id as string
