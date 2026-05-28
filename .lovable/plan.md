@@ -1,87 +1,57 @@
-## Goal
+# Fix Per-Size Scraper — Recovery Plan
 
-Today the scraper produces one rules-snapshot per firm at whatever account size that firm's landing page happened to show. That leaves Pro (100K) at the floor of the bucket and Elite (200K) almost empty. We rework the pipeline so rules are captured **per (firm, account size)** and Pro/Elite recommendations finally have ≥3 real samples.
+## What's wrong
 
-## Approach (Option A — full fix)
+A `weekly` scrape just ran for all 11 active firms. Result:
 
-Single source of truth shifts from "latest snapshot per firm" to "latest rules per (firm, size)". The existing snapshots table stays as the raw log; a new normalized table holds the per-size rules the recommendation engine reads.
+- 9 firms wrote snapshots successfully.
+- 2 firms hard-failed: `alpha` (OpenAI 429 TPM) and `lucid` (thin browserless content).
+- **0 firms wrote any `competitor_firm_rules` rows.** Every snapshot payload is missing the `rules_by_size` key entirely — meaning the per-size extraction block from the recent rewrite never reached the snapshot insert with data.
 
----
+Root causes, in order of likelihood:
 
-## 1. Database
+1. **OpenAI TPM ceiling (30k tokens/min for gpt-4o on this org).** Each firm does 1 base extraction + N per-size extractions back-to-back. With 3–5 sizes per firm × 11 firms running sequentially, the per-size calls 429 and the `catch` swallows the error → `rulesBySize` stays `{}` → `rules_by_size` is set to an empty object → upsert loop has 0 rows → table stays empty. We even see alpha 429 on the *base* call.
+2. **No retry / backoff** on the OpenAI call, so a single 429 wipes out that size permanently for the run.
+3. **Silent swallow.** `per-size extraction failed for X@Y` only goes to `console.warn`; nothing surfaces in the UI or the snapshot, so the run looks "green" while producing zero new rules.
+4. **Hard-failed firms (`alpha`, `lucid`) have no fallback.** One thin fetch or one 429 kills the entire firm for the cycle.
 
-New table `competitor_firm_rules` — one row per (firm_id, account_size_usd), upserted on each scrape.
+## Fix
 
-Columns:
-- `firm_id text` (FK to `competitor_intel_profiles`)
-- `account_size_usd integer` (50000, 100000, 200000, …)
-- `rules jsonb` (same shape as today's `payload.rules`)
-- `source_snapshot_id uuid` (FK to `competitor_intel_snapshots`)
-- `source_url text`
-- `captured_at timestamptz`
-- `extraction_confidence text`
-- PK: `(firm_id, account_size_usd)`
+### 1. OpenAI client hardening (`supabase/functions/scrape-competitor-intel/index.ts`)
 
-Standard 4-step migration (CREATE → GRANT authenticated SELECT + service_role ALL → RLS enable → admin-only SELECT policy via `has_role`). No anon grant (admin-only data).
+- Add retry-with-backoff around `openaiNormalize`: on HTTP 429, parse `Please try again in Xms` from the body, sleep that long (cap at 30s), retry up to 3 times.
+- Switch the per-size extraction to `gpt-4o-mini` (much higher TPM, plenty for "extract these rules at size $X"). Keep `gpt-4o` for the base extraction only.
+- Sleep ~250ms between per-size calls inside a firm to stay under TPM.
 
-Index: `(firm_id)` for fast per-firm reads.
+### 2. Make per-size capture observable
 
-## 2. Profiles change
+- Track `rulesBySizeErrors: Record<number, string>` next to `rulesBySize`.
+- Write both into the snapshot payload (`rules_by_size`, `rules_by_size_errors`).
+- Return per-firm `sizes_captured` / `sizes_failed` counts in the function's JSON response so the admin "Re-scrape" button shows real numbers instead of just "ok".
 
-Add a `sizes_to_scrape integer[]` column on `competitor_intel_profiles` (default `'{50000,100000,200000}'`). Per-firm overrides for firms that genuinely don't offer a size (e.g. Halcyon Elite). Backfill all 11 active firms with sensible defaults based on their current pricing rows.
+### 3. Always seed the base size
 
-## 3. Scraper rewrite (`supabase/functions/scrape-competitor-intel/index.ts`)
+The base extraction already returns one rules object with `account_size_usd`. Currently we only insert it into `rulesBySize` if it happens to match a configured size. Change to: **always** upsert the base size as a `competitor_firm_rules` row, regardless of whether it's in `sizes_to_scrape`. That guarantees at least 1 row per firm even if every per-size call fails.
 
-For each active profile, instead of one extraction pass per firm:
+### 4. Fetch-step resilience for `lucid`
 
-1. Fetch the configured pricing + rules URLs as today (single markdown bundle per URL).
-2. For each `size` in `sizes_to_scrape`:
-   - Run the OpenAI normalizer with an **additional system instruction**: "Extract the rules that apply to the {size} account. If the page only lists rules for a different size, return `rules: null`."
-   - Keep the per-size rules block; discard if `rules` is null.
-3. Write **one `competitor_intel_snapshots` row** (raw markdown + the combined payload, now shaped as `{ pricing, rules_by_size: { "50000": {...}, "100000": {...} } }` plus the legacy `rules` field set to whichever size matched the firm's default for backward compat).
-4. Upsert one `competitor_firm_rules` row per non-null size into the new table.
-5. Diff logic unchanged (operates on the snapshot payload).
+`lucid` failed with `thin browserless content (62)` on both URLs. Add `firecrawl` to its profile's `fetch_strategy` fallback chain (browserless → firecrawl). One-line profile update via `insert` tool, no schema change.
 
-Token budget: one fetch + N small extraction calls per firm (N ≤ 3). Cost stays bounded — the markdown is already in memory; only the LLM call repeats with a tighter prompt.
+### 5. Run order
 
-Curated-reference fallback (`CURATED_REFERENCE`) gets a `rules_by_size` block for the 3–4 firms where we already know Pro/Elite rules from manual research, so the first run after deploy has data even before live scrapes succeed.
-
-## 4. Recommendation engine (`src/lib/competitor-recommendation.ts`)
-
-`snapshotsInBucket()` currently filters by `payload.rules.account_size_usd`. Change the input contract: accept an additional `rulesByFirmSize: Map<firm_id, Map<size, rules>>` and, for each tier, pull the rules row whose size sits inside the tier's bucket. Snapshots without a matching size are excluded from that tier's median (not from others).
-
-All downstream math (median, clamps, rows, proposedCohort) is unchanged.
-
-## 5. UI
-
-- `ScraperCoverageCard`: switch from `payload.rules.account_size_usd` to the new per-size table. A cell is green (`rules`) when the firm has a `competitor_firm_rules` row inside that bucket; amber (`price`) when only a pricing label exists; gray otherwise. Tooltip on amber says "Re-scrape this firm at this size".
-- `MarketPositionView`: load `competitor_firm_rules` once and pass `rulesByFirmSize` into `recommendCohort` for all three tiers.
-- No new pages, no new buttons.
-
-## 6. Backfill
-
-After deploy, run the scraper once with `kind=weekly` for all firms; the new code path populates `competitor_firm_rules` for the 3 sizes per firm. Verify in admin UI that Pro and Elite both show ≥3 green cells.
-
-## 7. Tests
-
-Extend `src/lib/competitor-recommendation.test.ts`:
-- Pro recommendation with 3 firms at 100K → status `ok`, sourceFirms = those 3.
-- Elite with only 2 firms at 200K → status `insufficient_data`.
-- A firm with rules at 50K only does not contaminate Pro/Elite medians.
-
----
-
-## Files touched
-
-- new migration: `competitor_firm_rules` table + grants/RLS + `sizes_to_scrape` column on profiles + backfill defaults
-- `supabase/functions/scrape-competitor-intel/index.ts` — per-size extraction loop, upsert into new table, extend curated fallback
-- `src/lib/competitor-recommendation.ts` — accept `rulesByFirmSize`, change bucket filter
-- `src/lib/competitor-recommendation.test.ts` — Pro/Elite coverage tests
-- `src/components/admin/competitor-intel/ScraperCoverageCard.tsx` — read new table
-- `src/components/admin/competitor-intel/MarketPositionView.tsx` — fetch `competitor_firm_rules`, pass through
+- Apply code changes.
+- Insert `fetch_strategy` update for `lucid`.
+- Re-run `kind=weekly` from the admin UI.
+- Verify: `SELECT firm_id, COUNT(*) FROM competitor_firm_rules GROUP BY firm_id;` should show ≥1 row for every active firm, and Pro / Elite firms should show 2–3 rows each.
 
 ## Out of scope
 
-- Reset-bundle recommendations (still belongs on `reset-bundles.ts` SSOT).
-- A manual "re-scrape this cell" button (Option B). Skipped — full per-size loop replaces the need.
-- Replacing `CURRENT_FLOORS` with MC-derived floors (separate TODO already noted in the code).
+- Removing the OpenAI 429 by upgrading the org's TPM tier (user action).
+- Replacing browserless with a different vendor.
+- UI changes beyond surfacing the new per-firm capture counts.
+
+## Files touched
+
+- `supabase/functions/scrape-competitor-intel/index.ts` — retry/backoff, model swap for per-size, base-size always upsert, error capture in payload, richer JSON response.
+- `src/components/admin/competitor-intel/ScraperCoverageCard.tsx` — surface `sizes_captured / sizes_total` from the last run (small read-only addition).
+- One `insert`-tool data update for `lucid.fetch_strategy`.

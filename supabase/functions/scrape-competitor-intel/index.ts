@@ -554,6 +554,7 @@ async function openaiNormalize(
   kind: ScrapeKind,
   apiKey: string,
   ruleAccountSizeUsd?: number,
+  modelOverride?: string,
 ): Promise<Record<string, unknown>> {
   const schemaDescription =
     kind === 'weekly'
@@ -608,26 +609,43 @@ async function openaiNormalize(
 
   const userMsg = `${schemaDescription}\n\nSOURCE TEXT (truncated):\n${text.slice(0, 40000)}`
 
-  const res = await fetch(OPENAI_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      temperature: 0,
-      max_tokens: 2000,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: userMsg },
-      ],
-    }),
+  const requestBody = JSON.stringify({
+    model: modelOverride ?? OPENAI_MODEL,
+    temperature: 0,
+    max_tokens: 2000,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: userMsg },
+    ],
   })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`openai ${res.status}: ${body.slice(0, 300)}`)
+
+  let res: Response | null = null
+  let lastBody = ''
+  for (let attempt = 0; attempt < 3; attempt++) {
+    res = await fetch(OPENAI_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: requestBody,
+    })
+    if (res.ok) break
+    lastBody = await res.text()
+    if (res.status === 429 || res.status === 503) {
+      // Parse "Please try again in 178ms" / "in 2.5s" from OpenAI's rate-limit body.
+      const m = lastBody.match(/try again in ([0-9.]+)(ms|s)/i)
+      let waitMs = m ? Math.ceil(parseFloat(m[1]) * (m[2] === 's' ? 1000 : 1)) : 1500 * (attempt + 1)
+      // Add jitter; cap at 30s.
+      waitMs = Math.min(30_000, waitMs + 250 + Math.floor(Math.random() * 500))
+      await new Promise((r) => setTimeout(r, waitMs))
+      continue
+    }
+    throw new Error(`openai ${res.status}: ${lastBody.slice(0, 300)}`)
+  }
+  if (!res || !res.ok) {
+    throw new Error(`openai ${res?.status ?? 'no-response'}: ${lastBody.slice(0, 300)}`)
   }
   const data = await res.json()
   const content = data?.choices?.[0]?.message?.content ?? '{}'
@@ -939,7 +957,15 @@ Deno.serve(async (req) => {
     const { data: profiles, error: profilesErr } = await q
     if (profilesErr) throw profilesErr
 
-    const results: Array<{ firm_id: string; status: string; changes: number; error?: string }> = []
+    const results: Array<{
+      firm_id: string
+      status: string
+      changes: number
+      error?: string
+      sizes_total?: number
+      sizes_captured?: number
+      sizes_failed?: number
+    }> = []
 
     for (const p of profiles ?? []) {
       const firmId = p.firm_id as string
@@ -1028,6 +1054,7 @@ Deno.serve(async (req) => {
           ? (p.sizes_to_scrape as number[])
           : []
         const rulesBySize: Record<number, Record<string, unknown>> = {}
+        const rulesBySizeErrors: Record<number, string> = {}
         if (kind === 'weekly' && sizesToScrape.length > 0) {
           const defaultRules = (payload?.rules ?? {}) as Record<string, unknown>
           const defaultSize = typeof defaultRules.account_size_usd === 'number'
@@ -1039,19 +1066,31 @@ Deno.serve(async (req) => {
           for (const size of sizesToScrape) {
             if (rulesBySize[size]) continue
             try {
-              const sizedPayload = await openaiNormalize(markdown, kind, openaiKey, size)
+              // Use gpt-4o-mini for per-size extraction: much higher TPM ceiling
+              // and the prompt is narrow ("just pull rules for size $X").
+              const sizedPayload = await openaiNormalize(markdown, kind, openaiKey, size, 'gpt-4o-mini')
               const sizedRules = sizedPayload?.rules
               if (sizedRules && typeof sizedRules === 'object') {
                 rulesBySize[size] = { ...(sizedRules as Record<string, unknown>), account_size_usd: size }
+              } else {
+                rulesBySizeErrors[size] = 'no rules in source for this size'
               }
             } catch (sizeErr) {
-              console.warn(
-                `per-size extraction failed for ${firmId}@${size}:`,
-                sizeErr instanceof Error ? sizeErr.message : sizeErr,
-              )
+              const msg = sizeErr instanceof Error ? sizeErr.message : String(sizeErr)
+              rulesBySizeErrors[size] = msg
+              console.warn(`per-size extraction failed for ${firmId}@${size}:`, msg)
             }
+            // Pace per-size calls so we don't burn the org's per-minute token budget.
+            await new Promise((r) => setTimeout(r, 250))
+          }
+          // Always seed the base-extraction size into the rules table, even if
+          // it's not in sizes_to_scrape. Guarantees ≥1 row per firm so the
+          // recommendation engine has something to anchor on.
+          if (defaultSize && !rulesBySize[defaultSize]) {
+            rulesBySize[defaultSize] = { ...defaultRules }
           }
           ;(payload as Record<string, unknown>).rules_by_size = rulesBySize
+          ;(payload as Record<string, unknown>).rules_by_size_errors = rulesBySizeErrors
         }
 
         // Find previous snapshot of same kind
@@ -1120,7 +1159,14 @@ Deno.serve(async (req) => {
           }
         }
 
-        results.push({ firm_id: firmId, status: 'ok', changes: changeCount })
+        results.push({
+          firm_id: firmId,
+          status: 'ok',
+          changes: changeCount,
+          sizes_total: sizesToScrape.length,
+          sizes_captured: Object.keys(rulesBySize).length,
+          sizes_failed: Object.keys(rulesBySizeErrors).length,
+        })
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'unknown'
         console.error(`scrape failed for ${firmId}:`, msg)
