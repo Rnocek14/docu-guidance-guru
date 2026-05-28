@@ -147,7 +147,10 @@ export function RecommendedCohortCard({
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="top" className="max-w-xs text-xs">
-                          <div>{r.medianSource}{r.sampleSize > 0 ? ` · n=${r.sampleSize}` : ''}</div>
+                          <div>
+                            {r.medianSource}
+                            {r.totalFirms > 0 ? ` · ${r.sampleSize}/${r.totalFirms} firms` : ''}
+                          </div>
                           {r.exclusionNote && (
                             <div className="mt-1 text-amber-300">{r.exclusionNote}</div>
                           )}
