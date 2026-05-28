@@ -1178,9 +1178,44 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ ok: true, kind, results }), {
-      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    const profileList = profiles ?? []
+
+    // If a specific firm was requested, run inline — single firm fits well
+    // within the 150s edge budget and the caller wants the result immediately.
+    // Otherwise kick the full sweep into the background and return 202.
+    if (firmFilter || profileList.length <= 1) {
+      for (const p of profileList) {
+        await runOneFirm(p)
+      }
+      return new Response(JSON.stringify({ ok: true, kind, results }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const background = (async () => {
+      for (const p of profileList) {
+        try {
+          await runOneFirm(p)
+        } catch (e) {
+          console.error('background firm crash:', e)
+        }
+      }
+      console.log(`background scrape complete — ${results.length} firm result(s)`)
+    })()
+    // EdgeRuntime is the Deno Deploy global; guard for type-checkers.
+    const rt = (globalThis as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime
+    if (rt?.waitUntil) rt.waitUntil(background)
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        kind,
+        accepted: profileList.length,
+        status: 'processing',
+        message: 'Scrape running in background. Refresh in ~60s to see new rules.',
+      }),
+      { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    )
   } catch (e) {
     console.error('scrape-competitor-intel fatal:', e)
     return new Response(JSON.stringify({ error: 'Internal error' }), {
