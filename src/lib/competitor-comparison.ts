@@ -298,6 +298,17 @@ export function buildComparisonMatrix(
     rows.push({ key: 'entry_price_50k', label: 'Entry price (50K)', direction: 'lower_better', cells });
   }
 
+  // Account size — context for the normalized % rows below.
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, meridian.accountSizeNum, fmtUsd(meridian.accountSizeNum));
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.account_size_usd ?? null;
+      cell(cells, s.firm_id, v, fmtUsd(v));
+    }
+    rows.push({ key: 'account_size', label: 'Account size', direction: 'neutral', cells });
+  }
+
   {
     const cells: Record<FirmId, MetricCell> = {};
     cell(cells, MERIDIAN, meridianTarget, fmtUsd(meridianTarget));
@@ -306,6 +317,20 @@ export function buildComparisonMatrix(
       cell(cells, s.firm_id, v, fmtUsd(v));
     }
     rows.push({ key: 'profit_target', label: 'Profit target', direction: 'lower_better', cells });
+  }
+
+  // Normalized: profit target as % of account size — the apples-to-apples
+  // "how hard is this to pass?" metric. Lower = easier.
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, meridian.profitTarget, fmtPctOne(meridian.profitTarget));
+    for (const s of snapshots) {
+      const tgt = s.payload?.rules?.profit_target_usd ?? null;
+      const sz = s.payload?.rules?.account_size_usd ?? null;
+      const pct = tgt != null && sz ? (tgt / sz) * 100 : null;
+      cell(cells, s.firm_id, pct, fmtPctOne(pct));
+    }
+    rows.push({ key: 'profit_target_pct', label: 'Target (% of size)', direction: 'lower_better', cells });
   }
 
   {
@@ -327,6 +352,25 @@ export function buildComparisonMatrix(
     rows.push({ key: 'daily_loss', label: 'Daily loss limit', direction: 'higher_better', cells });
   }
 
+  // Normalized: daily loss as % of account size. Higher = more breathing room.
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, meridian.maxDailyLoss, fmtPctOne(meridian.maxDailyLoss));
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.daily_loss_usd ?? null;
+      const sz = s.payload?.rules?.account_size_usd ?? null;
+      const dd = (s.payload?.rules?.drawdown_type ?? '').toLowerCase();
+      const isTrailingOnly = dd.includes('trailing');
+      if (v == null && isTrailingOnly) {
+        cell(cells, s.firm_id, null, 'None', 'trailing DD only');
+      } else {
+        const pct = v != null && sz ? (v / sz) * 100 : null;
+        cell(cells, s.firm_id, pct, fmtPctOne(pct));
+      }
+    }
+    rows.push({ key: 'daily_loss_pct', label: 'Daily loss (% of size)', direction: 'higher_better', cells });
+  }
+
   {
     const cells: Record<FirmId, MetricCell> = {};
     cell(cells, MERIDIAN, meridianDD, fmtUsd(meridianDD));
@@ -335,6 +379,19 @@ export function buildComparisonMatrix(
       cell(cells, s.firm_id, v, fmtUsd(v));
     }
     rows.push({ key: 'max_drawdown', label: 'Max drawdown', direction: 'higher_better', cells });
+  }
+
+  // Normalized: max drawdown as % of account size.
+  {
+    const cells: Record<FirmId, MetricCell> = {};
+    cell(cells, MERIDIAN, meridian.maxTotalDrawdown, fmtPctOne(meridian.maxTotalDrawdown));
+    for (const s of snapshots) {
+      const v = s.payload?.rules?.max_drawdown_usd ?? null;
+      const sz = s.payload?.rules?.account_size_usd ?? null;
+      const pct = v != null && sz ? (v / sz) * 100 : null;
+      cell(cells, s.firm_id, pct, fmtPctOne(pct));
+    }
+    rows.push({ key: 'max_drawdown_pct', label: 'Drawdown (% of size)', direction: 'higher_better', cells });
   }
 
   {
