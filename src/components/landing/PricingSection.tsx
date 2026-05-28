@@ -45,10 +45,22 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
         <p className="text-2xl font-bold text-primary mt-1">{tier.accountSize}</p>
         <p className="text-xs text-muted-foreground">Simulated Account</p>
         <div className="mt-2">
-          <span className="text-5xl font-extrabold">${tier.price}</span>
-          <span className="text-muted-foreground ml-1">one-time</span>
+          {tier.id === 'founders' ? (
+            <div className="flex items-baseline justify-center gap-2">
+              <span className="text-2xl font-medium text-muted-foreground line-through">$149</span>
+              <span className="text-5xl font-extrabold">${tier.price}</span>
+              <span className="text-muted-foreground ml-1">one-time</span>
+            </div>
+          ) : (
+            <>
+              <span className="text-5xl font-extrabold">${tier.price}</span>
+              <span className="text-muted-foreground ml-1">one-time</span>
+            </>
+          )}
         </div>
-        <p className="text-xs text-success font-semibold mt-2">Earn up to ${tier.lifetimeCapAmount.toLocaleString()}</p>
+        <p className="text-xs text-success font-semibold mt-2">
+          Earn up to ${tier.lifetimeCapAmount.toLocaleString()} per account
+        </p>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col pt-4">
         <div className="space-y-3 flex-1">
@@ -63,9 +75,9 @@ function TierCard({ tier, ruleView }: { tier: PricingTier; ruleView: RuleView })
           ) : (
             <>
               <RuleRow label="Payout Split" value={`${tier.splitPercent}%`} highlight />
-              <RuleRow label="First Payout" value={`Up to $${tier.firstPayoutCap}`} />
+              <RuleRow label="First Payout" value={`Up to $${tier.firstPayoutCap} — paid fast`} />
               <RuleRow label="Payouts 2+" value={`Every ${tier.payoutCooldown} days, paced`} highlight />
-              <RuleRow label="Lifetime Earnings" value={`Up to ${tier.lifetimeCapMultiple}× entry`} highlight />
+              <RuleRow label="Per-Account Earnings" value={`Up to $${tier.lifetimeCapAmount.toLocaleString()}`} highlight />
               <RuleRow label="Cooldown Period" value={`${tier.payoutCooldown} days`} />
               <RuleRow label="Human Review" value="For Flags" highlight />
             </>
