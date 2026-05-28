@@ -423,6 +423,7 @@ export function recommendCohort(
     21,
     'Cannot drop below 7d — ops capacity floor.',
     'Cap at 21d — anything longer becomes user-hostile.',
+    { usableCount: cdUsable, exclusionNote: coverageNote(cdUsable, 'a payout cadence') },
   );
   // Reset fee intentionally omitted from this table: it lives on the
   // `reset-bundles.ts` SSOT, not the `cohorts` row, so a recommendation
