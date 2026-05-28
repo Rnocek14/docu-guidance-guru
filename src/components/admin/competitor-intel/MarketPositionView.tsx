@@ -11,6 +11,7 @@ import {
   filterComparableSnapshots,
   type SnapshotInput,
 } from '@/lib/competitor-comparison';
+import { RecommendedCohortCard } from './RecommendedCohortCard';
 
 const SIGNAL_CLASS = {
   friendly: 'text-emerald-400',
@@ -76,6 +77,9 @@ export function MarketPositionView({ snapshots }: { snapshots: SnapshotInput[] }
 
   return (
     <div className="space-y-4">
+      {/* Recommended cohort */}
+      <RecommendedCohortCard snapshots={comparable} />
+
       {/* Comparison matrix */}
       <Card>
         <CardHeader className="py-3">

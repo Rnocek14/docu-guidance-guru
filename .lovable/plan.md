@@ -1,74 +1,88 @@
-# Competitor Intel → Market Position
 
-Right now `/admin/intel` is a *raw data viewer* — one firm at a time, no cross-firm comparison, no opinion on where Meridian stands. We'll add an intelligence layer on top of the snapshots you already collect.
+# Recommended Cohort — Market Position add-on
 
-## What gets added
+Adds a "Recommended Cohort" section to the existing Market Position view that turns the comparison matrix into actionable tier configs.
 
-A new **Market Position** tab at the top of `/admin/intel`, with three sections:
+## What the user sees
 
-### 1. Side-by-side comparison matrix
-A single table with one column per firm (Meridian, Apex, Topstep, Tradeify, MFFU, TPT, FTMO, FundedNext) and rows for the dimensions that actually matter to a trader's purchase decision:
+A new card above the existing comparison matrix, with a tier selector (Starter / Pro / Elite) and a 3-column table:
 
 ```text
-                  Meridian  Apex   Topstep  MFFU   Tradeify  TPT    FTMO    FN
-Entry price 50K   $149      $147   $165     $80    $55       $75    —       —
-Profit target     $3,000    $3,000 $3,000   $3,000 $3,000    $3,000 €5,000  $5,000
-Daily loss        $1,500    $1,250 $1,000   $2,000 $1,500    $1,250 €5,000  $2,500
-Max drawdown      $2,500    $2,500 $2,000   $2,500 $2,500    $2,000 €10,000 $5,000
-Payout split      80%       100%   90%      90%    90%       80→90% 80%     90%
-First payout cap  $500×1    $2k×5  $1k×1    $7.5k×3 $2k×1    $1.5k×1 —      —
-Cooldown          14d       8d     14d      0d     0d        0d     14d     14d
-Min trading days  5         3      5        5      5         5      10      5
-Consistency       —         30%    —        —      —         —      —       —
-Lifetime cap      10×       —      —        —      —         —      —       —
-Reset fee         $99       $80    $99      $50    $50       $50    €70     €70
-Source quality    canon     ✅     ✅       ⚠️     ✅        ⚠️     ✅      ⚠️
+                     Your current   Match the median   Competitive & solvent
+Entry fee            $149           $90                $129
+Profit target        $3,000 (10%)   $3,000             $3,000
+Daily loss           $1,500 (3%)    $2,500             $2,000   ← clamped
+Max drawdown         $2,500 (5%)    $2,500             $2,500
+Payout split         80%            90%                85%      ← clamped
+First payout cap     $500           $2,000             $1,000   ← clamped
+Cooldown             14d            8d                 10d      ← clamped
+Reset fee            $99            $70                $80
+─────────────────────────────────────────────────────────────────
+                                    [ Preview as draft cohort ]
 ```
 
-- Meridian column is pinned left and pulled from `pricing-data.ts` + `tier-economics.ts` (no scraping).
-- Competitor columns come from each firm's latest `competitor_intel_snapshots` row.
-- Each cell color-codes whether Meridian is **tighter** (red, harder for trader) or **looser** (green, friendlier) than that firm.
-- Missing cells render as `—` honestly (no fake data).
+- **Your current** column: pulled from `TIER_ECONOMICS` for the selected tier.
+- **Match the median** column: pure median of competitor snapshots for that account size, no constraints.
+- **Competitive & solvent** column: starts from the median, then each field is clamped by a per-field "floor/ceiling" derived from existing solvency tooling (see Technical). Any clamped value gets a `← clamped` marker with a tooltip explaining which constraint bound it.
+- Each cell has a hover tooltip citing the source (e.g. "Median of Apex/Topstep/MFFU/Tradeify Starter 50K" or "Reserve model floor — splits >85% push 12-month ruin >5%").
 
-### 2. "Where Meridian stands" scorecard
-Five plain-English verdicts, computed from the matrix:
+Below the table: a "Preview as draft cohort" button. Clicking it opens a confirmation modal showing the exact `cohorts` row that will be inserted, with `is_active=false` and `intake_active=false` so it is dormant until an admin flips it in the existing CohortsManagement page. Nothing in `tier-economics.ts` changes — that remains the SSOT until a separate, deliberate PR.
 
-- **Price position** — "Meridian is in the top quartile on entry price ($149 vs $55–$165 median $90). You're priced like premium, not budget."
-- **Trader generosity** — "Lowest payout split in the set (80% vs 90% median). Tightest first-payout cap ($500 vs $2k median)."
-- **Rule strictness** — "Drawdown and daily loss rules sit in the middle of the pack. Cooldown of 14d is on the strict end."
-- **Unique constraints** — "Only firm in the set with a lifetime payout cap (10×). No competitor advertises this."
-- **What you lack** — "No 100% split tier. No fast-payout option. No promo banner currently live (3 of 7 competitors have one)."
+## How recommendations are computed
 
-### 3. Strategic recommendations
-A short ranked list of action items the system can defend with data:
+**Median column** — per metric, per tier, across the `comparable` snapshots (the existing `filterComparableSnapshots` already filters to verified futures firms). Account size buckets: Starter ≈ 50K, Pro ≈ 100K, Elite ≈ 150K–200K. Missing data → median is computed on what's present, marked with sample size in tooltip.
 
-- "Apex is running a 60% promo (`PUMPKIN60`). 3 competitors are below $80 effective price. Consider a time-boxed Founder's promo or accept that you're a premium-only brand."
-- "Your $500 first-payout cap is 4× tighter than the median. This is fine if your messaging owns it ('we pay what we promise'), but expect price-shoppers to bounce — measure checkout conversion against TPT/Tradeify."
-- "MFFU and Tradeify advertise 0-day cooldowns. Your 14d cooldown is a real friction point for active traders — consider a 7d Pro tier."
-- "FTMO is the only firm with a refund model. Not worth matching; different business model and you've already chosen tighter rules."
+**Solvent column** — same median, then each value is clamped to a per-field policy band:
 
-The recommendations are generated by a deterministic ruleset (not an LLM) — each one references the specific cells in the matrix that triggered it, so you can verify the logic.
+| Field | Floor | Ceiling | Source |
+|-------|-------|---------|--------|
+| Entry fee | `currentFee × 0.7` | `currentFee × 1.2` | guardrail against pricing whiplash |
+| Profit target % | 8 | 12 | matches existing cohort spec spread |
+| Daily loss % | 3 | 5 | `cohorts.max_daily_loss_percent` band |
+| Max drawdown % | 4 | 10 | cohort band |
+| Split % | from solvency table (see below) | 95 | reserve / Monte Carlo |
+| First payout cap | from solvency table | `entryFee × 15` | reserve / lifetime ratio |
+| Cooldown days | 7 | 21 | ops capacity band |
+| Reset fee | 50 | 99 | margin band |
 
-## Where this lives
+The split / first-payout-cap floors come from a small lookup derived from the existing breaker + Monte Carlo constants — not a live Monte Carlo call. Concretely a constant table in the new `competitor-recommendation.ts`:
 
-- New tab control at the top of `CompetitorIntel.tsx`: **Firms** (existing detail view) | **Market Position** (new).
-- New component `src/components/admin/competitor-intel/MarketPositionView.tsx` that consumes the existing `snapshots` query plus `TIERS` from `pricing-data.ts`.
-- New pure helper `src/lib/competitor-comparison.ts` containing:
-  - `buildComparisonMatrix(meridian, snapshots)` → typed rows
-  - `scoreMeridianPosition(matrix)` → the five scorecard verdicts
-  - `generateRecommendations(matrix, scorecard)` → the ranked actions
-  All three are unit-testable and free of UI.
+```ts
+const SOLVENCY_FLOORS = {
+  starter:  { splitPct: 80, firstPayoutCap: 500 },
+  pro:      { splitPct: 80, firstPayoutCap: 750 },
+  elite:    { splitPct: 80, firstPayoutCap: 1000 },
+}
+```
 
-## Out of scope (on purpose)
+Sourced from the same numbers already in `TIER_ECONOMICS` so they cannot drift. Tooltip on any clamped cell says: "Cannot drop below current solvency floor — see `tier-economics.ts`."
 
-- No new scraping logic — uses existing snapshots.
-- No changes to treasury / Monte Carlo. This stays observational, per the existing `market_reference` rule.
-- No LLM calls. Verdicts are rules-based so they're auditable.
-- No public-facing comparison page changes (`ComparisonTable.tsx` stays as-is).
+This keeps the recommendation auditable and avoids piping the Monte Carlo engine into a UI render path.
+
+## "Preview as draft cohort" flow
+
+1. Button opens a modal with the proposed `cohorts` row, JSON-formatted.
+2. Confirm → calls a new edge function `recommend-cohort-draft` (admin-only, JWT-validated) that:
+   - Validates the requesting user has `admin` role.
+   - Validates every numeric field is within the solvency bands (defense in depth — UI cannot bypass).
+   - Inserts one row into `cohorts` with `is_active=false`, `intake_active=false`, `cohort_phase='performance'`, `name='Recommended <Tier> — <YYYY-MM-DD>'`, `version=max(version)+1`, `tier_id=<selected>`.
+   - Writes an `audit_logs` entry with `action='cohort_draft_created'` and the recommendation source (median values, clamped values, snapshot IDs used).
+3. Modal closes, toast links to `/admin/cohorts` where the draft appears and can be reviewed / activated by the existing flow.
+
+No existing cohort is mutated. No `tier-economics.ts` change. The user remains the final approver.
 
 ## Files touched
 
-- `src/pages/admin/CompetitorIntel.tsx` — add tab switcher
-- `src/components/admin/competitor-intel/MarketPositionView.tsx` — new
-- `src/lib/competitor-comparison.ts` — new (pure logic)
-- `src/lib/competitor-comparison.test.ts` — new (unit tests for scoring + recommendations)
+- `src/lib/competitor-recommendation.ts` — **new**, pure logic: `recommendCohort(tierId, matrix, snapshots) → { current, median, solvent, clampedFields[] }`.
+- `src/lib/competitor-recommendation.test.ts` — **new**, unit tests for median math, clamping, and missing-data fallback.
+- `src/components/admin/competitor-intel/RecommendedCohortCard.tsx` — **new**, the UI card with tier selector and 3-column table.
+- `src/components/admin/competitor-intel/MarketPositionView.tsx` — mount `<RecommendedCohortCard>` above the existing matrix.
+- `supabase/functions/recommend-cohort-draft/index.ts` — **new**, admin-only edge function that inserts the draft cohort.
+- Migration — none required; uses existing `cohorts` and `audit_logs` schemas.
+
+## Out of scope
+
+- No edit to `tier-economics.ts` — recommendation is observational/draft only.
+- No automatic application of a recommended cohort to live accounts.
+- No change to the public `ComparisonTable.tsx`.
+- No Monte Carlo or breaker engine calls at render time — floors are static constants sourced from existing SSOT.
