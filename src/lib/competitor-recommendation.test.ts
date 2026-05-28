@@ -58,7 +58,7 @@ describe('recommendCohort', () => {
     expect(r.sourceFirms).toEqual([]);
   });
 
-  it('clamps a generous 90% split down to 80% solvency floor', () => {
+  it('passes through a competitor split that sits inside the solvency band', () => {
     const snaps = [
       makeSnap('apex', 50_000, { payout_split_pct: 90 }, 147),
       makeSnap('topstep', 50_000, { payout_split_pct: 90 }, 165),
@@ -67,9 +67,18 @@ describe('recommendCohort', () => {
     const r = recommendCohort('starter', snaps);
     const split = r.rows.find((x) => x.field === 'payout_split_percent')!;
     expect(split.median).toBe(90);
-    expect(split.solvent).toBe(80);
+    expect(split.solvent).toBe(90);
+    expect(split.clamped).toBe(false);
+    expect(r.proposedCohort.payout_split_percent).toBe(90);
+  });
+
+  it('caps a runaway 99% split at the 95% ceiling', () => {
+    const snaps = [makeSnap('x', 50_000, { payout_split_pct: 99 }, 100)];
+    const r = recommendCohort('starter', snaps);
+    const split = r.rows.find((x) => x.field === 'payout_split_percent')!;
+    expect(split.median).toBe(99);
+    expect(split.solvent).toBe(95);
     expect(split.clamped).toBe(true);
-    expect(r.proposedCohort.payout_split_percent).toBe(80);
   });
 
   it('respects entry-fee whiplash guardrails', () => {
