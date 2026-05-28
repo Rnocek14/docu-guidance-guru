@@ -58,6 +58,8 @@ export interface RecommendationRow {
   median: number | null;
   solvent: number | null;
   sampleSize: number;
+  /** Firms in the tier bucket (denominator for sampleSize). */
+  totalFirms: number;
   clamped: boolean;
   clampReason?: string;
   medianSource?: string;
@@ -107,6 +109,18 @@ function median(values: Array<number | null | undefined>): number | null {
   if (xs.length === 0) return null;
   const mid = Math.floor(xs.length / 2);
   return xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
+}
+
+/**
+ * Treat 0 / negative as missing for fields where 0 is structurally not a
+ * real rule (a scrape miss almost always shows up as 0 or null). Without
+ * this, a handful of junk zeros drag the cohort median toward zero and
+ * the recommendation tells you to drop your daily-loss / drawdown /
+ * split to absurd levels.
+ */
+function nonZeroOrNull(v: number | null | undefined): number | null {
+  if (v == null || !Number.isFinite(v) || v <= 0) return null;
+  return v;
 }
 
 function clamp(value: number, lo: number | null, hi: number | null): { v: number; clamped: 'lo' | 'hi' | null } {
