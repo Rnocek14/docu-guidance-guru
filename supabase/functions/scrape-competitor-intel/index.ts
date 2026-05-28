@@ -553,6 +553,7 @@ async function openaiNormalize(
   text: string,
   kind: ScrapeKind,
   apiKey: string,
+  ruleAccountSizeUsd?: number,
 ): Promise<Record<string, unknown>> {
   const schemaDescription =
     kind === 'weekly'
@@ -599,7 +600,11 @@ async function openaiNormalize(
     'trailing_dd_lock_usd (profit point where trailing drawdown stops trailing), news_trading_allowed (true/false), ' +
     'payout_methods (short string like "ACH, wire, crypto"), scaling_plan_summary (one short sentence if mentioned). ' +
     'For features: short keyword tags only (e.g. "instant_funding", "static_dd", "scaling_plan"). ' +
-    'Do not include rules you cannot literally find in the source text.'
+    'Do not include rules you cannot literally find in the source text.' +
+    (ruleAccountSizeUsd
+      ? ` IMPORTANT: For the "rules" object, extract ONLY the rules that apply to the $${ruleAccountSizeUsd.toLocaleString('en-US')} account size. ` +
+        `Set account_size_usd to ${ruleAccountSizeUsd}. If the source text does not show rules for this specific size, set "rules" to null entirely — do not guess from a different size.`
+      : '')
 
   const userMsg = `${schemaDescription}\n\nSOURCE TEXT (truncated):\n${text.slice(0, 40000)}`
 
@@ -928,7 +933,7 @@ Deno.serve(async (req) => {
     // Fetch active profiles
     let q = db
       .from('competitor_intel_profiles')
-      .select('firm_id, urls, fetch_strategy')
+      .select('firm_id, urls, fetch_strategy, sizes_to_scrape')
       .eq('active', true)
     if (firmFilter) q = q.eq('firm_id', firmFilter)
     const { data: profiles, error: profilesErr } = await q
@@ -1015,6 +1020,40 @@ Deno.serve(async (req) => {
         applyCuratedReference(firmId, payload)
         markdown = markdown.slice(0, 20_000)
 
+        // Per-(firm, size) rules extraction. For each configured size, ask
+        // the LLM to pull only the rules matching that account size. Stored
+        // in `competitor_firm_rules` so Pro / Elite tier recommendations
+        // have ≥3 samples instead of starving at the bucket floor.
+        const sizesToScrape = Array.isArray(p.sizes_to_scrape)
+          ? (p.sizes_to_scrape as number[])
+          : []
+        const rulesBySize: Record<number, Record<string, unknown>> = {}
+        if (kind === 'weekly' && sizesToScrape.length > 0) {
+          const defaultRules = (payload?.rules ?? {}) as Record<string, unknown>
+          const defaultSize = typeof defaultRules.account_size_usd === 'number'
+            ? (defaultRules.account_size_usd as number)
+            : null
+          if (defaultSize && sizesToScrape.includes(defaultSize)) {
+            rulesBySize[defaultSize] = defaultRules
+          }
+          for (const size of sizesToScrape) {
+            if (rulesBySize[size]) continue
+            try {
+              const sizedPayload = await openaiNormalize(markdown, kind, openaiKey, size)
+              const sizedRules = sizedPayload?.rules
+              if (sizedRules && typeof sizedRules === 'object') {
+                rulesBySize[size] = { ...(sizedRules as Record<string, unknown>), account_size_usd: size }
+              }
+            } catch (sizeErr) {
+              console.warn(
+                `per-size extraction failed for ${firmId}@${size}:`,
+                sizeErr instanceof Error ? sizeErr.message : sizeErr,
+              )
+            }
+          }
+          ;(payload as Record<string, unknown>).rules_by_size = rulesBySize
+        }
+
         // Find previous snapshot of same kind
         const { data: prev } = await db
           .from('competitor_intel_snapshots')
@@ -1039,6 +1078,28 @@ Deno.serve(async (req) => {
           .select('id')
           .single()
         if (snapErr) throw snapErr
+
+        // Upsert per-(firm, size) rules into the normalized table that the
+        // recommendation engine reads. Best-effort: log and continue on error.
+        const upsertRows = Object.entries(rulesBySize)
+          .filter(([, r]) => r && typeof r === 'object')
+          .map(([sizeStr, r]) => ({
+            firm_id: firmId,
+            account_size_usd: Number(sizeStr),
+            rules: r,
+            source_snapshot_id: snap!.id,
+            source_url: targetUrl,
+            extraction_confidence: 'medium',
+            captured_at: new Date().toISOString(),
+          }))
+        if (upsertRows.length > 0) {
+          const { error: rulesErr } = await db
+            .from('competitor_firm_rules')
+            .upsert(upsertRows, { onConflict: 'firm_id,account_size_usd' })
+          if (rulesErr) {
+            console.warn(`competitor_firm_rules upsert failed for ${firmId}:`, rulesErr.message)
+          }
+        }
 
         // Diff (only if we have a previous snapshot — first snapshot creates no change rows)
         let changeCount = 0

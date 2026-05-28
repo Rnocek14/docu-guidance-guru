@@ -15,6 +15,16 @@ import type { SnapshotInput } from './competitor-comparison';
 
 export type TierId = 'starter' | 'pro' | 'elite';
 
+/**
+ * Per-(firm, account-size) rules row. Comes from `competitor_firm_rules`
+ * (one row per size we've scraped). When provided to `recommendCohort`,
+ * the engine matches each firm's rules at a size inside the tier bucket
+ * instead of relying on whatever single size the snapshot happened to
+ * scrape. Pro and Elite tiers were starving for samples without this.
+ */
+export type CompetitorRules = NonNullable<SnapshotInput['payload']['rules']>;
+export type RulesByFirmSize = Record<string, Record<number, CompetitorRules>>;
+
 /** Account-size buckets used to match competitor pricing rows per tier. */
 const TIER_BUCKETS: Record<TierId, { target: number; min: number; max: number }> = {
   starter: { target: 50_000, min: 25_000, max: 75_000 },
@@ -124,9 +134,50 @@ function pickPriceForTier(snap: SnapshotInput, tierId: TierId): number | null {
   return null;
 }
 
-/** Snapshots whose rules.account_size_usd falls inside the tier bucket. */
-function snapshotsInBucket(snapshots: SnapshotInput[], tierId: TierId): SnapshotInput[] {
+/**
+ * Build the per-tier comparable set.
+ *
+ * When `rulesByFirmSize` is provided we pick, for each firm, the rules row
+ * whose `account_size_usd` falls inside the tier bucket — closest to the
+ * tier target — and stitch that into a synthetic snapshot (keeping the
+ * firm's pricing array intact). Without the map we fall back to the legacy
+ * "use whatever size the single snapshot happens to be" behavior.
+ */
+function snapshotsInBucket(
+  snapshots: SnapshotInput[],
+  tierId: TierId,
+  rulesByFirmSize?: RulesByFirmSize,
+): SnapshotInput[] {
   const bucket = TIER_BUCKETS[tierId];
+  if (rulesByFirmSize) {
+    const out: SnapshotInput[] = [];
+    for (const s of snapshots) {
+      const byCount = rulesByFirmSize[s.firm_id];
+      if (!byCount) continue;
+      // Pick the size in this bucket closest to the tier target.
+      let bestSize: number | null = null;
+      let bestDist = Infinity;
+      for (const k of Object.keys(byCount)) {
+        const sz = Number(k);
+        if (!Number.isFinite(sz) || sz < bucket.min || sz > bucket.max) continue;
+        const d = Math.abs(sz - bucket.target);
+        if (d < bestDist) {
+          bestDist = d;
+          bestSize = sz;
+        }
+      }
+      if (bestSize == null) continue;
+      const rules = byCount[bestSize];
+      out.push({
+        ...s,
+        payload: {
+          ...s.payload,
+          rules: { ...rules, account_size_usd: bestSize },
+        },
+      });
+    }
+    return out;
+  }
   return snapshots.filter((s) => {
     const sz = s.payload?.rules?.account_size_usd;
     return sz != null && sz >= bucket.min && sz <= bucket.max;
@@ -138,12 +189,13 @@ function snapshotsInBucket(snapshots: SnapshotInput[], tierId: TierId): Snapshot
 export function recommendCohort(
   tierId: TierId,
   comparableSnapshots: SnapshotInput[],
+  rulesByFirmSize?: RulesByFirmSize,
 ): CohortRecommendation {
   const tier = tierFromTiers(tierId);
   const bucket = TIER_BUCKETS[tierId];
   const floors = CURRENT_FLOORS[tierId];
 
-  const inBucket = snapshotsInBucket(comparableSnapshots, tierId);
+  const inBucket = snapshotsInBucket(comparableSnapshots, tierId, rulesByFirmSize);
   const sourceFirms = inBucket.map((s) => s.firm_name);
   const sourceSnapshotIds = inBucket.map((s) => `${s.firm_id}@${s.captured_at}`);
   const medianSrc =

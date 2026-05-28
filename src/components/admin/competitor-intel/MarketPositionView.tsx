@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { TrendingUp, TrendingDown, Minus, Lightbulb, ShieldAlert } from 'lucide-react';
@@ -11,6 +11,8 @@ import {
   filterComparableSnapshots,
   type SnapshotInput,
 } from '@/lib/competitor-comparison';
+import { supabase } from '@/integrations/supabase/client';
+import type { RulesByFirmSize, CompetitorRules } from '@/lib/competitor-recommendation';
 import { RecommendedCohortCard } from './RecommendedCohortCard';
 import { ScraperCoverageCard } from './ScraperCoverageCard';
 
@@ -40,6 +42,29 @@ export function MarketPositionView({ snapshots }: { snapshots: SnapshotInput[] }
   const matrix = useMemo(() => buildComparisonMatrix(TIERS, comparable), [comparable]);
   const scorecard = useMemo(() => scoreMeridianPosition(matrix), [matrix]);
   const recs = useMemo(() => generateRecommendations(matrix, scorecard), [matrix, scorecard]);
+
+  // Per-(firm, size) rules powering Pro/Elite tier recommendations.
+  // Falls back to legacy snapshot.rules when this map is empty.
+  const [rulesByFirmSize, setRulesByFirmSize] = useState<RulesByFirmSize>({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('competitor_firm_rules')
+        .select('firm_id, account_size_usd, rules');
+      if (cancelled || error || !data) return;
+      const map: RulesByFirmSize = {};
+      for (const row of data) {
+        const firm = row.firm_id as string;
+        const size = row.account_size_usd as number;
+        const rules = (row.rules ?? {}) as CompetitorRules;
+        if (!map[firm]) map[firm] = {};
+        map[firm][size] = rules;
+      }
+      setRulesByFirmSize(map);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   if (snapshots.length === 0) {
     return (
@@ -79,10 +104,10 @@ export function MarketPositionView({ snapshots }: { snapshots: SnapshotInput[] }
   return (
     <div className="space-y-4">
       {/* Scraper coverage — surface data gaps BEFORE trusting recommendations */}
-      <ScraperCoverageCard snapshots={comparable} />
+      <ScraperCoverageCard snapshots={comparable} rulesByFirmSize={rulesByFirmSize} />
 
       {/* Recommended cohort */}
-      <RecommendedCohortCard snapshots={comparable} />
+      <RecommendedCohortCard snapshots={comparable} rulesByFirmSize={rulesByFirmSize} />
 
       {/* Comparison matrix */}
       <Card>

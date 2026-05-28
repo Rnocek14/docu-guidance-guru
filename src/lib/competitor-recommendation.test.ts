@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { recommendCohort, _internal } from './competitor-recommendation';
+import { recommendCohort, _internal, type RulesByFirmSize } from './competitor-recommendation';
 import type { SnapshotInput } from './competitor-comparison';
 
 function makeSnap(firm: string, sz: number, overrides: Partial<SnapshotInput['payload']['rules']> = {}, price?: number): SnapshotInput {
@@ -141,5 +141,47 @@ describe('recommendCohort', () => {
     expect(c.entry_fee).toBeGreaterThan(0);
     expect(c.profit_target_percent).toBeGreaterThan(0);
     expect(c.payout_split_percent).toBeGreaterThanOrEqual(80);
+  });
+
+  describe('rulesByFirmSize (per-(firm, size) coverage)', () => {
+    // All three firms have a 50K snapshot; rules-by-size adds 100K and 200K
+    // rules for the firms we've actually scraped at those sizes.
+    const snaps = [
+      makeSnap('apex', 50_000, {}, 147),
+      makeSnap('topstep', 50_000, {}, 165),
+      makeSnap('mffu', 50_000, {}, 80),
+    ];
+
+    it('produces an ok Pro recommendation when ≥3 firms have 100K rules', () => {
+      const map: RulesByFirmSize = {
+        apex: { 100_000: { payout_split_pct: 90, profit_target_usd: 6_000, daily_loss_usd: 3_000, max_drawdown_usd: 3_000, first_payout_cap_usd: 1_500, payout_cadence_days: 8, account_size_usd: 100_000 } },
+        topstep: { 100_000: { payout_split_pct: 90, profit_target_usd: 9_000, daily_loss_usd: 3_000, max_drawdown_usd: 3_000, first_payout_cap_usd: 5_000, payout_cadence_days: 8, account_size_usd: 100_000 } },
+        mffu: { 100_000: { payout_split_pct: 90, profit_target_usd: 8_000, daily_loss_usd: 3_500, max_drawdown_usd: 3_000, first_payout_cap_usd: 9_000, payout_cadence_days: 14, account_size_usd: 100_000 } },
+      };
+      const r = recommendCohort('pro', snaps, map);
+      expect(r.status).toBe('ok');
+      expect(r.sourceFirms.sort()).toEqual(['apex', 'mffu', 'topstep']);
+    });
+
+    it('flags Elite as insufficient_data when only 2 firms have 200K rules', () => {
+      const map: RulesByFirmSize = {
+        apex: { 200_000: { payout_split_pct: 90, profit_target_usd: 12_000, daily_loss_usd: 6_000, max_drawdown_usd: 6_000, first_payout_cap_usd: 2_000, payout_cadence_days: 8, account_size_usd: 200_000 } },
+        topstep: { 200_000: { payout_split_pct: 90, profit_target_usd: 18_000, daily_loss_usd: 6_000, max_drawdown_usd: 6_000, first_payout_cap_usd: 5_000, payout_cadence_days: 8, account_size_usd: 200_000 } },
+      };
+      const r = recommendCohort('elite', snaps, map);
+      expect(r.status).toBe('insufficient_data');
+      expect(r.sourceFirms.length).toBe(2);
+    });
+
+    it('does not let a firm with only 50K rules contaminate Pro/Elite medians', () => {
+      const map: RulesByFirmSize = {
+        apex: { 50_000: { payout_split_pct: 90, account_size_usd: 50_000 } },
+        topstep: { 50_000: { payout_split_pct: 90, account_size_usd: 50_000 } },
+        mffu: { 50_000: { payout_split_pct: 90, account_size_usd: 50_000 } },
+      };
+      const pro = recommendCohort('pro', snaps, map);
+      expect(pro.sourceFirms).toEqual([]);
+      expect(pro.status).toBe('no_change');
+    });
   });
 });

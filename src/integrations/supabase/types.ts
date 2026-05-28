@@ -903,6 +903,47 @@ export type Database = {
         }
         Relationships: []
       }
+      competitor_firm_rules: {
+        Row: {
+          account_size_usd: number
+          captured_at: string
+          extraction_confidence: string | null
+          firm_id: string
+          rules: Json
+          source_snapshot_id: string | null
+          source_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_size_usd: number
+          captured_at?: string
+          extraction_confidence?: string | null
+          firm_id: string
+          rules?: Json
+          source_snapshot_id?: string | null
+          source_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_size_usd?: number
+          captured_at?: string
+          extraction_confidence?: string | null
+          firm_id?: string
+          rules?: Json
+          source_snapshot_id?: string | null
+          source_url?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_firm_rules_source_snapshot_id_fkey"
+            columns: ["source_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_intel_snapshots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       competitor_intel_annotations: {
         Row: {
           author: string | null
@@ -1004,6 +1045,7 @@ export type Database = {
           kind: string
           name: string
           notes: string | null
+          sizes_to_scrape: number[]
           updated_at: string
           urls: Json
         }
@@ -1015,6 +1057,7 @@ export type Database = {
           kind?: string
           name: string
           notes?: string | null
+          sizes_to_scrape?: number[]
           updated_at?: string
           urls?: Json
         }
@@ -1026,6 +1069,7 @@ export type Database = {
           kind?: string
           name?: string
           notes?: string | null
+          sizes_to_scrape?: number[]
           updated_at?: string
           urls?: Json
         }
