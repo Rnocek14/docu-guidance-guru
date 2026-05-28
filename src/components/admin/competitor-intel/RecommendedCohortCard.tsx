@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ArrowRight, CheckCircle2, Info, Lock, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { MIN_SAMPLE_SIZE, recommendCohort, type TierId, type RecommendationRow } from '@/lib/competitor-recommendation';
+import { MIN_SAMPLE_SIZE, recommendCohort, type TierId, type RecommendationRow, type RulesByFirmSize } from '@/lib/competitor-recommendation';
 import type { SnapshotInput } from '@/lib/competitor-comparison';
 
 const TIERS: TierId[] = ['starter', 'pro', 'elite'];
@@ -19,13 +19,22 @@ function formatValue(v: number | null, format: RecommendationRow['format']): str
   return `${v}d`;
 }
 
-export function RecommendedCohortCard({ snapshots }: { snapshots: SnapshotInput[] }) {
+export function RecommendedCohortCard({
+  snapshots,
+  rulesByFirmSize,
+}: {
+  snapshots: SnapshotInput[];
+  rulesByFirmSize?: RulesByFirmSize;
+}) {
   const [tierId, setTierId] = useState<TierId>('starter');
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
-  const rec = useMemo(() => recommendCohort(tierId, snapshots), [tierId, snapshots]);
+  const rec = useMemo(
+    () => recommendCohort(tierId, snapshots, rulesByFirmSize),
+    [tierId, snapshots, rulesByFirmSize],
+  );
 
   async function handleApply() {
     setSubmitting(true);

@@ -43,17 +43,17 @@ function coverage(
   rulesByFirmSize?: RulesByFirmSize,
 ): Coverage {
   // Prefer the new per-(firm, size) rules table when available.
-  const sizes = Object.keys(rulesByFirmSize?.[snap.firm_id] ?? {})
+  const ruleSizes = Object.keys(rulesByFirmSize?.[snap.firm_id] ?? {})
     .map((k) => Number(k))
     .filter((n) => Number.isFinite(n));
-  if (sizes.some((s) => inBucket(s, tier))) return 'rules';
+  if (ruleSizes.some((s) => inBucket(s, tier))) return 'rules';
   // Legacy fallback: snapshot's single bundled rules row.
   const rulesSize = snap.payload?.rules?.account_size_usd ?? null;
   if (rulesSize != null && inBucket(rulesSize, tier)) return 'rules';
-  const sizes = (snap.payload?.pricing ?? [])
+  const priceSizes = (snap.payload?.pricing ?? [])
     .map((p) => parseSize(p.account_size_label))
     .filter((n): n is number => n != null);
-  if (sizes.some((s) => inBucket(s, tier))) return 'price';
+  if (priceSizes.some((s) => inBucket(s, tier))) return 'price';
   return 'none';
 }
 
