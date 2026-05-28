@@ -143,6 +143,51 @@ describe('recommendCohort', () => {
     expect(c.payout_split_percent).toBeGreaterThanOrEqual(80);
   });
 
+  describe('implausible-zero coercion', () => {
+    it('treats daily_loss_usd=0 as missing and does NOT collapse the median to zero', () => {
+      const snaps = [
+        makeSnap('a', 50_000, { daily_loss_usd: 0 }, 147),
+        makeSnap('b', 50_000, { daily_loss_usd: 0 }, 165),
+        makeSnap('c', 50_000, { daily_loss_usd: 0 }, 80),
+      ];
+      const r = recommendCohort('starter', snaps);
+      const dl = r.rows.find((x) => x.field === 'max_daily_loss_percent')!;
+      // All daily-loss values dropped → median null → solvent falls back to current.
+      expect(dl.median).toBeNull();
+      expect(dl.sampleSize).toBe(0);
+      expect(dl.totalFirms).toBe(3);
+      expect(dl.exclusionNote).toMatch(/3 of 3/);
+    });
+
+    it('flags low-coverage fields with an exclusion note', () => {
+      // Only 1 of 4 firms publishes a first-payout cap.
+      const snaps = [
+        makeSnap('a', 50_000, { first_payout_cap_usd: null as unknown as number }, 147),
+        makeSnap('b', 50_000, { first_payout_cap_usd: null as unknown as number }, 165),
+        makeSnap('c', 50_000, { first_payout_cap_usd: null as unknown as number }, 80),
+        makeSnap('d', 50_000, { first_payout_cap_usd: 3000 }, 120),
+      ];
+      const r = recommendCohort('starter', snaps);
+      const fc = r.rows.find((x) => x.field === 'first_payout_cap_amount')!;
+      expect(fc.sampleSize).toBe(1);
+      expect(fc.totalFirms).toBe(4);
+      expect(fc.exclusionNote).toMatch(/Only 1 of 4/);
+    });
+
+    it('keeps reset_fee_usd=0 (genuine free reset) and payout_cadence_days=0 (instant)', () => {
+      // We don't expose reset/cadence rows publicly for reset, but cadence is in rows.
+      const snaps = [
+        makeSnap('a', 50_000, { payout_cadence_days: 0 }, 147),
+        makeSnap('b', 50_000, { payout_cadence_days: 0 }, 165),
+        makeSnap('c', 50_000, { payout_cadence_days: 0 }, 80),
+      ];
+      const r = recommendCohort('starter', snaps);
+      const cd = r.rows.find((x) => x.field === 'payout_cooldown_days')!;
+      expect(cd.median).toBe(0);
+      expect(cd.sampleSize).toBe(3);
+    });
+  });
+
   describe('rulesByFirmSize (per-(firm, size) coverage)', () => {
     // All three firms have a 50K snapshot; rules-by-size adds 100K and 200K
     // rules for the firms we've actually scraped at those sizes.
