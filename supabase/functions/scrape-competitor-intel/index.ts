@@ -609,7 +609,12 @@ async function openaiNormalize(
     '(static / trailing / eod_trailing), payout split %, first payout cap (USD and count), ' +
     'minimum trading days, consistency rule %, and payout cadence in days. Convert phrases like ' +
     '"every 14 days" to 14, "weekly" to 7, "daily" to 1. ' +
-    'Also extract: reset fee (USD to retake a failed evaluation), activation fee (USD + whether one_time or monthly), ' +
+    'Also extract: reset fee (USD to retake a failed evaluation), activation fee (USD + whether one_time or monthly). ' +
+    'For activation_fee_cadence: set "one_time" if the page describes it as a per-pass / per-account / one-time / lifetime activation ' +
+    '(typical: Apex 4.0 from March 2026, Topstep activation, FundedNext PA activation). ' +
+    'Set "monthly" ONLY if the page explicitly says the fee recurs every month as a subscription. ' +
+    'A monthly evaluation/Combine SUBSCRIPTION is NOT the same as activation — if both exist, activation_fee_* refers to the one-time funding fee, not the subscription. ' +
+    'When unsure, prefer null over guessing "monthly". ' +
     'phase_count (1 for instant/eval-only, 2 for eval+verification), accounts_allowed_max (max concurrent accounts), ' +
     'trailing_dd_lock_usd (profit point where trailing drawdown stops trailing), news_trading_allowed (true/false), ' +
     'payout_methods (short string like "ACH, wire, crypto"), scaling_plan_summary (one short sentence if mentioned). ' +
