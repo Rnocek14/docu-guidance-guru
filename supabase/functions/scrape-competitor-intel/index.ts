@@ -466,8 +466,16 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
 const REFERENCE_OVERRIDES: Record<string, Record<string, unknown>> = {
   apex: {
     phase_count: 1, // Apex is single-evaluation; the "PA" step is funding, not an eval phase
-    activation_fee_usd: 130, // $130/mo (or $340 lifetime) — scraper sometimes picks the lifetime upfront
-    activation_fee_cadence: 'monthly',
+    // Apex 4.0 (March 2026): one-time activation per evaluation pass,
+    // NOT a recurring monthly fee. Typical value ~ $89–$169 depending on
+    // account size; use $99 as a representative 50K figure.
+    activation_fee_usd: 99,
+    activation_fee_cadence: 'one_time',
+    // Per-payout ladder; not representable as a single (cap, count) pair.
+    // Force null so downstream "first payout cap" math doesn't anchor to
+    // a fabricated $25,000 × 5.
+    first_payout_cap_usd: null,
+    first_payout_cap_count: null,
   },
   tradeify: {
     phase_count: 1, // Straight-to-sim is single-phase
