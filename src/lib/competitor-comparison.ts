@@ -27,6 +27,8 @@ export interface SnapshotInput {
       account_size_label?: string | null;
       list_price_usd?: number | null;
       promo_price_usd?: number | null;
+      promo_label?: string | null;
+      discount_pct?: number | null;
     }>;
     active_promo_banner?: string | null;
     promo_code?: string | null;
