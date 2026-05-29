@@ -238,14 +238,19 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       max_drawdown_usd: 1000,
       drawdown_type: 'trailing',
       payout_split_pct: 100,
-      first_payout_cap_usd: 25000,
-      first_payout_cap_count: 5,
+      // Apex pays a per-payout ladder ($1,500 → $3,000 across ~6 payouts),
+      // not a single scalar cap N times. Our schema can't represent the
+      // ladder honestly, so leave it null rather than mislead with a
+      // synthetic $25,000 × 5. See REFERENCE_OVERRIDES.apex.
+      first_payout_cap_usd: null,
+      first_payout_cap_count: null,
       min_trading_days: 1,
       consistency_rule_pct: 50,
       payout_cadence_days: 5,
       reset_fee_usd: 80,
-      activation_fee_usd: 130,
-      activation_fee_cadence: 'monthly',
+      // Apex 4.0 (March 2026) removed monthly activation; one-time per pass.
+      activation_fee_usd: 99,
+      activation_fee_cadence: 'one_time',
       phase_count: 1,
       accounts_allowed_max: 20,
       trailing_dd_lock_usd: 100, // Trailing DD locks at initial balance + $100 once hit
