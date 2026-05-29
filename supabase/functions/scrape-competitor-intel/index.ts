@@ -902,15 +902,10 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY') ?? ''
     const openaiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
-    let browserlessKey = Deno.env.get('BROWSERLESS_API_KEY') ?? ''
-    if (!browserlessKey) {
-      const { data: bls } = await createClient(supabaseUrl, serviceKey)
-        .from('system_settings')
-        .select('value')
-        .eq('key', 'browserless_api_key')
-        .single()
-      browserlessKey = (bls?.value as { key?: string } | undefined)?.key ?? ''
-    }
+    // Browserless key is edge-secret only. Never read from system_settings —
+    // that table is readable by risk_officer/support roles, so storing a paid
+    // third-party credential there leaks it beyond admins.
+    const browserlessKey = Deno.env.get('BROWSERLESS_API_KEY') ?? ''
     if (!openaiKey && !firecrawlKey) {
       return new Response(
         JSON.stringify({ error: 'Need either OPENAI_API_KEY or FIRECRAWL_API_KEY' }),

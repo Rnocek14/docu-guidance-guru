@@ -7,8 +7,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Loader2, RefreshCw, ExternalLink, AlertTriangle, Eye, EyeOff, Save, KeyRound } from 'lucide-react';
+import { Loader2, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
 import { missionControlNavItems } from '@/components/layout/AdminNav';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { MarketPositionView } from '@/components/admin/competitor-intel/MarketPositionView';
@@ -112,8 +111,6 @@ function fmtPct(n: number | null | undefined): string {
 export default function CompetitorIntel() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [browserlessKey, setBrowserlessKey] = useState('');
-  const [showKey, setShowKey] = useState(false);
 
   const profilesQ = useQuery({
     queryKey: ['ci-profiles'],
@@ -187,35 +184,6 @@ export default function CompetitorIntel() {
     }
     return out;
   }, [profiles, latestByFirm]);
-
-  // Browserless key status
-  const browserlessQ = useQuery({
-    queryKey: ['ci-browserless-key'],
-    queryFn: async (): Promise<string | null> => {
-      const { data, error } = await supabase
-        .from('system_settings')
-        .select('value')
-        .eq('key', 'browserless_api_key')
-        .single();
-      if (error) return null;
-      return (data?.value as { key?: string } | undefined)?.key ?? null;
-    },
-  });
-
-  const saveBrowserlessKey = useMutation({
-    mutationFn: async (key: string) => {
-      const { error } = await supabase
-        .from('system_settings')
-        .upsert({ key: 'browserless_api_key', value: { key } }, { onConflict: 'key' });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success('Browserless API key saved');
-      setBrowserlessKey('');
-      queryClient.invalidateQueries({ queryKey: ['ci-browserless-key'] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
 
   // Manual run mutation
   const runScrape = useMutation({
@@ -298,50 +266,6 @@ export default function CompetitorIntel() {
             </Button>
           </div>
         </header>
-
-        {/* Browserless API key */}
-        <Card>
-          <CardHeader className="py-3">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <KeyRound className="h-4 w-4" />
-              Browserless API Key
-              <Badge variant="outline" className={browserlessQ.data ? 'border-emerald-500/40 text-emerald-400' : 'border-slate-500/40 text-slate-400'}>
-                {browserlessQ.data ? 'Configured' : 'Not set'}
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Input
-                  type={showKey ? 'text' : 'password'}
-                  placeholder="Paste your Browserless API key…"
-                  value={browserlessKey}
-                  onChange={(e) => setBrowserlessKey(e.target.value)}
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowKey((s) => !s)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-              <Button
-                size="sm"
-                onClick={() => saveBrowserlessKey.mutate(browserlessKey)}
-                disabled={!browserlessKey || saveBrowserlessKey.isPending}
-              >
-                {saveBrowserlessKey.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                <span className="ml-2">Save</span>
-              </Button>
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Needed for Apex, Topstep, and FTMO which sit behind Cloudflare. Stored securely in system settings.
-            </p>
-          </CardContent>
-        </Card>
 
         <Tabs defaultValue="market">
           <TabsList>
