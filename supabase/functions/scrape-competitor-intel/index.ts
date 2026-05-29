@@ -238,14 +238,19 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
       max_drawdown_usd: 1000,
       drawdown_type: 'trailing',
       payout_split_pct: 100,
-      first_payout_cap_usd: 25000,
-      first_payout_cap_count: 5,
+      // Apex pays a per-payout ladder ($1,500 → $3,000 across ~6 payouts),
+      // not a single scalar cap N times. Our schema can't represent the
+      // ladder honestly, so leave it null rather than mislead with a
+      // synthetic $25,000 × 5. See REFERENCE_OVERRIDES.apex.
+      first_payout_cap_usd: null,
+      first_payout_cap_count: null,
       min_trading_days: 1,
       consistency_rule_pct: 50,
       payout_cadence_days: 5,
       reset_fee_usd: 80,
-      activation_fee_usd: 130,
-      activation_fee_cadence: 'monthly',
+      // Apex 4.0 (March 2026) removed monthly activation; one-time per pass.
+      activation_fee_usd: 99,
+      activation_fee_cadence: 'one_time',
       phase_count: 1,
       accounts_allowed_max: 20,
       trailing_dd_lock_usd: 100, // Trailing DD locks at initial balance + $100 once hit
@@ -461,8 +466,16 @@ const CURATED_REFERENCE: Record<string, Record<string, unknown>> = {
 const REFERENCE_OVERRIDES: Record<string, Record<string, unknown>> = {
   apex: {
     phase_count: 1, // Apex is single-evaluation; the "PA" step is funding, not an eval phase
-    activation_fee_usd: 130, // $130/mo (or $340 lifetime) — scraper sometimes picks the lifetime upfront
-    activation_fee_cadence: 'monthly',
+    // Apex 4.0 (March 2026): one-time activation per evaluation pass,
+    // NOT a recurring monthly fee. Typical value ~ $89–$169 depending on
+    // account size; use $99 as a representative 50K figure.
+    activation_fee_usd: 99,
+    activation_fee_cadence: 'one_time',
+    // Per-payout ladder; not representable as a single (cap, count) pair.
+    // Force null so downstream "first payout cap" math doesn't anchor to
+    // a fabricated $25,000 × 5.
+    first_payout_cap_usd: null,
+    first_payout_cap_count: null,
   },
   tradeify: {
     phase_count: 1, // Straight-to-sim is single-phase
@@ -596,7 +609,12 @@ async function openaiNormalize(
     '(static / trailing / eod_trailing), payout split %, first payout cap (USD and count), ' +
     'minimum trading days, consistency rule %, and payout cadence in days. Convert phrases like ' +
     '"every 14 days" to 14, "weekly" to 7, "daily" to 1. ' +
-    'Also extract: reset fee (USD to retake a failed evaluation), activation fee (USD + whether one_time or monthly), ' +
+    'Also extract: reset fee (USD to retake a failed evaluation), activation fee (USD + whether one_time or monthly). ' +
+    'For activation_fee_cadence: set "one_time" if the page describes it as a per-pass / per-account / one-time / lifetime activation ' +
+    '(typical: Apex 4.0 from March 2026, Topstep activation, FundedNext PA activation). ' +
+    'Set "monthly" ONLY if the page explicitly says the fee recurs every month as a subscription. ' +
+    'A monthly evaluation/Combine SUBSCRIPTION is NOT the same as activation — if both exist, activation_fee_* refers to the one-time funding fee, not the subscription. ' +
+    'When unsure, prefer null over guessing "monthly". ' +
     'phase_count (1 for instant/eval-only, 2 for eval+verification), accounts_allowed_max (max concurrent accounts), ' +
     'trailing_dd_lock_usd (profit point where trailing drawdown stops trailing), news_trading_allowed (true/false), ' +
     'payout_methods (short string like "ACH, wire, crypto"), scaling_plan_summary (one short sentence if mentioned). ' +

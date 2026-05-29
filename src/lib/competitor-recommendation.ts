@@ -133,17 +133,35 @@ function tierFromTiers(tierId: TierId): PricingTier {
   return TIERS.find((t) => t.id === tierId) ?? TIERS[0];
 }
 
-/** Pick the pricing row whose account size best matches a tier bucket. */
+/** Deep promos (e.g. Apex 90% off SAVENOW) are transient acquisition spikes,
+ *  not structural prices. Anchoring our median to those produces a fire-sale
+ *  recommendation. Threshold tuned so normal coupons (~25–30%) still count. */
+const PROMO_LIST_PRICE_THRESHOLD_PCT = 30;
+
+/** Pick the pricing row whose account size best matches a tier bucket.
+ *  Uses list_price_usd when the row is in an aggressive promo
+ *  (discount_pct > 30) so the median reflects structural pricing,
+ *  not a flash sale. */
 function pickPriceForTier(snap: SnapshotInput, tierId: TierId): number | null {
   const bucket = TIER_BUCKETS[tierId];
   const rows = snap.payload?.pricing ?? [];
-  // Try label match first
   const targetK = `${bucket.target / 1000}k`;
   for (const r of rows) {
     const l = (r.account_size_label ?? '').toLowerCase().replace(/[\s,$]/g, '');
-    if (l.includes(targetK)) {
-      return r.promo_price_usd ?? r.list_price_usd ?? null;
+    if (!l.includes(targetK)) continue;
+    const list = r.list_price_usd ?? null;
+    const promo = r.promo_price_usd ?? null;
+    const discount = r.discount_pct ?? null;
+    // Deep promo + we have a list price → use list (structural).
+    if (
+      promo != null &&
+      list != null &&
+      discount != null &&
+      discount > PROMO_LIST_PRICE_THRESHOLD_PCT
+    ) {
+      return list;
     }
+    return promo ?? list ?? null;
   }
   return null;
 }
