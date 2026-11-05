@@ -106,6 +106,16 @@ Deno.serve(async (req) => {
       )
     }
 
+    // ── 2c. Pilot seat cap ─────────────────────────────────
+    const pilot = await checkPilotCapacity(serviceClient)
+    if (pilot.full) {
+      console.warn(`Checkout blocked: pilot full (${pilot.taken}/${pilot.cap})`)
+      return new Response(
+        JSON.stringify({ error: 'All pilot seats are taken. Join the waitlist and we will email you when seats open.', code: 'PILOT_FULL' }),
+        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // ── 3. Resolve active payment rail ──────────────────────
     const railKey = await resolveActiveInboundRail(serviceClient)
     const provider = getCheckoutProvider(railKey)
