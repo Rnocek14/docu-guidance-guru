@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { TIERS, RULES_VERSION } from '../_shared/checkout/config.ts'
 import { getCheckoutProvider, resolveActiveInboundRail } from '../_shared/checkout/registry.ts'
 import type { CheckoutMetadata } from '../_shared/checkout/types.ts'
+import { checkPilotCapacity } from '../_shared/checkout/pilot-cap.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
