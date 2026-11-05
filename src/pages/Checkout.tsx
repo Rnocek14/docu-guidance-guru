@@ -106,7 +106,17 @@ export default function Checkout() {
           affiliateCode: (await import('@/lib/referral')).getReferralCode(),
         },
       });
-      if (error) throw error;
+      if (error) {
+        const ctx = (error as { context?: Response }).context;
+        const body = ctx && typeof ctx.json === 'function' ? await ctx.json().catch(() => null) : null;
+        if (body?.code === 'PILOT_FULL') {
+          track('checkout_session_failed', { tier: selectedTier, error_code: 'PILOT_FULL' });
+          toast.error('All pilot seats are taken. We\'ll open more soon.');
+          setIsProcessing(false);
+          return;
+        }
+        throw error;
+      }
       if (data?.url) {
         track('checkout_session_created', { tier: selectedTier });
         window.location.href = data.url;

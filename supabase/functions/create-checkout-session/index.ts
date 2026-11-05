@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { TIERS, RULES_VERSION } from '../_shared/checkout/config.ts'
 import { getCheckoutProvider, resolveActiveInboundRail } from '../_shared/checkout/registry.ts'
 import type { CheckoutMetadata } from '../_shared/checkout/types.ts'
+import { checkPilotCapacity } from '../_shared/checkout/pilot-cap.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -103,6 +104,16 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ error: 'New purchases are temporarily paused. Please try again later.' }),
         { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // ── 2c. Pilot seat cap ─────────────────────────────────
+    const pilot = await checkPilotCapacity(serviceClient)
+    if (pilot.full) {
+      console.warn(`Checkout blocked: pilot full (${pilot.taken}/${pilot.cap})`)
+      return new Response(
+        JSON.stringify({ error: 'All pilot seats are taken. Join the waitlist and we will email you when seats open.', code: 'PILOT_FULL' }),
+        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
